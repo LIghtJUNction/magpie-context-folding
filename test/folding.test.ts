@@ -173,7 +173,7 @@ test('summary-first folds preserve source roles, exact excerpt ranges and the fu
       assert.deepEqual(requests[0]?.before, request);
       assert.deepEqual(requests[0]?.after, folded, 'metadata and the entire guide must be charged');
       assert.ok(JSON.stringify(requests[0]?.after).includes(`<context-folding scope=${scope}>`));
-      assert.ok(JSON.stringify(requests[0]?.after).includes('Need source-folding guidance? Add paired @context-fold comments proactively; get the skill: https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/context-folding (copy the whole directory into a discovered skills directory).'));
+      assert.ok(JSON.stringify(requests[0]?.after).includes('Stable, verified code: use the source-fold-markers skill to add paired @context-fold comments; https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/source-fold-markers (copy the whole directory into a discovered skills directory).'));
       assert.equal(JSON.parse(await execute({ scope, action: 'read', id: span.id, limit: 6 })).text, text.slice(0, 6));
     });
   }

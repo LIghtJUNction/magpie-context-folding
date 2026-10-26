@@ -1,0 +1,5 @@
+{
+  "name": "context-folding-read",
+  "version": "0.1.0",
+  "description": "Opt-in reversible folding of complete Python Read responses; retains physical line positions and existing edit permissions."
+}

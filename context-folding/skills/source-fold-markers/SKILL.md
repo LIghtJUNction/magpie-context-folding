@@ -5,6 +5,8 @@ description: Add and maintain safe paired source folding comments when creating 
 
 # Source fold markers
 
+When a self-contained implementation has been verified and is unlikely to need further edits, proactively apply this skill and mark its body for default folding so the next agent can inspect its description and expand the exact code when needed. Preserve requirements, failure handling, security-relevant context and active work in the visible surrounding code; stability is a judgment based on evidence, not a claim that the code is bug-free. Use the host's actual skill discovery mechanism; a prompt cannot silently install or load a skill.
+
 When creating or modifying source code, proactively mark meaningful regions that can be folded while retaining enough surrounding context to navigate the file. Do not mark or fold a one-line function: the overhead is not worthwhile. Choose useful boundaries such as a function body or a cohesive implementation block; avoid obscuring declarations needed to understand the surrounding code. Respect explicit user or project instructions about regions to keep visible. Do not add markers when there is no safe, valid place for them.
 
 Use standalone comment lines containing `@context-fold begin NAME` and `@context-fold end NAME`, with the same non-whitespace name and the same comment delimiters on both lines. Choose a descriptive name. For example:
