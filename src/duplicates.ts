@@ -8,8 +8,8 @@ export const isDuplicateFold = (entry: Entry): boolean => entry.folded?.startsWi
 export function canReplayDuplicate(entry: Entry, spans: readonly Span[], entries: ReadonlyMap<string, Entry>, eligible: ReadonlySet<string>): boolean {
   if (!isDuplicateFold(entry)) return false;
   const marker = '\nExact repeat of JSON path ';
-  // The generated reference follows the summary; Opening is JSON-escaped and
-  // cannot contain this literal newline marker, even when original text does.
+  // The generated reference follows the summary. Both legacy JSON-escaped
+  // openings and new range references cannot contain this literal newline marker.
   const position = entry.folded!.lastIndexOf(marker);
   if (position < 0) return false;
   const reference = entry.folded!.slice(position + marker.length).split('\n', 1)[0]!;
@@ -51,7 +51,7 @@ export function duplicatePlans(spans: readonly Span[], entries: ReadonlyMap<stri
       ? `\nSummary (${entry.version?.automatic || entry.manual === false ? 'automatic policy' : 'agent-written'}): ${entry.mark.summary}` : '';
     let end = Math.min(headChars, entry.text.length);
     if (end > 0 && /[\uD800-\uDBFF]/.test(entry.text[end - 1]!) && /[\uDC00-\uDFFF]/.test(entry.text[end] ?? '')) end--;
-    const text = `${prefix(entry.id)}${summary}\nExact repeat of JSON path ${JSON.stringify(anchor.path)} (zero-based); full text stays inline. Same text, separate observation. Original UTF-16: inline [0,${end}); archived [0,${entry.text.length})\nOpening: ${JSON.stringify(entry.text.slice(0, end))}`;
+    const text = `${prefix(entry.id)}${summary}\nExact repeat of JSON path ${JSON.stringify(anchor.path)} (zero-based); full text stays inline. Same text, separate observation. Original UTF-16: inline [0,${end}); archived [0,${entry.text.length})\nOpening: same JSON path UTF-16 [0,${end})`;
     if (Buffer.byteLength(JSON.stringify(text)) < Buffer.byteLength(JSON.stringify(span.text))) plans.set(span.id, text);
   }
   return plans;

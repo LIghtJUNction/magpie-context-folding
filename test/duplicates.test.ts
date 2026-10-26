@@ -23,7 +23,9 @@ test('duplicate aliases require exact text, matching provenance and a protected 
   const plans = duplicatePlans([first, last], entries, eligible, 400);
   assert.ok(plans.get('old')!.includes('["messages",4,"content"]'));
   assert.ok(plans.get('old')!.includes('Same text, separate observation'));
-  assert.ok(plans.get('old')!.includes(JSON.stringify(original.slice(0, 400))));
+  assert.ok(plans.get('old')!.includes('Opening: same JSON path UTF-16 [0,400)'));
+  assert.ok(!plans.get('old')!.includes(JSON.stringify(original.slice(0, 400))));
+  assert.ok(plans.get('old')!.includes(`Original UTF-16: inline [0,400); archived [0,${original.length})`));
   assert.equal(plans.has('latest'), false);
   assert.equal(duplicatePlans([first, { ...last, text: original + 'changed' }], entries, eligible, 400).size, 0);
   assert.equal(duplicatePlans([first, last], entries, new Set(['old', 'latest']), 400).size, 0);
@@ -36,6 +38,25 @@ test('duplicate aliases require exact text, matching provenance and a protected 
   assert.ok(duplicatePlans([first, last], entries, eligible, 400).get('old')!.includes('Manual evidence: preserve  exact spelling.\n原文🙂'));
 });
 
+test('duplicate opening references use the same UTF-16 range without splitting surrogate pairs', () => {
+  const text = 'A🙂中\n"\\'.repeat(200);
+  const first = span('old', 0, text), last = span('latest', 4, text);
+  const entries = new Map([first, last].map(s => [s.id, entry(s)]));
+  const eligible = new Set(['old']);
+  for (const [headChars, end] of [[0, 0], [1, 1], [2, 1], [3, 3], [4, 4], [text.length + 1, text.length]]) {
+    const folded = duplicatePlans([first, last], entries, eligible, headChars!).get('old')!;
+    assert.ok(folded.includes(`Opening: same JSON path UTF-16 [0,${end})`));
+    assert.ok(folded.includes(`Original UTF-16: inline [0,${end}); archived [0,${text.length})`));
+    entries.get('old')!.folded = folded;
+    assert.equal(canReplayDuplicate(entries.get('old')!, [first, last], entries, eligible), true);
+  }
+  const old = entries.get('old')!;
+  old.mark = { disposition: 'foldable', summary: 'Automatic evidence summary. 原文🙂' };
+  old.manual = false;
+  assert.ok(duplicatePlans([first, last], entries, eligible, 2).get('old')!
+    .includes(`Summary (automatic policy): ${old.mark.summary}`));
+});
+
 test('accepted aliases validate their stored path and provenance independently of new rendering', () => {
   const first = span('old', 0), last = span('latest', 4);
   const entries = new Map([first, last].map(s => [s.id, entry(s)]));
@@ -45,12 +66,20 @@ test('accepted aliases validate their stored path and provenance independently o
   old.folded = duplicatePlans([first, last], entries, eligible, 400).get('old')!;
   old.mark = { disposition: 'foldable', summary: 'Updated manual summary' };
   old.manual = true;
-  assert.equal(canReplayDuplicate(old, [first, last], entries, eligible), true);
-  assert.notEqual(duplicatePlans([first, last], entries, eligible, 0).get('old'), old.folded);
-  assert.equal(canReplayDuplicate(old, [first, { ...last, path: ['messages', 5, 'content'] }], entries, eligible), false);
-  assert.equal(canReplayDuplicate(old, [first, { ...last, source: { path: '/different', range: 'full' } }], entries, eligible), false);
-  assert.equal(canReplayDuplicate(old, [first, last], entries, new Set(['old', 'latest'])), false);
-  assert.equal(canReplayDuplicate(old, [first, { ...last, protectedReason: 'opaque' }], entries, eligible), false);
+  const current = old.folded;
+  const legacy = current.replace('Opening: same JSON path UTF-16 [0,400)', `Opening: ${JSON.stringify(original.slice(0, 400))}`);
+  assert.notEqual(current, legacy);
+  for (const folded of [current, legacy]) {
+    old.folded = folded;
+    assert.equal(canReplayDuplicate(old, [first, last], entries, eligible), true);
+    assert.notEqual(duplicatePlans([first, last], entries, eligible, 0).get('old'), old.folded);
+    assert.equal(canReplayDuplicate(old, [first, { ...last, path: ['messages', 5, 'content'] }], entries, eligible), false);
+    assert.equal(canReplayDuplicate(old, [first, { ...last, text: original + 'changed' }], entries, eligible), false);
+    assert.equal(canReplayDuplicate(old, [first], entries, eligible), false);
+    assert.equal(canReplayDuplicate(old, [first, { ...last, source: { path: '/different', range: 'full' } }], entries, eligible), false);
+    assert.equal(canReplayDuplicate(old, [first, last], entries, new Set(['old', 'latest'])), false);
+    assert.equal(canReplayDuplicate(old, [first, { ...last, protectedReason: 'opaque' }], entries, eligible), false);
+  }
 });
 
 async function fixture(run: (store: Store, scope: string) => Promise<void>) {
@@ -142,9 +171,9 @@ test('an oversized new duplicate falls back to a smaller normal manual summary',
     await execute({ action: 'mark', scope, marks: [{ id, disposition: 'foldable', summary },
       { id: spans.find(s => s.messageIndex === 2)!.id, disposition: 'foldable', summary: 'Earlier completed observation.' }] });
     const state = await store.transaction(scope, false, 64 * 1024 * 1024, s => structuredClone(s));
-    const duplicate = duplicatePlans(spans, new Map(state.entries.map(e => [e.id, e])), new Set([id]), 400).get(id)!;
+    const duplicate = duplicatePlans(spans, new Map(state.entries.map(e => [e.id, e])), new Set([id]), 0).get(id)!;
     assert.ok(Buffer.byteLength(JSON.stringify(duplicate)) >= Buffer.byteLength(JSON.stringify(alias)));
-    const output = await onRequest(manualBody, ctx) as typeof body;
+    const output = await onRequest(manualBody, { ...ctx, options: { ...ctx.options, headChars: 0 } }) as typeof body;
     assert.ok(output.messages[1]!.content!.startsWith('[context-folding id='));
     assert.ok(output.messages[1]!.content!.includes(`Summary (agent-written): ${summary}`));
     assert.ok(output.messages[1]!.content!.length < alias.length);
