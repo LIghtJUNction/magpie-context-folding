@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addMetrics, emptyMetrics, formatNanoUsd, metricsSchema } from '../src/metrics.js';
+import { addMetrics, emptyMetrics, formatNanoUsd, formatTokenCount, metricsSchema } from '../src/metrics.js';
 
 test('empty totals are independent and serialize without BigInt JSON support', () => {
   const first = emptyMetrics();
@@ -32,7 +32,9 @@ test('stored metrics without hook counters parse with zero defaults', () => {
     estimatedTokenDelta: '-41',
   })));
   for (const key of hookCounters) delete legacy[key];
+  delete legacy.foldedTokensEstimated;
   const parsed = metricsSchema.parse(legacy);
+  assert.equal(parsed.foldedTokensEstimated, '0');
   for (const key of hookCounters) assert.equal(parsed[key], 0);
   assert.equal(parsed.successfulFoldedRequests, 3);
   assert.equal(parsed.estimatedTokenDelta, '-41');
@@ -84,18 +86,32 @@ test('hook counters reject invalid values and overflow while omitted increments 
 
 test('token and fee totals stay exact beyond JavaScript safe integer precision', () => {
   const before = addMetrics(emptyMetrics(), {
+    foldedTokensEstimated: '900719925474099312345',
     estimatedTokenDelta: '900719925474099312345',
     certifiedTokenDeltaLower: '-900719925474099312345',
     savingNanoUsdLower: '999999999999999999999999999',
   });
   const total = addMetrics(before, {
+    foldedTokensEstimated: '1',
     estimatedTokenDelta: '-900719925474099312344',
     certifiedTokenDeltaLower: '900719925474099312344',
     savingNanoUsdLower: '1',
   });
   assert.equal(total.estimatedTokenDelta, '1');
+  assert.equal(total.foldedTokensEstimated, '900719925474099312346');
+  assert.throws(() => addMetrics(before, { foldedTokensEstimated: '-1' }));
   assert.equal(total.certifiedTokenDeltaLower, '-1');
   assert.equal(total.savingNanoUsdLower, '1000000000000000000000000000');
+});
+
+test('token formatting uses decimal K M B with exact arithmetic and unit promotion', () => {
+  for (const [value, expected] of [
+    ['0', '0'], ['999', '999'], ['1000', '1K'], ['1250', '1.25K'],
+    ['999994', '999.99K'], ['999995', '1M'], ['1000000', '1M'],
+    ['1250000', '1.25M'], ['999999999', '1B'], ['1000000000', '1B'],
+    ['1250000000', '1.25B'], ['1000000000000', '1000B'],
+    ['900719925474099312345', '900719925474.1B'], ['-1250000', '-1.25M'],
+  ] as const) assert.equal(formatTokenCount(value), expected);
 });
 
 test('invalid, decreasing, and overflowing counters cannot create misleading totals', () => {

@@ -69,7 +69,7 @@ test('no MCP tool still reports budget without creating an archive', async () =>
     const withoutTool = { ...body, tools: [] };
     const result = await onRequest(withoutTool, context);
     assert.ok(JSON.stringify(result).includes('<context-budget>'));
-    assert.ok(JSON.stringify(result).includes('Capacity: unknown'));
+    assert.ok(!JSON.stringify(result).includes('Capacity:'));
     assert.ok(!JSON.stringify(result).includes('<context-folding scope='));
     assert.deepEqual(await readdir(directory), []);
   });
@@ -301,16 +301,19 @@ test('script gets only eligible originals and a missing summary uses truthful re
   });
 });
 
-test('empty eligible requests get a configured self-inclusive budget without archiving', async () => {
+test('switching models keeps a self-inclusive estimate without plugin-owned capacity or archiving', async () => {
   await fixture(async directory => {
-    const request = { ...body, messages: [] };
-    const output = await onRequest(request, { ...context, options: { contextWindowTokens: 128000 } });
-    const text = JSON.stringify(output);
-    const used = Number(text.match(/length estimate: (\d+) tokens/)?.[1]);
-    assert.equal(used, Math.ceil(Buffer.byteLength(text) / 4));
-    assert.ok(text.includes('Capacity: 128000 tokens (configured)'));
-    assert.ok(text.includes('used ratio estimate:'));
-    assert.ok(!text.includes('<context-folding scope='));
+    for (const model of ['small-window-model', 'large-window-model']) {
+      const request = { ...body, model, messages: [] };
+      const output = await onRequest(request, { ...context, model });
+      const text = JSON.stringify(output);
+      const used = Number(text.match(/length estimate: (\d+) tokens/)?.[1]);
+      assert.equal(used, Math.ceil(Buffer.byteLength(text) / 4));
+      assert.ok(!text.includes('Capacity:'));
+      assert.ok(!text.includes('used ratio'));
+      assert.ok(!text.includes('remaining'));
+      assert.ok(!text.includes('<context-folding scope='));
+    }
     assert.deepEqual(await readdir(directory), []);
   });
 });

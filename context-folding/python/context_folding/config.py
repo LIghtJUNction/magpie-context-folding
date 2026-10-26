@@ -39,7 +39,6 @@ DEFAULTS: dict[str, dict[str, Any]] = {
 }
 _KEYS = {
     **{section: set(values) for section, values in DEFAULTS.items()},
-    "folding": set(DEFAULTS["folding"]) | {"context_window_tokens"},
     "magpie": {"gateway_timeout_ms", "accounting"},
     "policy": {"mode", "auto_roles", "min_chars", "minimum_saving_usd", "cost", "script", "certificate_script"},
 }
@@ -280,7 +279,6 @@ def _validate_cost(data: Any, source: str | Path, *, complete: bool) -> None:
 _STRENGTHS = {"off", "conservative", "balanced", "aggressive"}
 _RANGES = {
     "folding.threshold_tokens": (1, math.inf, True),
-    "folding.context_window_tokens": (1, 9007199254740991, True),
     "folding.keep_recent_messages": (0, math.inf, True),
     "folding.head_chars": (0, 1000, True),
     "folding.max_session_bytes": (1, 67108864, True),
