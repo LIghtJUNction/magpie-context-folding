@@ -270,7 +270,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
                 assert len(fixture.upstream) == count + 1, "request did not reach the synthetic upstream exactly once"
                 outgoing = fixture.upstream[-1]
-                hint = re.search(r"Current context length estimate: (\d+) tokens", serialized(outgoing))
+                hint = re.search(r"Estimate: (\d+) tokens", serialized(outgoing))
                 assert hint, "upstream request did not include the estimated context budget"
                 # The hook runs before routing strips fake/ from the model name.
                 complete = {**outgoing, "model": body["model"]}
