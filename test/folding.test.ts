@@ -160,11 +160,15 @@ test('summary-first folds preserve source roles, exact excerpt ranges and the fu
       const scope = await scopeFor(directory);
       const span = extractSpans(request, 'chat').find(span => span.text === text);
       assert.ok(span);
-      const summary = 'Tool evidence: checks passed. Assistant judgment: this step is complete.';
+      const summary = 'Tool evidence: checks passed.\n助手判断：已完成 😀；保留 "引号"、\\路径和双  空格。';
       await execute({ scope, action: 'mark', marks: [{ id: span.id, disposition: 'foldable', summary }] });
       const folded = await onRequest(request, ctx);
       const replacement = chatSpans(folded).find(item => item.messageIndex === span.messageIndex)?.text;
-      assert.equal(replacement, `[context-folding id=${span.id} role=${role}]\nSummary (agent-written): ${summary}\nOriginal UTF-16: inline [0,${end}); archived [0,${text.length})\nOpening: ${JSON.stringify(text.slice(0, end))}\nOriginal/layers: context_folding read id=${span.id}`);
+      assert.equal(replacement, `[context-folding id=${span.id} role=${role}]\nSummary (agent-written): ${summary}\nOriginal UTF-16: inline [0,${end}); archived [0,${text.length})\nOpening: ${JSON.stringify(text.slice(0, end))}`);
+      assert.equal(replacement!.split(span.id).length - 1, 1, 'entry ID occurs only in the header');
+      assert.ok(!replacement!.includes('context_folding read'));
+      assert.deepEqual((folded as typeof request).tools, request.tools);
+      assert.equal((folded as typeof request).messages.length, request.messages.length);
       assert.equal(requests.length, 1);
       assert.deepEqual(requests[0]?.before, request);
       assert.deepEqual(requests[0]?.after, folded, 'metadata and the entire guide must be charged');
@@ -222,6 +226,59 @@ test('legacy layers replay unchanged and remain recoverable after a new summary-
     assert.equal(JSON.parse(await execute({ scope, action: 'read', id, layer: latest.previousId })).previousId, 'original');
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'keep' }] });
     assert.equal(chatSpans(await onRequest(body, context))[0]?.text, oldText);
+  });
+});
+
+test('legacy group replay stays exact until compact group and child identities pass the cost gate', async () => {
+  await fixture(async (directory, url, requests) => {
+    const history = Array.from({ length: 24 }, (_, index) => index % 2 === 0
+      ? { role: 'assistant', content: `Completed reasoning ${index}. `.repeat(100) }
+      : { role: 'tool', tool_call_id: `call_${index}`, content: `Tool evidence ${index}. `.repeat(100) });
+    const messages = history.flatMap((message, index) => message.role === 'tool'
+      ? [{ role: 'assistant', content: null, tool_calls: [{ id: `call_${index}`, type: 'function', function: { name: 'read', arguments: '{}' } }] }, message]
+      : [message]);
+    const request = { ...body, messages: [...messages, body.messages.at(-1)!] };
+    const options = { thresholdTokens: 1, keepRecentMessages: 1, policy: { mode: 'cost', autoRoles: [] } };
+    await onRequest(request, { ...context, options });
+    const scope = await scopeFor(directory);
+    const spans = extractSpans(request, 'chat').slice(0, history.length);
+    const inner = JSON.parse(await execute({ scope, action: 'mark', marks: [{ ids: spans.slice(0, 2).map(span => span.id), disposition: 'foldable', summary: 'Inner evidence.' }] })).groups[0];
+    const summary = 'Group evidence: 原样 😀\n"quotes", \\path and double  spaces.';
+    const children = [inner, ...spans.slice(2).map(span => span.id)];
+    const groupId = JSON.parse(await execute({ scope, action: 'mark', marks: [{ ids: children, disposition: 'foldable', summary }] })).groups[0];
+    const legacy = `[context-folding group=${groupId}]\nSummary (agent-written): ${summary}\nOriginals: context_folding read id=${groupId}; read each child ID for exact original/layers.`;
+    const store = new Store(directory);
+    await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => { snapshot.groups!.find(group => group.id === groupId)!.folded = legacy; });
+    const previous = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => structuredClone(snapshot));
+    const denied = await onRequest(request, { ...context, options });
+    assert.deepEqual(chatSpans(denied).slice(0, spans.length).map(span => span.text), spans.map((span, index) => index === 0 ? legacy
+      : `[context-folding group=${groupId} id=${span.id} role=${span.role}; summary above; original: context_folding read id=${span.id}]`));
+    assert.equal(JSON.parse(await execute({ scope, action: 'status' })).decision.reason, 'policy-cost-bounds-missing');
+    assert.deepEqual(await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot.groups), previous.groups);
+    const ctx = { ...context, options: { ...options, accounting: { url } } };
+    const folded = await onRequest(request, ctx);
+    assert.equal(requests.length, 1);
+    assert.deepEqual(chatSpans(requests[0]!.before).slice(0, spans.length).map(span => span.text), chatSpans(denied).slice(0, spans.length).map(span => span.text));
+    assert.deepEqual(requests[0]!.after, folded);
+    for (const [index, span] of spans.entries()) {
+      assert.equal(chatSpans(folded)[index]!.text, index === 0
+        ? `[context-folding group=${groupId} id=${span.id} role=${span.role}]\nSummary (agent-written): ${summary}`
+        : `[context-folding group=${groupId} id=${span.id} role=${span.role}; summary above]`);
+      assert.equal(JSON.parse(await execute({ scope, action: 'read', id: span.id, limit: 24000, peek: true })).text, history[index]!.content);
+    }
+    const manifest = JSON.parse(JSON.parse(await execute({ scope, action: 'read', id: groupId, peek: true })).text);
+    assert.deepEqual(manifest, { id: groupId, summary, children });
+    assert.deepEqual(JSON.parse(JSON.parse(await execute({ scope, action: 'read', id: inner, peek: true })).text).children, spans.slice(0, 2).map(span => span.id));
+    assert.deepEqual((folded as typeof request).tools, request.tools);
+    assert.equal((folded as typeof request).messages.length, request.messages.length);
+    assert.deepEqual(await onRequest(request, ctx), folded);
+    assert.equal(requests.length, 1, 'compact group replay must not create another batch');
+    const reordered = { ...request, messages: [messages[1]!, messages[2]!, messages[0]!, ...messages.slice(3), body.messages.at(-1)!] };
+    const rebound = chatSpans(await onRequest(reordered, ctx));
+    assert.equal(rebound[0]!.text, `[context-folding group=${groupId} id=${spans[1]!.id} role=tool]\nSummary (agent-written): ${summary}`);
+    assert.equal(rebound[1]!.text, `[context-folding group=${groupId} id=${spans[0]!.id} role=assistant; summary above]`);
+    assert.equal(requests.length, 1, 'reordering group members only rebinds leaf metadata');
+    assert.deepEqual(await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot.entries), previous.entries);
   });
 });
 

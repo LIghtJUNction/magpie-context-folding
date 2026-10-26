@@ -349,6 +349,22 @@ test('group replay preserves leaf roles, wire envelopes, durable children and co
   });
 });
 
+test('legacy group replay retains child markers when no new fold is eligible', async () => {
+  await fixture(async ({ store, scope, ctx, comparisons }) => {
+    const body = chat(a, b);
+    await onRequest(body, ctx);
+    const ids = extractSpans(body, 'chat').slice(0, 2).map(span => span.id);
+    const id = (await mark(scope, [{ ids, disposition: 'foldable', summary: 'Legacy complete.' }])).groups[0];
+    const legacy = `[context-folding group=${id}]\nSummary (agent-written): Legacy complete.\nOriginals: context_folding read id=${id}; read each child ID for exact original/layers.`;
+    await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => { snapshot.groups![0]!.folded = legacy; });
+    const replay = await onRequest(body, { ...ctx, options: { ...ctx.options, thresholdTokens: Number.MAX_SAFE_INTEGER } });
+    assert.equal(content(replay)[0], legacy);
+    assert.equal(content(replay)[1], `[context-folding group=${id} id=${ids[1]} role=assistant; summary above; original: context_folding read id=${ids[1]}]`);
+    assert.equal(comparisons.length, 0);
+    assert.equal((await load(store, scope)).groups![0]!.folded, legacy);
+  });
+});
+
 test('partial or protected groups never replay; manual restoration releases ancestors', async () => {
   await fixture(async ({ scope, ctx }) => {
     const body = chat(a, b);
