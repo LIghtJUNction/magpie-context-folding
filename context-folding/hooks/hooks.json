@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-read.py\" start", "timeout": 10}]
+    }],
+    "PostToolUse": [{
+      "matcher": "Read",
+      "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-read.py\" hook", "timeout": 10}]
+    }]
+  }
+}

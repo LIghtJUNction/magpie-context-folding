@@ -44,7 +44,7 @@ magpie plugin add /绝对路径/magpie-context-folding
 
 开发检查需要 Bun >= 1.4.0、Node.js >= 22 和 npm。Magpie 使用 Bun 直接加载包内 TypeScript 源码，不依赖安装时构建脚本，也不需要在源码仓库保存重复的编译产物。根 npm 包只包含 Magpie 插件，不包含通用 Python/SDK 子项目或独立 skill；通用实现按自己的 README 单独安装。
 
-请求 guide 已附带一行按需安装提示：[context-folding skill 目录](https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/context-folding)——需要完整操作指导时，把整个目录复制到宿主已发现的 skills 目录。该提示按需引导 agent 获取完整说明，不自动安装 skill，也不修改宿主配置；这一行的输入开销包含在费用候选中。
+请求 guide 已附带一行按需安装提示：[source-fold-markers skill 目录](https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/source-fold-markers)——稳定、已验证的代码可用此技能添加默认折叠标记，把整个目录复制到宿主已发现的 skills 目录。该提示按需引导 agent 获取完整说明，不自动安装 skill，也不修改宿主配置；这一行的输入开销包含在费用候选中。
 
 包内同时提供 `magpie.hooks` 请求钩子和自定义工具。需要让使用 Magpie 的 agent 连接其 HTTP MCP 服务：
 
