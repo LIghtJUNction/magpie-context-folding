@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="magpie-context-folding 折纸喜鹊 Logo" width="240" />
+</p>
+
 # magpie-context-folding
 
 给 Magpie 提供可逆的上下文折叠。历史用户消息、模型回复和工具结果都能折叠，原文保持可读，不只是截断工具输出。
