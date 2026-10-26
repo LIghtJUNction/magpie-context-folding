@@ -6,7 +6,7 @@ export function estimateTokens(body: unknown): number {
 
 export function appendBudget(body: Record<string, unknown>, protocol: Protocol, guide = ''): Record<string, unknown> {
   const render = (used: number) => {
-    const budget = `<context-budget>Current context length estimate: ${used} tokens (complete serialized request UTF-8 bytes / 4; not tokenizer or billing evidence).</context-budget>`;
+    const budget = `<context-budget>Estimate: ${used} tokens=ceil(full request JSON UTF-8 bytes/4); not tokenizer/billing evidence.</context-budget>`;
     return appendGuide(body, guide ? `${budget}\n\n${guide}` : budget, protocol);
   };
   // Include the hint itself. Its decimal length converges after a few iterations.

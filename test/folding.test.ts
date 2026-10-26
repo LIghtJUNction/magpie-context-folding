@@ -367,7 +367,7 @@ test('switching models keeps a self-inclusive estimate without plugin-owned capa
       const request = { ...body, model, messages: [] };
       const output = await onRequest(request, { ...context, model });
       const text = JSON.stringify(output);
-      const used = Number(text.match(/length estimate: (\d+) tokens/)?.[1]);
+      const used = Number(text.match(/Estimate: (\d+) tokens/)?.[1]);
       assert.equal(used, Math.ceil(Buffer.byteLength(text) / 4));
       assert.ok(!text.includes('Capacity:'));
       assert.ok(!text.includes('used ratio'));
