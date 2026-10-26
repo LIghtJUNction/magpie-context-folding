@@ -4,7 +4,7 @@ import { appendBudget, estimateTokens } from './budget.js';
 import { evaluatePolicy, planCandidates, policyRequestHash } from './policy.js';
 import type { SavingsProof } from './economics.js';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
-import { extractSpans, replaceSpans } from './protocol.js';
+import { extractSpans, replaceExtractedSpans } from './protocol.js';
 import { Store, digest } from './store.js';
 import type { Entry, Group, Snapshot } from './store.js';
 import { parentIndex } from './tree.js';
@@ -216,7 +216,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           && (!isDuplicateFold(entry) || canReplayDuplicate(entry, spans, byId, eligibleIds))) existing.set(entry.id, entry.folded);
       }
       const replayedGroups = groupPlans(snapshot, spans, eligibleIds, existing, true);
-      const withoutGuide = replaceSpans(body, existing, ctx.protocol);
+      const withoutGuide = replaceExtractedSpans(body, existing, ctx.protocol, spans);
       const baseline = withBudget(withoutGuide, guide);
       const finish = (output: Record<string, unknown>, foldedCount: number, newBatch = false, proof?: SavingsProof) => {
         if (ctx.state) {
@@ -265,7 +265,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           : changeCount === 0 ? 'no-marked-smaller-candidates' : 'below-threshold' };
         return finish(baseline, existing.size);
       }
-      const candidate = withBudget(replaceSpans(body, planned, ctx.protocol), guide);
+      const candidate = withBudget(replaceExtractedSpans(body, planned, ctx.protocol, spans), guide);
       const beforeBytes = Buffer.byteLength(JSON.stringify(withoutGuide));
       const afterBytes = Buffer.byteLength(JSON.stringify(candidate));
       if (afterBytes >= beforeBytes) {

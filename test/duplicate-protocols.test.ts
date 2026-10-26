@@ -122,6 +122,9 @@ for (const variant of variants) {
       assert.ok(folded.startsWith(`[context-folding duplicate id=${old.id} role=tool]\n`));
       assert.ok(folded.includes(`Exact repeat of JSON path ${JSON.stringify(anchor.path)}`));
       assert.ok(folded.includes('Same text, separate observation.'));
+      assert.ok(folded.includes('Opening: same JSON path UTF-16 [0,400)'));
+      assert.ok(folded.includes(`Original UTF-16: inline [0,400); archived [0,${evidence.length})`));
+      assert.ok(!folded.includes(JSON.stringify(evidence.slice(0, 400))));
       assertPreserved(output, body, protocol, folded);
       assert.deepEqual(body, untouched, 'onRequest must not mutate its input');
       const read = JSON.parse(await execute({ action: 'read', scope, id: old.id, peek: true, limit: 24000 }));
@@ -133,6 +136,26 @@ for (const variant of variants) {
       const restored = await onRequest(body, ctx) as Body;
       assertPreserved(restored, body, protocol, evidence);
       assert.equal(toolSpans(restored, protocol)[0]!.text, evidence);
+    });
+  });
+
+  test(`${label}: legacy literal openings replay unchanged and invalidate when their anchor changes`, async () => {
+    await fixture(variant, async (store, scope, ctx) => {
+      const body = request(variant);
+      const [old, anchor] = toolSpans(body, protocol);
+      const output = await onRequest(body, ctx) as Body;
+      const alias = toolSpans(output, protocol)[0]!.text;
+      const legacy = alias.replace('Opening: same JSON path UTF-16 [0,400)', `Opening: ${JSON.stringify(evidence.slice(0, 400))}`);
+      assert.notEqual(legacy, alias);
+      await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+        state.entries.find(entry => entry.id === old!.id)!.folded = legacy;
+      });
+      const noNewFolds = { ...ctx, options: { ...ctx.options, thresholdTokens: Number.MAX_SAFE_INTEGER } };
+      const replayed = await onRequest(body, noNewFolds) as Body;
+      assertPreserved(replayed, body, protocol, legacy);
+      const changed = structuredClone(body);
+      setText(changed, anchor!.path, evidence + 'Changed anchor.');
+      assertPreserved(await onRequest(changed, noNewFolds) as Body, changed, protocol, evidence);
     });
   });
 

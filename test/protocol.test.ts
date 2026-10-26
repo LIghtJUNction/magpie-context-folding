@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendGuide, extractSpans, replaceSpans, type Protocol } from "../src/protocol.js";
+import { createHash } from "node:crypto";
+import { appendGuide, extractSpans, replaceExtractedSpans, replaceSpans, type Protocol } from "../src/protocol.js";
 
 test("Responses custom tool results are foldable and custom code input remains exact", () => {
   const call = { type: "custom_tool_call", call_id: "code-1", name: "exec", input: "const x = await tools.run(); text(x);" };
@@ -362,6 +363,91 @@ test("read result IDs select the corresponding file even when results are reorde
     }
     const body = { [key]: [first[key][0], second[key][0], second[key][1], first[key][1]] };
     assert.deepEqual(extractSpans(body, protocol).filter((span) => span.role === "tool").map((span) => span.source?.path), ["b", "a"], protocol);
+  }
+});
+
+test("request-local repeated text retains exact role hashes and occurrence IDs", () => {
+  const text = 'same text with quotes " and a newline\n😀';
+  const body = { messages: [
+    { role: "user", content: text }, { role: "assistant", content: text },
+    { role: "user", content: text }, { role: "tool", content: text },
+  ] };
+  const spans = extractSpans(body, "chat");
+  const counts = new Map<string, number>();
+  for (const span of spans) {
+    const hash = createHash("sha256").update(JSON.stringify([span.role, text])).digest("hex").slice(0, 24);
+    const count = counts.get(hash) ?? 0;
+    assert.equal(span.id, `${hash}-${count}`);
+    counts.set(hash, count + 1);
+  }
+  body.messages[0]!.content = "changed between requests";
+  assert.notEqual(extractSpans(body, "chat")[0]!.id, spans[0]!.id);
+});
+
+test("repeated read text reuses parsing without sharing envelope safety or request state", () => {
+  for (const protocol of protocols) {
+    const output = '{"data":[1,2,3],"text":"file contents"}';
+    const body: any = readExchange(protocol, { path: "a" }, "read", output);
+    const key = protocol === "responses" ? "input" : protocol === "gemini" ? "contents" : "messages";
+    const other: any = readExchange(protocol, { path: "b" }, "read", output);
+    if (protocol === "chat") {
+      other[key][0].tool_calls[0].id = "read-2";
+      other[key][1].tool_call_id = "read-2";
+    } else if (protocol === "responses") {
+      other[key][0].call_id = "read-2";
+      other[key][1].call_id = "read-2";
+    } else if (protocol === "anthropic") {
+      other[key][0].content[0].id = "read-2";
+      other[key][1].content[0].tool_use_id = "read-2";
+    } else {
+      other[key][0].parts[0].functionCall.id = "read-2";
+      other[key][1].parts[0].functionResponse.id = "read-2";
+    }
+    body[key].push(...other[key]);
+    const parse = JSON.parse;
+    let outputParses = 0;
+    JSON.parse = ((value: string, ...rest: any[]) => {
+      if (value === output) outputParses++;
+      return parse(value, ...rest);
+    }) as typeof JSON.parse;
+    try {
+      assert.deepEqual(extractSpans(body, protocol).filter(span => span.role === "tool").map(span => span.source?.path), ["a", "b"]);
+      assert.equal(outputParses, 1, `${protocol}: identical result text is parsed once per extraction`);
+      extractSpans(body, protocol);
+      assert.equal(outputParses, 2, `${protocol}: parsing state never survives an extraction`);
+    } finally {
+      JSON.parse = parse;
+    }
+    const result = protocol === "anthropic" ? other[key][1].content[0]
+      : protocol === "gemini" ? other[key][1].parts[0].functionResponse.response : other[key][1];
+    result.signature = "signed";
+    assert.deepEqual(extractSpans(body, protocol).filter(span => span.role === "tool").map(span => span.source?.path), ["a", undefined]);
+  }
+});
+
+test("pre-extracted replacement matches the public API across protocols and rechecks protection", () => {
+  for (const protocol of protocols) {
+    const body: any = readExchange(protocol);
+    const original = structuredClone(body);
+    const spans = extractSpans(body, protocol);
+    const replacements = new Map(spans.map(span => [span.id, "folded"]));
+    assert.deepEqual(replaceExtractedSpans(body, replacements, protocol, spans), replaceSpans(body, replacements, protocol));
+    assert.deepEqual(body, original);
+    // Even if a pipeline accidentally adds an unfinished exchange after extraction,
+    // the fast path must still decline all writes.
+    const key = protocol === "responses" ? "input" : protocol === "gemini" ? "contents" : "messages";
+    body[key].push(structuredClone(body[key][0]));
+    assert.deepEqual(replaceExtractedSpans(body, replacements, protocol, spans), body);
+    const protectedSpans = extractSpans(body, protocol);
+    body[key].pop();
+    assert.deepEqual(replaceExtractedSpans(body, replacements, protocol, protectedSpans), body);
+  }
+  for (const [protocol, body] of [
+    ["responses", { input: "request", previous_response_id: "server" }],
+    ["anthropic", { messages: [{ role: "assistant", content: "prefill" }] }],
+  ] satisfies [Protocol, Record<string, unknown>][]) {
+    const spans = extractSpans(body, protocol);
+    assert.deepEqual(replaceExtractedSpans(body, new Map(spans.map(span => [span.id, "folded"])), protocol, spans), body);
   }
 });
 

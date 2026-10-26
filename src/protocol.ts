@@ -181,15 +181,20 @@ function unsafeReadResult(value: unknown): boolean {
   return Object.values(value).some((entry) => (isRecord(entry) || Array.isArray(entry)) && unsafeReadResult(entry));
 }
 
-function singleReadText(value: unknown, types: ReadonlySet<string>): boolean {
+function singleReadText(value: unknown, types: ReadonlySet<string>, textSafety: Map<string, boolean>): boolean {
   if (typeof value === "string") {
-    if (!value.length || /^\s*(?:error\b|failed\b|ENOENT\b|EACCES\b|EPERM\b|file not found\b|no such file or directory\b|permission denied\b|<tool_use_error>)/i.test(value)) return false;
-    try { if (unsafeReadResult(JSON.parse(value))) return false; } catch { /* Ordinary file text. */ }
-    return true;
+    const cached = textSafety.get(value);
+    if (cached !== undefined) return cached;
+    let safe = !!value.length && !/^\s*(?:error\b|failed\b|ENOENT\b|EACCES\b|EPERM\b|file not found\b|no such file or directory\b|permission denied\b|<tool_use_error>)/i.test(value);
+    if (safe) {
+      try { safe = !unsafeReadResult(JSON.parse(value)); } catch { /* Ordinary file text. */ }
+    }
+    textSafety.set(value, safe);
+    return safe;
   }
   return Array.isArray(value) && value.length === 1 && isRecord(value[0])
     && typeof value[0].type === "string" && types.has(value[0].type)
-    && !unsafeReadResult(value[0]) && singleReadText(value[0].text, types)
+    && !unsafeReadResult(value[0]) && singleReadText(value[0].text, types, textSafety)
     && !Object.keys(value[0]).some((key) => !["type", "text", "annotations"].includes(key));
 }
 
@@ -197,6 +202,9 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
   type Call = { id: unknown; name: unknown; args: unknown; safe: boolean };
   type Result = { id: unknown; name?: unknown; path: Path; safe: boolean };
   const events: ({ call: Call } | { result: Result })[] = [];
+  // Only immutable strings are reused, and only within this extraction. Envelope
+  // safety and protocol-specific text-part checks still run for every result.
+  const textSafety = new Map<string, boolean>();
   const items = protocol === "responses" ? body.input : protocol === "gemini" ? body.contents : body.messages;
   if (!Array.isArray(items)) return;
   for (const [index, item] of items.entries()) {
@@ -210,12 +218,12 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
         }
       } else if (item.role === "tool") events.push({ result: {
         id: item.tool_call_id, path: ["messages", index, "content"],
-        safe: !unsafeReadResult(item) && singleReadText(item.content, chatTextTypes),
+        safe: !unsafeReadResult(item) && singleReadText(item.content, chatTextTypes, textSafety),
       } });
     } else if (protocol === "responses") {
       if (item.type === "function_call" || item.type === "custom_tool_call") events.push({ call: { id: item.call_id, name: item.name, args: item.arguments ?? item.input, safe: !unsafeReadResult(item) } });
       else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") events.push({ result: {
-        id: item.call_id, path: ["input", index, "output"], safe: !unsafeReadResult(item) && singleReadText(item.output, responseTextTypes),
+        id: item.call_id, path: ["input", index, "output"], safe: !unsafeReadResult(item) && singleReadText(item.output, responseTextTypes, textSafety),
       } });
     } else {
       const parts = protocol === "gemini" ? item.parts : item.content;
@@ -226,7 +234,7 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
         if (protocol === "anthropic") {
           if (item.role === "assistant" && part.type === "tool_use") events.push({ call: { id: part.id, name: part.name, args: part.input, safe } });
           else if (item.role === "user" && part.type === "tool_result") events.push({ result: {
-            id: part.tool_use_id, path: ["messages", index, "content", partIndex, "content"], safe: safe && singleReadText(part.content, chatTextTypes),
+            id: part.tool_use_id, path: ["messages", index, "content", partIndex, "content"], safe: safe && singleReadText(part.content, chatTextTypes, textSafety),
           } });
         } else if (item.role === "model" || item.role === "user") {
           if (item.role === "model" && isRecord(part.functionCall)) {
@@ -239,7 +247,7 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
             const textKeys = isRecord(output) ? ["text", "output", "result", "content"].filter((key) => typeof output[key] === "string") : [];
             events.push({ result: {
               id: response.id, name: response.name, path: ["contents", index, "parts", partIndex, "functionResponse", "response"],
-              safe: safe && isRecord(output) && textKeys.length === 1 && singleReadText(output[textKeys[0]!], chatTextTypes)
+              safe: safe && isRecord(output) && textKeys.length === 1 && singleReadText(output[textKeys[0]!], chatTextTypes, textSafety)
                 && !Object.values(output).some((entry) => isRecord(entry) || Array.isArray(entry))
                 && Object.keys(part).every((key) => key === "functionResponse")
                 && !Array.isArray(response.parts),
@@ -363,9 +371,19 @@ export function extractSpans(body: Record<string, unknown>, protocol: Protocol):
   }
   attachReadSources(body, protocol, candidates);
   const occurrences = new Map<string, number>();
+  const hashes = new Map<Role, Map<string, string>>();
   const reason = protectionReason(body, protocol);
   return candidates.map((candidate) => {
-    const hash = createHash("sha256").update(JSON.stringify([candidate.role, candidate.text])).digest("hex").slice(0, 24);
+    let roleHashes = hashes.get(candidate.role);
+    if (!roleHashes) {
+      roleHashes = new Map();
+      hashes.set(candidate.role, roleHashes);
+    }
+    let hash = roleHashes.get(candidate.text);
+    if (hash === undefined) {
+      hash = createHash("sha256").update(JSON.stringify([candidate.role, candidate.text])).digest("hex").slice(0, 24);
+      roleHashes.set(candidate.text, hash);
+    }
     const occurrence = occurrences.get(hash) ?? 0;
     occurrences.set(hash, occurrence + 1);
     return { ...candidate, id: `${hash}-${occurrence}`, ...(reason ? { protectedReason: reason } : {}) };
@@ -389,8 +407,24 @@ export function replaceSpans(
   replacements: ReadonlyMap<string, string>,
   protocol: Protocol,
 ): Record<string, unknown> {
+  return replaceExtractedSpans(body, replacements, protocol, extractSpans(body, protocol));
+}
+
+/**
+ * Internal request-pipeline fast path. `spans` must be the unmodified result of
+ * extractSpans(body, protocol), with neither body nor spans mutated since then.
+ * Do not reuse spans across requests, protocols, or replacement passes.
+ * Protection is checked again against the current body before any write.
+ */
+export function replaceExtractedSpans(
+  body: Record<string, unknown>,
+  replacements: ReadonlyMap<string, string>,
+  protocol: Protocol,
+  spans: readonly Span[],
+): Record<string, unknown> {
   const result = structuredClone(body);
-  for (const span of extractSpans(body, protocol)) {
+  if (protectionReason(body, protocol)) return result;
+  for (const span of spans) {
     const replacement = replacements.get(span.id);
     if (replacement !== undefined && !span.protectedReason) setText(result, span.path, replacement);
   }
