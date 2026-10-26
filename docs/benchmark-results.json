@@ -1,0 +1,5226 @@
+{
+  "date": "2026-10-26",
+  "scope": "Local reversible folding and performance; conditional text tariffs, not production billing or semantic-quality proof.",
+  "folding": {
+    "small": {
+      "generatedAt": "2026-10-26T09:46:47.273Z",
+      "runtime": "1.4.0",
+      "machine": {
+        "cpu": "12th Gen Intel(R) Core(TM) i9-12900HX",
+        "cores": 24,
+        "loadAverage": [
+          20.83,
+          19.59,
+          12.76
+        ]
+      },
+      "billing": "SYNTHETIC_ACCOUNTING_ONLY",
+      "stages": [
+        {
+          "label": "fold_1",
+          "hookMs": 15.606071000000014,
+          "requestBytes": 3237,
+          "decision": {
+            "estimatedTokens": 2491,
+            "thresholdTokens": 1,
+            "thresholdIsEstimate": true,
+            "approved": true,
+            "reason": "proven",
+            "baselineLowerUsd": 0.009293999999999998,
+            "foldedUpperUsd": 0.0032370000000000003,
+            "savingLowerUsd": 0.006056999999999999,
+            "assumptions": [
+              "SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M."
+            ],
+            "bounds": {
+              "beforeLowerTokens": 9294,
+              "afterUpperTokens": 3237,
+              "oldMinPricePerMillion": 1,
+              "newMaxPricePerMillion": 1,
+              "extraCostUpperUsd": 0,
+              "expiresAt": "2026-10-26T09:47:47.200Z"
+            },
+            "requestHash": "ee8de7395938d27d7dcaefc574e6c0743ef3549f2ee575e92e9cfd03b9625a75",
+            "model": "synthetic",
+            "protocol": "chat",
+            "proposedFolds": 1
+          }
+        },
+        {
+          "label": "fold_2",
+          "hookMs": 4.734214999999978,
+          "requestBytes": 2237,
+          "decision": {
+            "estimatedTokens": 810,
+            "thresholdTokens": 1,
+            "thresholdIsEstimate": true,
+            "approved": true,
+            "reason": "proven",
+            "baselineLowerUsd": 0.0025689999999999997,
+            "foldedUpperUsd": 0.0022370000000000003,
+            "savingLowerUsd": 0.00033199999999999994,
+            "assumptions": [
+              "SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M."
+            ],
+            "bounds": {
+              "beforeLowerTokens": 2569,
+              "afterUpperTokens": 2237,
+              "oldMinPricePerMillion": 1,
+              "newMaxPricePerMillion": 1,
+              "extraCostUpperUsd": 0,
+              "expiresAt": "2026-10-26T09:47:47.214Z"
+            },
+            "requestHash": "3fa3af1e99061d5fd9dc600059b59a485c5f82780352d4a60eec8a960cdcace6",
+            "model": "synthetic",
+            "protocol": "chat",
+            "proposedFolds": 1
+          }
+        },
+        {
+          "label": "fold_3",
+          "hookMs": 6.134401999999994,
+          "requestBytes": 1255,
+          "decision": {
+            "estimatedTokens": 560,
+            "thresholdTokens": 1,
+            "thresholdIsEstimate": true,
+            "approved": true,
+            "reason": "proven",
+            "baselineLowerUsd": 0.0015689999999999999,
+            "foldedUpperUsd": 0.0012550000000000003,
+            "savingLowerUsd": 0.00031399999999999993,
+            "assumptions": [
+              "SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M."
+            ],
+            "bounds": {
+              "beforeLowerTokens": 1569,
+              "afterUpperTokens": 1255,
+              "oldMinPricePerMillion": 1,
+              "newMaxPricePerMillion": 1,
+              "extraCostUpperUsd": 0,
+              "expiresAt": "2026-10-26T09:47:47.225Z"
+            },
+            "requestHash": "b830d901c14baa54473ec14237c1c5b63cef4380a6da6c1d74b80075f9afaf6a",
+            "model": "synthetic",
+            "protocol": "chat",
+            "proposedFolds": 1
+          }
+        }
+      ],
+      "measurements": {
+        "baselineCloneMs": {
+          "samples": 9,
+          "median": 0.01927100000000337,
+          "min": 0.00925200000000359,
+          "max": 0.037132999999982985
+        },
+        "warmFoldedHookMs": {
+          "samples": 9,
+          "median": 1.7803159999999991,
+          "min": 1.4701780000000042,
+          "max": 3.3399490000000185
+        },
+        "warmFoldedHookCpuMs": {
+          "samples": 9,
+          "median": 2.781,
+          "min": 1.747,
+          "max": 4.615
+        }
+      },
+      "storage": {
+        "files": [
+          "state.sqlite"
+        ],
+        "beforeRepeatBytes": 61440,
+        "afterRepeatBytes": 61440,
+        "afterForgetBytes": 45056,
+        "recursiveLayers": 3
+      },
+      "errors": 0,
+      "prompts": [
+        {
+          "label": "original",
+          "utf8Bytes": 9048,
+          "sha256": "c299b22e14eb81e1f9d6701d9a5d257deae546c59399a67478126a5848c75bdb"
+        },
+        {
+          "label": "fold_1",
+          "utf8Bytes": 3047,
+          "sha256": "30eec99f7c2e69b5fc3ddcd2830e6cfef9d10c57e2a0ff0bcfd0a644293a5e7e"
+        },
+        {
+          "label": "fold_2",
+          "utf8Bytes": 2047,
+          "sha256": "f33393f91d0ff2bd44b340458879e83ef9c0cd193506f3ee51cc9dbc2a0f4f2a"
+        },
+        {
+          "label": "fold_3",
+          "utf8Bytes": 1065,
+          "sha256": "4c5df0506c1b6f2914d3fe41e8794fb2eaad02d7e2a32551579b343b07978c2a"
+        }
+      ]
+    },
+    "large": {
+      "generatedAt": "2026-10-26T09:46:47.462Z",
+      "runtime": "1.4.0",
+      "machine": {
+        "cpu": "12th Gen Intel(R) Core(TM) i9-12900HX",
+        "cores": 24,
+        "loadAverage": [
+          20.83,
+          19.59,
+          12.76
+        ]
+      },
+      "billing": "SYNTHETIC_ACCOUNTING_ONLY",
+      "stages": [
+        {
+          "label": "fold_1",
+          "hookMs": 17.426226999999997,
+          "requestBytes": 3238,
+          "decision": {
+            "estimatedTokens": 22665,
+            "thresholdTokens": 1,
+            "thresholdIsEstimate": true,
+            "approved": true,
+            "reason": "proven",
+            "baselineLowerUsd": 0.08998899999999999,
+            "foldedUpperUsd": 0.0032380000000000004,
+            "savingLowerUsd": 0.08675099999999998,
+            "assumptions": [
+              "SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M."
+            ],
+            "bounds": {
+              "beforeLowerTokens": 89989,
+              "afterUpperTokens": 3238,
+              "oldMinPricePerMillion": 1,
+              "newMaxPricePerMillion": 1,
+              "extraCostUpperUsd": 0,
+              "expiresAt": "2026-10-26T09:47:47.388Z"
+            },
+            "requestHash": "66c4c620e845bb27439e338f351e9ed28eb2ac3dc0a1d2ba3ca804f6b4cbacb5",
+            "model": "synthetic",
+            "protocol": "chat",
+            "proposedFolds": 1
+          }
+        },
+        {
+          "label": "fold_2",
+          "hookMs": 5.1666720000000055,
+          "requestBytes": 2238,
+          "decision": {
+            "estimatedTokens": 810,
+            "thresholdTokens": 1,
+            "thresholdIsEstimate": true,
+            "approved": true,
+            "reason": "proven",
+            "baselineLowerUsd": 0.0025689999999999997,
+            "foldedUpperUsd": 0.0022380000000000004,
+            "savingLowerUsd": 0.00033099999999999997,
+            "assumptions": [
+              "SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M."
+            ],
+            "bounds": {
+              "beforeLowerTokens": 2569,
+              "afterUpperTokens": 2238,
+              "oldMinPricePerMillion": 1,
+              "newMaxPricePerMillion": 1,
+              "extraCostUpperUsd": 0,
+              "expiresAt": "2026-10-26T09:47:47.402Z"
+            },
+            "requestHash": "58b6d3e46d9fad9d4a341a13b50f777d44cd1dd6b47257c8247770f3cd0379cd",
+            "model": "synthetic",
+            "protocol": "chat",
+            "proposedFolds": 1
+          }
+        },
+        {
+          "label": "fold_3",
+          "hookMs": 4.237624999999994,
+          "requestBytes": 1256,
+          "decision": {
+            "estimatedTokens": 560,
+            "thresholdTokens": 1,
+            "thresholdIsEstimate": true,
+            "approved": true,
+            "reason": "proven",
+            "baselineLowerUsd": 0.0015689999999999999,
+            "foldedUpperUsd": 0.0012560000000000002,
+            "savingLowerUsd": 0.00031299999999999996,
+            "assumptions": [
+              "SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M."
+            ],
+            "bounds": {
+              "beforeLowerTokens": 1569,
+              "afterUpperTokens": 1256,
+              "oldMinPricePerMillion": 1,
+              "newMaxPricePerMillion": 1,
+              "extraCostUpperUsd": 0,
+              "expiresAt": "2026-10-26T09:47:47.410Z"
+            },
+            "requestHash": "1f2b9968a5675aa09ba46d036f3eaca4d432e520222d19057a4fa05ca7e9760d",
+            "model": "synthetic",
+            "protocol": "chat",
+            "proposedFolds": 1
+          }
+        }
+      ],
+      "measurements": {
+        "baselineCloneMs": {
+          "samples": 9,
+          "median": 0.03321500000001265,
+          "min": 0.02118099999998435,
+          "max": 0.0483650000000182
+        },
+        "warmFoldedHookMs": {
+          "samples": 9,
+          "median": 2.1641290000000026,
+          "min": 1.9293700000000058,
+          "max": 3.174714999999992
+        },
+        "warmFoldedHookCpuMs": {
+          "samples": 9,
+          "median": 3.373,
+          "min": 1.989,
+          "max": 4.555
+        }
+      },
+      "storage": {
+        "files": [
+          "state.sqlite"
+        ],
+        "beforeRepeatBytes": 139264,
+        "afterRepeatBytes": 139264,
+        "afterForgetBytes": 45056,
+        "recursiveLayers": 3
+      },
+      "errors": 0,
+      "prompts": [
+        {
+          "label": "original",
+          "utf8Bytes": 89158,
+          "sha256": "0757212cc4ab4a3c79a2ee89df858dd9d38cc405b3366f288fb40572aa0c09fc"
+        },
+        {
+          "label": "fold_1",
+          "utf8Bytes": 3048,
+          "sha256": "567f6a9f84ac284766ffcfd83808996dd22861dbeb9dfc1aebf0d5f7b5fad445"
+        },
+        {
+          "label": "fold_2",
+          "utf8Bytes": 2048,
+          "sha256": "e6d9b4dc5b34b30beced72c03de62e16ced390d42223e6d19b3e2ee841c68347"
+        },
+        {
+          "label": "fold_3",
+          "utf8Bytes": 1066,
+          "sha256": "f91edf5c5fa5ebc6c7c4bdd879da976f848ba03a3e4acecd8f3f8df52d54d67c"
+        }
+      ]
+    }
+  },
+  "inference": {
+    "startedAt": "2026-10-26T09:51:06.705008+00:00",
+    "claim": "local one-output-token inference latency on these four actual plugin prompt versions",
+    "ollamaVersion": {
+      "version": "0.20.2"
+    },
+    "model": {
+      "name": "smollm2:135m",
+      "model": "smollm2:135m",
+      "modified_at": "2026-06-04T23:12:50.596965265+08:00",
+      "size": 270898672,
+      "digest": "9077fe9d2ae1a4a41a868836b56b8163731a8fe16621397028c2c76f838c6907",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "llama",
+        "families": [
+          "llama"
+        ],
+        "parameter_size": "134.52M",
+        "quantization_level": "F16"
+      }
+    },
+    "nativeContext": 8192,
+    "options": {
+      "num_ctx": 4096,
+      "num_predict": 1,
+      "temperature": 0,
+      "seed": 42,
+      "num_thread": 4
+    },
+    "raw": true,
+    "truncate": false,
+    "shift": false,
+    "promptMetadata": [
+      {
+        "label": "original",
+        "chars": 9048,
+        "utf8Bytes": 9048,
+        "sha256": "c299b22e14eb81e1f9d6701d9a5d257deae546c59399a67478126a5848c75bdb"
+      },
+      {
+        "label": "fold_1",
+        "chars": 3047,
+        "utf8Bytes": 3047,
+        "sha256": "30eec99f7c2e69b5fc3ddcd2830e6cfef9d10c57e2a0ff0bcfd0a644293a5e7e"
+      },
+      {
+        "label": "fold_2",
+        "chars": 2047,
+        "utf8Bytes": 2047,
+        "sha256": "f33393f91d0ff2bd44b340458879e83ef9c0cd193506f3ee51cc9dbc2a0f4f2a"
+      },
+      {
+        "label": "fold_3",
+        "chars": 1065,
+        "utf8Bytes": 1065,
+        "sha256": "4c5df0506c1b6f2914d3fe41e8794fb2eaad02d7e2a32551579b343b07978c2a"
+      }
+    ],
+    "initialPs": {
+      "models": []
+    },
+    "initialResources": {
+      "loadAverage": [
+        8.1162109375,
+        12.01513671875,
+        11.18798828125
+      ],
+      "logicalCpus": 24,
+      "memory": {
+        "MemTotalKiB": 16091208,
+        "MemAvailableKiB": 4475108,
+        "SwapTotalKiB": 39459208,
+        "SwapFreeKiB": 21017056
+      },
+      "cpuPressure": "some avg10=0.00 avg60=0.11 avg300=0.48 total=55071266\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+      "memoryPressure": "some avg10=0.34 avg60=1.20 avg300=1.78 total=110061393\nfull avg10=0.33 avg60=1.17 avg300=1.71 total=106773914",
+      "ioPressure": "some avg10=36.26 avg60=17.89 avg300=20.30 total=1546021890\nfull avg10=32.04 avg60=15.65 avg300=16.91 total=1322966355",
+      "cpuTicks": [
+        1315644,
+        44218,
+        879286,
+        12356009,
+        2119237,
+        95201,
+        46698,
+        0,
+        46254,
+        0
+      ]
+    },
+    "wasLoadedInitially": false,
+    "requestRuns": [
+      {
+        "label": "original",
+        "phase": "prefix-disrupted",
+        "trial": 0,
+        "promptSha256": "59899813364af81b757ab176d3499c1c22fc98b150544c8e2ba056b8fd9d8359",
+        "valid": true,
+        "wallMs": 164.038267,
+        "prompt_eval_duration": 129838560,
+        "eval_duration": 0,
+        "load_duration": 29184659,
+        "total_duration": 163005969,
+        "prompt_eval_count": 1915,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 129.83856,
+        "decodeMs": 0.0,
+        "loadMs": 29.184659,
+        "totalMs": 163.005969,
+        "otherServerMs": 3.9827499999999922
+      },
+      {
+        "label": "fold_1",
+        "phase": "prefix-disrupted",
+        "trial": 0,
+        "promptSha256": "444dbd25bed5801f94132aec2597d04db4d019d727009533ced1d250f30d29b7",
+        "valid": true,
+        "wallMs": 74.206104,
+        "prompt_eval_duration": 34483498,
+        "eval_duration": 0,
+        "load_duration": 35636161,
+        "total_duration": 73251645,
+        "prompt_eval_count": 761,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 34.483498,
+        "decodeMs": 0.0,
+        "loadMs": 35.636161,
+        "totalMs": 73.251645,
+        "otherServerMs": 3.1319859999999977
+      },
+      {
+        "label": "fold_2",
+        "phase": "prefix-disrupted",
+        "trial": 0,
+        "promptSha256": "1a8ed4c5b9c880471528fd71a972961600f9d700e1a0998de7b9430be19c9801",
+        "valid": true,
+        "wallMs": 80.189107,
+        "prompt_eval_duration": 43578927,
+        "eval_duration": 0,
+        "load_duration": 33359677,
+        "total_duration": 79578353,
+        "prompt_eval_count": 590,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 43.578927,
+        "decodeMs": 0.0,
+        "loadMs": 33.359677,
+        "totalMs": 79.578353,
+        "otherServerMs": 2.639749000000009
+      },
+      {
+        "label": "fold_3",
+        "phase": "prefix-disrupted",
+        "trial": 0,
+        "promptSha256": "b221e3cbb022cca5e9bd0b1f7cbd65a8c915f14adb6f6e2fb5978714c456c20c",
+        "valid": true,
+        "wallMs": 82.774272,
+        "prompt_eval_duration": 48715425,
+        "eval_duration": 0,
+        "load_duration": 30697643,
+        "total_duration": 81907593,
+        "prompt_eval_count": 424,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 48.715425,
+        "decodeMs": 0.0,
+        "loadMs": 30.697643,
+        "totalMs": 81.907593,
+        "otherServerMs": 2.494525000000003
+      },
+      {
+        "label": "fold_3",
+        "phase": "prefix-disrupted",
+        "trial": 1,
+        "promptSha256": "2c85531c0d66d960e6c399fe77e522cd7db7337080fc1d966217935a9db9de32",
+        "valid": true,
+        "wallMs": 78.003495,
+        "prompt_eval_duration": 41653858,
+        "eval_duration": 0,
+        "load_duration": 33870999,
+        "total_duration": 77317251,
+        "prompt_eval_count": 422,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 41.653858,
+        "decodeMs": 0.0,
+        "loadMs": 33.870999,
+        "totalMs": 77.317251,
+        "otherServerMs": 1.7923940000000016
+      },
+      {
+        "label": "fold_2",
+        "phase": "prefix-disrupted",
+        "trial": 1,
+        "promptSha256": "f465f56b13e1713876ce740a2a284af06faca2532bb2bc890cda27861c33178e",
+        "valid": true,
+        "wallMs": 97.981156,
+        "prompt_eval_duration": 61071615,
+        "eval_duration": 0,
+        "load_duration": 33580470,
+        "total_duration": 97286824,
+        "prompt_eval_count": 588,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 61.071615,
+        "decodeMs": 0.0,
+        "loadMs": 33.58047,
+        "totalMs": 97.286824,
+        "otherServerMs": 2.634738999999996
+      },
+      {
+        "label": "fold_1",
+        "phase": "prefix-disrupted",
+        "trial": 1,
+        "promptSha256": "8691f6357d9f49349471e7bc0406d941e3b40ead24e53af3e1e739edd63cc9b5",
+        "valid": true,
+        "wallMs": 88.062732,
+        "prompt_eval_duration": 55378451,
+        "eval_duration": 0,
+        "load_duration": 29739147,
+        "total_duration": 87470246,
+        "prompt_eval_count": 759,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 55.378451,
+        "decodeMs": 0.0,
+        "loadMs": 29.739147,
+        "totalMs": 87.470246,
+        "otherServerMs": 2.3526480000000056
+      },
+      {
+        "label": "original",
+        "phase": "prefix-disrupted",
+        "trial": 1,
+        "promptSha256": "fbb85d05c682e84b3c94a613ab2b78546832d9dcd3d9342ea619e9ccdeb37315",
+        "valid": true,
+        "wallMs": 173.114085,
+        "prompt_eval_duration": 132179816,
+        "eval_duration": 0,
+        "load_duration": 36623939,
+        "total_duration": 172446197,
+        "prompt_eval_count": 1913,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 132.179816,
+        "decodeMs": 0.0,
+        "loadMs": 36.623939,
+        "totalMs": 172.446197,
+        "otherServerMs": 3.642442000000024
+      },
+      {
+        "label": "original",
+        "phase": "prefix-disrupted",
+        "trial": 2,
+        "promptSha256": "c6d04140c8266990437ef6b086c3eeac87debfdb20e19b1bc39202c5ed6ef635",
+        "valid": true,
+        "wallMs": 173.778956,
+        "prompt_eval_duration": 139916843,
+        "eval_duration": 0,
+        "load_duration": 29519886,
+        "total_duration": 173183828,
+        "prompt_eval_count": 1914,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 139.916843,
+        "decodeMs": 0.0,
+        "loadMs": 29.519886,
+        "totalMs": 173.183828,
+        "otherServerMs": 3.7470990000000057
+      },
+      {
+        "label": "fold_1",
+        "phase": "prefix-disrupted",
+        "trial": 2,
+        "promptSha256": "0c52826beb4e71719540c7e7526b9b6dbded3990f21e78fd98e95de329deee7c",
+        "valid": true,
+        "wallMs": 93.714919,
+        "prompt_eval_duration": 61553036,
+        "eval_duration": 0,
+        "load_duration": 29386293,
+        "total_duration": 93099908,
+        "prompt_eval_count": 760,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 61.553036,
+        "decodeMs": 0.0,
+        "loadMs": 29.386293,
+        "totalMs": 93.099908,
+        "otherServerMs": 2.160579000000002
+      },
+      {
+        "label": "fold_2",
+        "phase": "prefix-disrupted",
+        "trial": 2,
+        "promptSha256": "9814bcc0ff900ffc632b2d371ab0c6a56d42e07dae4eb6576500edd0775912ce",
+        "valid": true,
+        "wallMs": 42.459215,
+        "prompt_eval_duration": 10135253,
+        "eval_duration": 0,
+        "load_duration": 28994868,
+        "total_duration": 41763039,
+        "prompt_eval_count": 589,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 10.135253,
+        "decodeMs": 0.0,
+        "loadMs": 28.994868,
+        "totalMs": 41.763039,
+        "otherServerMs": 2.632918
+      },
+      {
+        "label": "fold_3",
+        "phase": "prefix-disrupted",
+        "trial": 2,
+        "promptSha256": "191c1e81cf719b377698ff410692aa545ec9690114b08fe7b9efda5edf9b5b07",
+        "valid": true,
+        "wallMs": 41.399134,
+        "prompt_eval_duration": 10920048,
+        "eval_duration": 0,
+        "load_duration": 27391085,
+        "total_duration": 40389865,
+        "prompt_eval_count": 423,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 10.920048,
+        "decodeMs": 0.0,
+        "loadMs": 27.391085,
+        "totalMs": 40.389865,
+        "otherServerMs": 2.0787319999999987
+      },
+      {
+        "label": "fold_3",
+        "phase": "prefix-disrupted",
+        "trial": 3,
+        "promptSha256": "fc997301602b0f93f17779fad71cd7df8bdd77a7496d605317bc2f752231e810",
+        "valid": true,
+        "wallMs": 93.700768,
+        "prompt_eval_duration": 53761212,
+        "eval_duration": 0,
+        "load_duration": 37262509,
+        "total_duration": 92785695,
+        "prompt_eval_count": 420,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 53.761212,
+        "decodeMs": 0.0,
+        "loadMs": 37.262509,
+        "totalMs": 92.785695,
+        "otherServerMs": 1.7619740000000021
+      },
+      {
+        "label": "fold_2",
+        "phase": "prefix-disrupted",
+        "trial": 3,
+        "promptSha256": "110d2fe9747db297db2c21dc709a0bc30dc8acf999a2fbff2ef15aa888af1fbc",
+        "valid": true,
+        "wallMs": 65.343025,
+        "prompt_eval_duration": 35186601,
+        "eval_duration": 0,
+        "load_duration": 27724991,
+        "total_duration": 64721986,
+        "prompt_eval_count": 586,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 35.186601,
+        "decodeMs": 0.0,
+        "loadMs": 27.724991,
+        "totalMs": 64.721986,
+        "otherServerMs": 1.8103939999999987
+      },
+      {
+        "label": "fold_1",
+        "phase": "prefix-disrupted",
+        "trial": 3,
+        "promptSha256": "27a9df196db13ad3556fbf9425723a693dfe94a4b025233df3adc59fcee3a94f",
+        "valid": true,
+        "wallMs": 59.310209,
+        "prompt_eval_duration": 29473719,
+        "eval_duration": 0,
+        "load_duration": 27101083,
+        "total_duration": 58731804,
+        "prompt_eval_count": 757,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 29.473719,
+        "decodeMs": 0.0,
+        "loadMs": 27.101083,
+        "totalMs": 58.731804,
+        "otherServerMs": 2.1570019999999985
+      },
+      {
+        "label": "original",
+        "phase": "prefix-disrupted",
+        "trial": 3,
+        "promptSha256": "5bfcd3177043d738cf3e19519bc97c0354a1681650c305057d4146808c80a88a",
+        "valid": true,
+        "wallMs": 192.433741,
+        "prompt_eval_duration": 155898330,
+        "eval_duration": 0,
+        "load_duration": 31318732,
+        "total_duration": 191804036,
+        "prompt_eval_count": 1911,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 155.89833,
+        "decodeMs": 0.0,
+        "loadMs": 31.318732,
+        "totalMs": 191.804036,
+        "otherServerMs": 4.5869740000000085
+      },
+      {
+        "label": "original",
+        "phase": "prefix-disrupted",
+        "trial": 4,
+        "promptSha256": "2eeef3c80c9c027ee9e55a1f6d4dec9b939d07233784b3d883e39b028ce3ee46",
+        "valid": true,
+        "wallMs": 206.987394,
+        "prompt_eval_duration": 168169799,
+        "eval_duration": 0,
+        "load_duration": 33797545,
+        "total_duration": 206247217,
+        "prompt_eval_count": 1911,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 168.169799,
+        "decodeMs": 0.0,
+        "loadMs": 33.797545,
+        "totalMs": 206.247217,
+        "otherServerMs": 4.279872999999995
+      },
+      {
+        "label": "fold_1",
+        "phase": "prefix-disrupted",
+        "trial": 4,
+        "promptSha256": "23a1a7619eb6e268830d48c3e42de63168a197e7d3f3f7da3d5e10794500d54f",
+        "valid": true,
+        "wallMs": 105.050032,
+        "prompt_eval_duration": 65169432,
+        "eval_duration": 0,
+        "load_duration": 36933194,
+        "total_duration": 104429650,
+        "prompt_eval_count": 757,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 65.169432,
+        "decodeMs": 0.0,
+        "loadMs": 36.933194,
+        "totalMs": 104.42965,
+        "otherServerMs": 2.3270239999999944
+      },
+      {
+        "label": "fold_2",
+        "phase": "prefix-disrupted",
+        "trial": 4,
+        "promptSha256": "4f5e2602408cdd57e2385ae35f5a8ad4ac73fef448ba5795f62938aa74876a47",
+        "valid": true,
+        "wallMs": 77.129823,
+        "prompt_eval_duration": 41717530,
+        "eval_duration": 0,
+        "load_duration": 31892636,
+        "total_duration": 76357221,
+        "prompt_eval_count": 586,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 41.71753,
+        "decodeMs": 0.0,
+        "loadMs": 31.892636,
+        "totalMs": 76.357221,
+        "otherServerMs": 2.7470549999999996
+      },
+      {
+        "label": "fold_3",
+        "phase": "prefix-disrupted",
+        "trial": 4,
+        "promptSha256": "8be8022a76cc3dd1945ac17753713c417a8a22b54d43559146f5133b98133fe7",
+        "valid": true,
+        "wallMs": 157.600625,
+        "prompt_eval_duration": 19524649,
+        "eval_duration": 0,
+        "load_duration": 128625293,
+        "total_duration": 155954818,
+        "prompt_eval_count": 420,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 19.524649,
+        "decodeMs": 0.0,
+        "loadMs": 128.625293,
+        "totalMs": 155.954818,
+        "otherServerMs": 7.804875999999979
+      },
+      {
+        "label": "original",
+        "phase": "warm-primer",
+        "trial": 0,
+        "promptSha256": "a1ea4c7542a5b0d89c375c6a0fd98a912b6fb46f2c941746374167049b4eab08",
+        "valid": true,
+        "wallMs": 289.697041,
+        "prompt_eval_duration": 121616079,
+        "eval_duration": 0,
+        "load_duration": 150542470,
+        "total_duration": 287692158,
+        "prompt_eval_count": 1914,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 121.616079,
+        "decodeMs": 0.0,
+        "loadMs": 150.54247,
+        "totalMs": 287.692158,
+        "otherServerMs": 15.533608999999984
+      },
+      {
+        "label": "original",
+        "phase": "warm",
+        "trial": 0,
+        "promptSha256": "a1ea4c7542a5b0d89c375c6a0fd98a912b6fb46f2c941746374167049b4eab08",
+        "valid": true,
+        "wallMs": 78.575844,
+        "prompt_eval_duration": 19053595,
+        "eval_duration": 0,
+        "load_duration": 52685373,
+        "total_duration": 77597763,
+        "prompt_eval_count": 1914,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 19.053595,
+        "decodeMs": 0.0,
+        "loadMs": 52.685373,
+        "totalMs": 77.597763,
+        "otherServerMs": 5.858795000000001
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm-primer",
+        "trial": 0,
+        "promptSha256": "8000bb91eefa03f5735da8b9314df10f5925e078588a60e7d5d116a0b1833aab",
+        "valid": true,
+        "wallMs": 105.859743,
+        "prompt_eval_duration": 56652453,
+        "eval_duration": 0,
+        "load_duration": 45598229,
+        "total_duration": 104977870,
+        "prompt_eval_count": 760,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 56.652453,
+        "decodeMs": 0.0,
+        "loadMs": 45.598229,
+        "totalMs": 104.97787,
+        "otherServerMs": 2.727187999999991
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm",
+        "trial": 0,
+        "promptSha256": "8000bb91eefa03f5735da8b9314df10f5925e078588a60e7d5d116a0b1833aab",
+        "valid": true,
+        "wallMs": 85.512234,
+        "prompt_eval_duration": 48189237,
+        "eval_duration": 0,
+        "load_duration": 33916860,
+        "total_duration": 84704313,
+        "prompt_eval_count": 760,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 48.189237,
+        "decodeMs": 0.0,
+        "loadMs": 33.91686,
+        "totalMs": 84.704313,
+        "otherServerMs": 2.5982160000000007
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm-primer",
+        "trial": 0,
+        "promptSha256": "582e85b34458377dcf95cdb50f08cfe62b5d7db761bac40244340f65b0867a91",
+        "valid": true,
+        "wallMs": 51.55744,
+        "prompt_eval_duration": 16221932,
+        "eval_duration": 0,
+        "load_duration": 32756874,
+        "total_duration": 50792649,
+        "prompt_eval_count": 589,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 16.221932,
+        "decodeMs": 0.0,
+        "loadMs": 32.756874,
+        "totalMs": 50.792649,
+        "otherServerMs": 1.8138429999999985
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm",
+        "trial": 0,
+        "promptSha256": "582e85b34458377dcf95cdb50f08cfe62b5d7db761bac40244340f65b0867a91",
+        "valid": true,
+        "wallMs": 58.258548,
+        "prompt_eval_duration": 25100895,
+        "eval_duration": 0,
+        "load_duration": 30503847,
+        "total_duration": 57500555,
+        "prompt_eval_count": 589,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 25.100895,
+        "decodeMs": 0.0,
+        "loadMs": 30.503847,
+        "totalMs": 57.500555,
+        "otherServerMs": 1.8958129999999969
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm-primer",
+        "trial": 0,
+        "promptSha256": "f595f5498529e448eedc6639a9c79ace265b56b3e27bdc519a1b43d3a5a6e65a",
+        "valid": true,
+        "wallMs": 53.12642,
+        "prompt_eval_duration": 21968521,
+        "eval_duration": 0,
+        "load_duration": 28398316,
+        "total_duration": 52254957,
+        "prompt_eval_count": 423,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 21.968521,
+        "decodeMs": 0.0,
+        "loadMs": 28.398316,
+        "totalMs": 52.254957,
+        "otherServerMs": 1.8881199999999971
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm",
+        "trial": 0,
+        "promptSha256": "f595f5498529e448eedc6639a9c79ace265b56b3e27bdc519a1b43d3a5a6e65a",
+        "valid": true,
+        "wallMs": 64.986455,
+        "prompt_eval_duration": 31958809,
+        "eval_duration": 0,
+        "load_duration": 30934303,
+        "total_duration": 64355578,
+        "prompt_eval_count": 423,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 31.958809,
+        "decodeMs": 0.0,
+        "loadMs": 30.934303,
+        "totalMs": 64.355578,
+        "otherServerMs": 1.462465999999992
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm-primer",
+        "trial": 1,
+        "promptSha256": "b16d46d587d186250266da0467b63686f1f25b6c99c78e2dfab68445eed9d93e",
+        "valid": true,
+        "wallMs": 68.942002,
+        "prompt_eval_duration": 39014284,
+        "eval_duration": 0,
+        "load_duration": 27703030,
+        "total_duration": 68205156,
+        "prompt_eval_count": 421,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 39.014284,
+        "decodeMs": 0.0,
+        "loadMs": 27.70303,
+        "totalMs": 68.205156,
+        "otherServerMs": 1.4878420000000006
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm",
+        "trial": 1,
+        "promptSha256": "b16d46d587d186250266da0467b63686f1f25b6c99c78e2dfab68445eed9d93e",
+        "valid": true,
+        "wallMs": 36.660568,
+        "prompt_eval_duration": 5935714,
+        "eval_duration": 0,
+        "load_duration": 28584754,
+        "total_duration": 35971058,
+        "prompt_eval_count": 421,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 5.935714,
+        "decodeMs": 0.0,
+        "loadMs": 28.584754,
+        "totalMs": 35.971058,
+        "otherServerMs": 1.4505899999999983
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm-primer",
+        "trial": 1,
+        "promptSha256": "91dad1394f9e93399642972e40d860a2520026eb45357631ab3efda4a7837c07",
+        "valid": true,
+        "wallMs": 88.10619,
+        "prompt_eval_duration": 55077362,
+        "eval_duration": 0,
+        "load_duration": 29628131,
+        "total_duration": 87355196,
+        "prompt_eval_count": 587,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 55.077362,
+        "decodeMs": 0.0,
+        "loadMs": 29.628131,
+        "totalMs": 87.355196,
+        "otherServerMs": 2.649703000000006
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm",
+        "trial": 1,
+        "promptSha256": "91dad1394f9e93399642972e40d860a2520026eb45357631ab3efda4a7837c07",
+        "valid": true,
+        "wallMs": 36.910024,
+        "prompt_eval_duration": 3179682,
+        "eval_duration": 0,
+        "load_duration": 30894399,
+        "total_duration": 35840786,
+        "prompt_eval_count": 587,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 3.179682,
+        "decodeMs": 0.0,
+        "loadMs": 30.894399,
+        "totalMs": 35.840786,
+        "otherServerMs": 1.7667050000000017
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm-primer",
+        "trial": 1,
+        "promptSha256": "a4d76020ba6867454b9dedb5dfc2eac7f16a53dff2346175ef427f9c19e0ffb9",
+        "valid": true,
+        "wallMs": 82.158916,
+        "prompt_eval_duration": 37424704,
+        "eval_duration": 0,
+        "load_duration": 41342584,
+        "total_duration": 81418957,
+        "prompt_eval_count": 758,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 37.424704,
+        "decodeMs": 0.0,
+        "loadMs": 41.342584,
+        "totalMs": 81.418957,
+        "otherServerMs": 2.6516690000000054
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm",
+        "trial": 1,
+        "promptSha256": "a4d76020ba6867454b9dedb5dfc2eac7f16a53dff2346175ef427f9c19e0ffb9",
+        "valid": true,
+        "wallMs": 52.631822,
+        "prompt_eval_duration": 18923023,
+        "eval_duration": 0,
+        "load_duration": 30777400,
+        "total_duration": 51861200,
+        "prompt_eval_count": 758,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 18.923023,
+        "decodeMs": 0.0,
+        "loadMs": 30.7774,
+        "totalMs": 51.8612,
+        "otherServerMs": 2.160776999999996
+      },
+      {
+        "label": "original",
+        "phase": "warm-primer",
+        "trial": 1,
+        "promptSha256": "7a0e5107bddb9ab4e9c114a535026fbed4b88553131ee88caa779f18359e6951",
+        "valid": true,
+        "wallMs": 196.954072,
+        "prompt_eval_duration": 156356532,
+        "eval_duration": 0,
+        "load_duration": 36486334,
+        "total_duration": 196421638,
+        "prompt_eval_count": 1912,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 156.356532,
+        "decodeMs": 0.0,
+        "loadMs": 36.486334,
+        "totalMs": 196.421638,
+        "otherServerMs": 3.578772000000015
+      },
+      {
+        "label": "original",
+        "phase": "warm",
+        "trial": 1,
+        "promptSha256": "7a0e5107bddb9ab4e9c114a535026fbed4b88553131ee88caa779f18359e6951",
+        "valid": true,
+        "wallMs": 52.319949,
+        "prompt_eval_duration": 21478504,
+        "eval_duration": 0,
+        "load_duration": 26933809,
+        "total_duration": 51741647,
+        "prompt_eval_count": 1912,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 21.478504,
+        "decodeMs": 0.0,
+        "loadMs": 26.933809,
+        "totalMs": 51.741647,
+        "otherServerMs": 3.3293339999999993
+      },
+      {
+        "label": "original",
+        "phase": "warm-primer",
+        "trial": 2,
+        "promptSha256": "46c3aeb7969fa428c9e2ef95f4acbd2483945a41adbe99190330bf233339ba64",
+        "valid": true,
+        "wallMs": 171.111076,
+        "prompt_eval_duration": 137653774,
+        "eval_duration": 0,
+        "load_duration": 28560878,
+        "total_duration": 170069120,
+        "prompt_eval_count": 1914,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 137.653774,
+        "decodeMs": 0.0,
+        "loadMs": 28.560878,
+        "totalMs": 170.06912,
+        "otherServerMs": 3.8544680000000007
+      },
+      {
+        "label": "original",
+        "phase": "warm",
+        "trial": 2,
+        "promptSha256": "46c3aeb7969fa428c9e2ef95f4acbd2483945a41adbe99190330bf233339ba64",
+        "valid": true,
+        "wallMs": 59.673504,
+        "prompt_eval_duration": 24725038,
+        "eval_duration": 0,
+        "load_duration": 30910020,
+        "total_duration": 58956568,
+        "prompt_eval_count": 1914,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 24.725038,
+        "decodeMs": 0.0,
+        "loadMs": 30.91002,
+        "totalMs": 58.956568,
+        "otherServerMs": 3.321509999999993
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm-primer",
+        "trial": 2,
+        "promptSha256": "ec565379eb330728bd041aae905e52585e60ea9f19e4eb2b8741cc3963ae7150",
+        "valid": true,
+        "wallMs": 98.475399,
+        "prompt_eval_duration": 67402373,
+        "eval_duration": 0,
+        "load_duration": 27866065,
+        "total_duration": 97806612,
+        "prompt_eval_count": 760,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 67.402373,
+        "decodeMs": 0.0,
+        "loadMs": 27.866065,
+        "totalMs": 97.806612,
+        "otherServerMs": 2.538174000000005
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm",
+        "trial": 2,
+        "promptSha256": "ec565379eb330728bd041aae905e52585e60ea9f19e4eb2b8741cc3963ae7150",
+        "valid": true,
+        "wallMs": 39.243244,
+        "prompt_eval_duration": 3991638,
+        "eval_duration": 0,
+        "load_duration": 32299246,
+        "total_duration": 38681245,
+        "prompt_eval_count": 760,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 3.991638,
+        "decodeMs": 0.0,
+        "loadMs": 32.299246,
+        "totalMs": 38.681245,
+        "otherServerMs": 2.3903609999999986
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm-primer",
+        "trial": 2,
+        "promptSha256": "62ea91012660b36ddcb6a6bc155564cf21bf4eb2bc2c97bf5a0715e91011b35f",
+        "valid": true,
+        "wallMs": 72.400828,
+        "prompt_eval_duration": 33353077,
+        "eval_duration": 0,
+        "load_duration": 35192284,
+        "total_duration": 71742855,
+        "prompt_eval_count": 589,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 33.353077,
+        "decodeMs": 0.0,
+        "loadMs": 35.192284,
+        "totalMs": 71.742855,
+        "otherServerMs": 3.197494000000006
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm",
+        "trial": 2,
+        "promptSha256": "62ea91012660b36ddcb6a6bc155564cf21bf4eb2bc2c97bf5a0715e91011b35f",
+        "valid": true,
+        "wallMs": 50.85037,
+        "prompt_eval_duration": 3114119,
+        "eval_duration": 0,
+        "load_duration": 45008990,
+        "total_duration": 50219432,
+        "prompt_eval_count": 589,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 3.114119,
+        "decodeMs": 0.0,
+        "loadMs": 45.00899,
+        "totalMs": 50.219432,
+        "otherServerMs": 2.096322999999998
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm-primer",
+        "trial": 2,
+        "promptSha256": "5e346a5279dbcee397aa630ef908ef83732b0a3932110637f243cd14d25ef975",
+        "valid": true,
+        "wallMs": 77.26958,
+        "prompt_eval_duration": 32990896,
+        "eval_duration": 0,
+        "load_duration": 42062116,
+        "total_duration": 76632119,
+        "prompt_eval_count": 423,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 32.990896,
+        "decodeMs": 0.0,
+        "loadMs": 42.062116,
+        "totalMs": 76.632119,
+        "otherServerMs": 1.5791070000000005
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm",
+        "trial": 2,
+        "promptSha256": "5e346a5279dbcee397aa630ef908ef83732b0a3932110637f243cd14d25ef975",
+        "valid": true,
+        "wallMs": 39.210564,
+        "prompt_eval_duration": 8319892,
+        "eval_duration": 0,
+        "load_duration": 28884073,
+        "total_duration": 38634283,
+        "prompt_eval_count": 423,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 8.319892,
+        "decodeMs": 0.0,
+        "loadMs": 28.884073,
+        "totalMs": 38.634283,
+        "otherServerMs": 1.4303180000000033
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm-primer",
+        "trial": 3,
+        "promptSha256": "a1f126cc526ac5abaea5d60e0e09da299b2efdca3fa43b2d5ffa68abdcb39ee4",
+        "valid": true,
+        "wallMs": 90.676518,
+        "prompt_eval_duration": 55918850,
+        "eval_duration": 0,
+        "load_duration": 31973096,
+        "total_duration": 89903628,
+        "prompt_eval_count": 425,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 55.91885,
+        "decodeMs": 0.0,
+        "loadMs": 31.973096,
+        "totalMs": 89.903628,
+        "otherServerMs": 2.011681999999997
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm",
+        "trial": 3,
+        "promptSha256": "a1f126cc526ac5abaea5d60e0e09da299b2efdca3fa43b2d5ffa68abdcb39ee4",
+        "valid": true,
+        "wallMs": 68.70185,
+        "prompt_eval_duration": 34985825,
+        "eval_duration": 0,
+        "load_duration": 31393686,
+        "total_duration": 68053598,
+        "prompt_eval_count": 425,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 34.985825,
+        "decodeMs": 0.0,
+        "loadMs": 31.393686,
+        "totalMs": 68.053598,
+        "otherServerMs": 1.6740869999999966
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm-primer",
+        "trial": 3,
+        "promptSha256": "bc91f12f3573266bcff7e7ec2932106125d3b3901e0d9d3de81e1798970fc989",
+        "valid": true,
+        "wallMs": 50.799977,
+        "prompt_eval_duration": 20445071,
+        "eval_duration": 0,
+        "load_duration": 27815512,
+        "total_duration": 50214128,
+        "prompt_eval_count": 591,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 20.445071,
+        "decodeMs": 0.0,
+        "loadMs": 27.815512,
+        "totalMs": 50.214128,
+        "otherServerMs": 1.9535450000000054
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm",
+        "trial": 3,
+        "promptSha256": "bc91f12f3573266bcff7e7ec2932106125d3b3901e0d9d3de81e1798970fc989",
+        "valid": true,
+        "wallMs": 59.046583,
+        "prompt_eval_duration": 27246131,
+        "eval_duration": 0,
+        "load_duration": 28882605,
+        "total_duration": 58358745,
+        "prompt_eval_count": 591,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 27.246131,
+        "decodeMs": 0.0,
+        "loadMs": 28.882605,
+        "totalMs": 58.358745,
+        "otherServerMs": 2.230008999999999
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm-primer",
+        "trial": 3,
+        "promptSha256": "2abf27b78c92ebe59f1d730ac2c505a45590a8488026f38e6483b190a702c65b",
+        "valid": true,
+        "wallMs": 65.27223,
+        "prompt_eval_duration": 27080948,
+        "eval_duration": 0,
+        "load_duration": 35267936,
+        "total_duration": 64624685,
+        "prompt_eval_count": 762,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 27.080948,
+        "decodeMs": 0.0,
+        "loadMs": 35.267936,
+        "totalMs": 64.624685,
+        "otherServerMs": 2.2758010000000013
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm",
+        "trial": 3,
+        "promptSha256": "2abf27b78c92ebe59f1d730ac2c505a45590a8488026f38e6483b190a702c65b",
+        "valid": true,
+        "wallMs": 38.365994,
+        "prompt_eval_duration": 5132095,
+        "eval_duration": 0,
+        "load_duration": 30202118,
+        "total_duration": 37797824,
+        "prompt_eval_count": 762,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 5.132095,
+        "decodeMs": 0.0,
+        "loadMs": 30.202118,
+        "totalMs": 37.797824,
+        "otherServerMs": 2.463611
+      },
+      {
+        "label": "original",
+        "phase": "warm-primer",
+        "trial": 3,
+        "promptSha256": "fdb40df7221c202d0da01f1b7751f3a67b1db7466f33b4a6cf7fb78b20cf3735",
+        "valid": true,
+        "wallMs": 197.255199,
+        "prompt_eval_duration": 165605007,
+        "eval_duration": 0,
+        "load_duration": 26428604,
+        "total_duration": 196590407,
+        "prompt_eval_count": 1916,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 165.605007,
+        "decodeMs": 0.0,
+        "loadMs": 26.428604,
+        "totalMs": 196.590407,
+        "otherServerMs": 4.5567959999999985
+      },
+      {
+        "label": "original",
+        "phase": "warm",
+        "trial": 3,
+        "promptSha256": "fdb40df7221c202d0da01f1b7751f3a67b1db7466f33b4a6cf7fb78b20cf3735",
+        "valid": true,
+        "wallMs": 42.102649,
+        "prompt_eval_duration": 7751392,
+        "eval_duration": 0,
+        "load_duration": 29575443,
+        "total_duration": 41166183,
+        "prompt_eval_count": 1916,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 7.751392,
+        "decodeMs": 0.0,
+        "loadMs": 29.575443,
+        "totalMs": 41.166183,
+        "otherServerMs": 3.839347999999994
+      },
+      {
+        "label": "original",
+        "phase": "warm-primer",
+        "trial": 4,
+        "promptSha256": "6233aee63d5df0d2bb9e3247224a52d1654d873dce40e0284a9fb58937232f2b",
+        "valid": true,
+        "wallMs": 178.702354,
+        "prompt_eval_duration": 135176255,
+        "eval_duration": 0,
+        "load_duration": 39532365,
+        "total_duration": 178094261,
+        "prompt_eval_count": 1910,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 135.176255,
+        "decodeMs": 0.0,
+        "loadMs": 39.532365,
+        "totalMs": 178.094261,
+        "otherServerMs": 3.3856409999999926
+      },
+      {
+        "label": "original",
+        "phase": "warm",
+        "trial": 4,
+        "promptSha256": "6233aee63d5df0d2bb9e3247224a52d1654d873dce40e0284a9fb58937232f2b",
+        "valid": true,
+        "wallMs": 45.668057,
+        "prompt_eval_duration": 9052226,
+        "eval_duration": 0,
+        "load_duration": 32516592,
+        "total_duration": 44972968,
+        "prompt_eval_count": 1910,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 9.052226,
+        "decodeMs": 0.0,
+        "loadMs": 32.516592,
+        "totalMs": 44.972968,
+        "otherServerMs": 3.4041500000000013
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm-primer",
+        "trial": 4,
+        "promptSha256": "890efc0192fbe92038a34757d03d5ead712789591a82d9429f4181d47bc2d4f4",
+        "valid": true,
+        "wallMs": 104.311899,
+        "prompt_eval_duration": 70224632,
+        "eval_duration": 0,
+        "load_duration": 30737900,
+        "total_duration": 103683530,
+        "prompt_eval_count": 756,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 70.224632,
+        "decodeMs": 0.0,
+        "loadMs": 30.7379,
+        "totalMs": 103.68353,
+        "otherServerMs": 2.720998000000005
+      },
+      {
+        "label": "fold_1",
+        "phase": "warm",
+        "trial": 4,
+        "promptSha256": "890efc0192fbe92038a34757d03d5ead712789591a82d9429f4181d47bc2d4f4",
+        "valid": true,
+        "wallMs": 35.583055,
+        "prompt_eval_duration": 3951254,
+        "eval_duration": 0,
+        "load_duration": 28404918,
+        "total_duration": 34852976,
+        "prompt_eval_count": 756,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 3.951254,
+        "decodeMs": 0.0,
+        "loadMs": 28.404918,
+        "totalMs": 34.852976,
+        "otherServerMs": 2.496804000000001
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm-primer",
+        "trial": 4,
+        "promptSha256": "4532db01166a89a547d2a8e710ad58a42f1064487eb35b85610bd5fb78cf5024",
+        "valid": true,
+        "wallMs": 72.796139,
+        "prompt_eval_duration": 41343280,
+        "eval_duration": 0,
+        "load_duration": 28640757,
+        "total_duration": 71952609,
+        "prompt_eval_count": 585,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 41.34328,
+        "decodeMs": 0.0,
+        "loadMs": 28.640757,
+        "totalMs": 71.952609,
+        "otherServerMs": 1.9685719999999947
+      },
+      {
+        "label": "fold_2",
+        "phase": "warm",
+        "trial": 4,
+        "promptSha256": "4532db01166a89a547d2a8e710ad58a42f1064487eb35b85610bd5fb78cf5024",
+        "valid": true,
+        "wallMs": 61.978861,
+        "prompt_eval_duration": 29757569,
+        "eval_duration": 0,
+        "load_duration": 29801679,
+        "total_duration": 61329725,
+        "prompt_eval_count": 585,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 29.757569,
+        "decodeMs": 0.0,
+        "loadMs": 29.801679,
+        "totalMs": 61.329725,
+        "otherServerMs": 1.7704770000000032
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm-primer",
+        "trial": 4,
+        "promptSha256": "d3ee46334c577462f8a9845cfefcd666222ac7b9b6eb1182af8af6ede95cc160",
+        "valid": true,
+        "wallMs": 49.680362,
+        "prompt_eval_duration": 20067116,
+        "eval_duration": 0,
+        "load_duration": 26998169,
+        "total_duration": 48928271,
+        "prompt_eval_count": 419,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 20.067116,
+        "decodeMs": 0.0,
+        "loadMs": 26.998169,
+        "totalMs": 48.928271,
+        "otherServerMs": 1.862986000000003
+      },
+      {
+        "label": "fold_3",
+        "phase": "warm",
+        "trial": 4,
+        "promptSha256": "d3ee46334c577462f8a9845cfefcd666222ac7b9b6eb1182af8af6ede95cc160",
+        "valid": true,
+        "wallMs": 44.586731,
+        "prompt_eval_duration": 9972260,
+        "eval_duration": 0,
+        "load_duration": 32528783,
+        "total_duration": 43900865,
+        "prompt_eval_count": 419,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 9.97226,
+        "decodeMs": 0.0,
+        "loadMs": 32.528783,
+        "totalMs": 43.900865,
+        "otherServerMs": 1.3998220000000074
+      }
+    ],
+    "profileRuns": [
+      {
+        "label": "original",
+        "phase": "profile",
+        "trial": 0,
+        "promptSha256": "993c5c998659af2057e31ce117b97b55998d465784829c541ee023d7aca257ed",
+        "valid": true,
+        "wallMs": 177.707935,
+        "prompt_eval_duration": 144598479,
+        "eval_duration": 0,
+        "load_duration": 29100232,
+        "total_duration": 177036855,
+        "prompt_eval_count": 1912,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 144.598479,
+        "decodeMs": 0.0,
+        "loadMs": 29.100232,
+        "totalMs": 177.036855,
+        "otherServerMs": 3.338144000000007,
+        "ollamaProcessCpuMs": 190.0000000000004,
+        "ollamaProcessCoreEquivalents": 1.0691700401560595,
+        "resourcesBefore": {
+          "loadAverage": [
+            8.01171875,
+            11.86572265625,
+            11.14794921875
+          ],
+          "logicalCpus": 24,
+          "memory": {
+            "MemTotalKiB": 16091208,
+            "MemAvailableKiB": 3955412,
+            "SwapTotalKiB": 39459208,
+            "SwapFreeKiB": 21008632
+          },
+          "cpuPressure": "some avg10=0.00 avg60=0.10 avg300=0.47 total=55112161\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memoryPressure": "some avg10=0.47 avg60=1.14 avg300=1.75 total=110140798\nfull avg10=0.37 avg60=1.08 avg300=1.68 total=106852071",
+          "ioPressure": "some avg10=18.62 avg60=16.18 avg300=19.86 total=1546401436\nfull avg10=16.40 avg60=14.17 avg300=16.55 total=1323299480",
+          "cpuTicks": [
+            1317157,
+            44230,
+            879943,
+            12372285,
+            2119768,
+            95284,
+            46751,
+            0,
+            46263,
+            0
+          ]
+        },
+        "resourcesAfter": {
+          "loadAverage": [
+            8.01171875,
+            11.86572265625,
+            11.14794921875
+          ],
+          "logicalCpus": 24,
+          "memory": {
+            "MemTotalKiB": 16091208,
+            "MemAvailableKiB": 3954764,
+            "SwapTotalKiB": 39459208,
+            "SwapFreeKiB": 21008664
+          },
+          "cpuPressure": "some avg10=0.00 avg60=0.10 avg300=0.47 total=55113652\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memoryPressure": "some avg10=0.47 avg60=1.14 avg300=1.75 total=110140798\nfull avg10=0.37 avg60=1.08 avg300=1.68 total=106852071",
+          "ioPressure": "some avg10=18.62 avg60=16.18 avg300=19.86 total=1546417206\nfull avg10=16.40 avg60=14.17 avg300=16.55 total=1323312189",
+          "cpuTicks": [
+            1317187,
+            44230,
+            879951,
+            12372694,
+            2119779,
+            95286,
+            46752,
+            0,
+            46263,
+            0
+          ]
+        }
+      },
+      {
+        "label": "fold_3",
+        "phase": "profile",
+        "trial": 0,
+        "promptSha256": "59d0b35833653314b2c68788afbdfe7c621de461cdae42354665324915e0c382",
+        "valid": true,
+        "wallMs": 87.227537,
+        "prompt_eval_duration": 57956627,
+        "eval_duration": 0,
+        "load_duration": 26966330,
+        "total_duration": 86516564,
+        "prompt_eval_count": 422,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 57.956627,
+        "decodeMs": 0.0,
+        "loadMs": 26.96633,
+        "totalMs": 86.516564,
+        "otherServerMs": 1.5936070000000058,
+        "ollamaProcessCpuMs": 99.99999999999964,
+        "ollamaProcessCoreEquivalents": 1.1464269591837684,
+        "resourcesBefore": {
+          "loadAverage": [
+            8.01171875,
+            11.86572265625,
+            11.14794921875
+          ],
+          "logicalCpus": 24,
+          "memory": {
+            "MemTotalKiB": 16091208,
+            "MemAvailableKiB": 3954764,
+            "SwapTotalKiB": 39459208,
+            "SwapFreeKiB": 21008664
+          },
+          "cpuPressure": "some avg10=0.00 avg60=0.10 avg300=0.47 total=55113664\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memoryPressure": "some avg10=0.47 avg60=1.14 avg300=1.75 total=110140798\nfull avg10=0.37 avg60=1.08 avg300=1.68 total=106852071",
+          "ioPressure": "some avg10=18.62 avg60=16.18 avg300=19.86 total=1546420533\nfull avg10=16.40 avg60=14.17 avg300=16.55 total=1323315087",
+          "cpuTicks": [
+            1317189,
+            44230,
+            879951,
+            12372719,
+            2119779,
+            95286,
+            46752,
+            0,
+            46263,
+            0
+          ]
+        },
+        "resourcesAfter": {
+          "loadAverage": [
+            8.01171875,
+            11.86572265625,
+            11.14794921875
+          ],
+          "logicalCpus": 24,
+          "memory": {
+            "MemTotalKiB": 16091208,
+            "MemAvailableKiB": 3955236,
+            "SwapTotalKiB": 39459208,
+            "SwapFreeKiB": 21008816
+          },
+          "cpuPressure": "some avg10=0.00 avg60=0.10 avg300=0.47 total=55114102\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+          "memoryPressure": "some avg10=0.47 avg60=1.14 avg300=1.75 total=110140799\nfull avg10=0.37 avg60=1.08 avg300=1.68 total=106852071",
+          "ioPressure": "some avg10=18.62 avg60=16.18 avg300=19.86 total=1546431398\nfull avg10=16.40 avg60=14.17 avg300=16.55 total=1323325593",
+          "cpuTicks": [
+            1317203,
+            44230,
+            879956,
+            12372934,
+            2119784,
+            95287,
+            46752,
+            0,
+            46263,
+            0
+          ]
+        }
+      }
+    ],
+    "preflight": [
+      {
+        "label": "original",
+        "phase": "preflight",
+        "trial": 0,
+        "promptSha256": "8ee25ba9b96c713343e09f6f2cd24fe29d002627fc8c91485390b342a833f24a",
+        "valid": true,
+        "wallMs": 155.533518,
+        "prompt_eval_duration": 119925238,
+        "eval_duration": 0,
+        "load_duration": 30650066,
+        "total_duration": 154811105,
+        "prompt_eval_count": 1913,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "The",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 119.925238,
+        "decodeMs": 0.0,
+        "loadMs": 30.650066,
+        "totalMs": 154.811105,
+        "otherServerMs": 4.235801000000006
+      },
+      {
+        "label": "fold_1",
+        "phase": "preflight",
+        "trial": 0,
+        "promptSha256": "68de94d72dba82e0d15d735fd01532e59009aefcdfa0bfdc97e59a005d4b599f",
+        "valid": true,
+        "wallMs": 110.100304,
+        "prompt_eval_duration": 74609517,
+        "eval_duration": 0,
+        "load_duration": 32332825,
+        "total_duration": 109415494,
+        "prompt_eval_count": 759,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 74.609517,
+        "decodeMs": 0.0,
+        "loadMs": 32.332825,
+        "totalMs": 109.415494,
+        "otherServerMs": 2.473151999999999
+      },
+      {
+        "label": "fold_2",
+        "phase": "preflight",
+        "trial": 0,
+        "promptSha256": "6a4aa0ca05bcf89b10ae89a8887be05a4ef9542b5c2f9df1bf119d45af7c20f7",
+        "valid": true,
+        "wallMs": 78.087748,
+        "prompt_eval_duration": 44302944,
+        "eval_duration": 0,
+        "load_duration": 31135160,
+        "total_duration": 77475524,
+        "prompt_eval_count": 589,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 44.302944,
+        "decodeMs": 0.0,
+        "loadMs": 31.13516,
+        "totalMs": 77.475524,
+        "otherServerMs": 2.0374199999999973
+      },
+      {
+        "label": "fold_3",
+        "phase": "preflight",
+        "trial": 0,
+        "promptSha256": "76a52bf6c1b73dedfa855a5bb9cec74af678eb81c8152ced763d3d7adde6f66a",
+        "valid": true,
+        "wallMs": 95.039496,
+        "prompt_eval_duration": 62625701,
+        "eval_duration": 0,
+        "load_duration": 30062809,
+        "total_duration": 94540230,
+        "prompt_eval_count": 421,
+        "prompt_eval_cached_count": null,
+        "eval_count": 1,
+        "done": true,
+        "done_reason": "length",
+        "response": "[",
+        "omittedDurationFields": [
+          "eval_duration"
+        ],
+        "nonemptyOutput": true,
+        "visibleOutput": true,
+        "semanticCorrect": false,
+        "promptEvalMs": 62.625701,
+        "decodeMs": 0.0,
+        "loadMs": 30.062809,
+        "totalMs": 94.54023,
+        "otherServerMs": 1.8517199999999931
+      }
+    ],
+    "limits": [
+      "small local model, fixed one-token output; not a cloud-provider latency or semantic-quality result",
+      "prefix-disrupted requests share a nonce within each round and can still reuse that nonce and unchanged opening tokens",
+      "warm requests repeat each exact prompt immediately; only the second request is included in warm statistics",
+      "other host workloads are preserved; alternating forward/reverse order reduces but does not remove noise",
+      "adding the separately measured hook median is an estimate, not a timed Magpie end-to-end request",
+      "no electricity or provider bill is measured; local token savings are not dollar savings",
+      "Ollama includes the first generated token in prompt evaluation; omitted zero decode duration does not mean inference was skipped"
+    ],
+    "sources": [
+      "https://docs.ollama.com/api/generate",
+      "https://github.com/ollama/ollama/blob/v0.20.2/runner/llamarunner/cache.go",
+      "https://github.com/ollama/ollama/blob/v0.20.2/api/types.go#L529",
+      "https://github.com/ollama/ollama/blob/v0.20.2/runner/llamarunner/runner.go#L489"
+    ],
+    "warmup": {
+      "label": "warmup",
+      "phase": "warmup",
+      "trial": 0,
+      "promptSha256": "9723a6763f1a6a308eccb3ebf360f4addf53daf67fcfa1c464352a7d5a6aea78",
+      "valid": true,
+      "wallMs": 2049.243271,
+      "prompt_eval_duration": 42878028,
+      "eval_duration": 0,
+      "load_duration": 2004331287,
+      "total_duration": 2048444889,
+      "prompt_eval_count": 11,
+      "prompt_eval_cached_count": null,
+      "eval_count": 1,
+      "done": true,
+      "done_reason": "length",
+      "response": "\n",
+      "omittedDurationFields": [
+        "eval_duration"
+      ],
+      "nonemptyOutput": true,
+      "visibleOutput": false,
+      "semanticCorrect": false,
+      "promptEvalMs": 42.878028,
+      "decodeMs": 0.0,
+      "loadMs": 2004.331287,
+      "totalMs": 2048.444889,
+      "otherServerMs": 1.235573999999815
+    },
+    "loadedPs": {
+      "models": [
+        {
+          "name": "smollm2:135m",
+          "model": "smollm2:135m",
+          "size": 465315072,
+          "digest": "9077fe9d2ae1a4a41a868836b56b8163731a8fe16621397028c2c76f838c6907",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "llama",
+            "families": [
+              "llama"
+            ],
+            "parameter_size": "134.52M",
+            "quantization_level": "F16"
+          },
+          "expires_at": "2026-10-26T17:52:08.754977263+08:00",
+          "size_vram": 465315072,
+          "context_length": 4096
+        }
+      ]
+    },
+    "summaries": {
+      "prefix-disrupted": {
+        "original": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "The": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 173.778956,
+            "min": 164.038267,
+            "max": 206.987394
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 139.916843,
+            "min": 129.83856,
+            "max": 168.169799
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 31.318732,
+            "min": 29.184659,
+            "max": 36.623939
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 173.183828,
+            "min": 163.005969,
+            "max": 206.247217
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 3.9827499999999922,
+            "min": 3.642442000000024,
+            "max": 4.5869740000000085
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 1913,
+            "min": 1911,
+            "max": 1915
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        },
+        "fold_1": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "[": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 88.062732,
+            "min": 59.310209,
+            "max": 105.050032
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 55.378451,
+            "min": 29.473719,
+            "max": 65.169432
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 29.739147,
+            "min": 27.101083,
+            "max": 36.933194
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 87.470246,
+            "min": 58.731804,
+            "max": 104.42965
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 2.3270239999999944,
+            "min": 2.1570019999999985,
+            "max": 3.1319859999999977
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 759,
+            "min": 757,
+            "max": 761
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        },
+        "fold_2": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "[": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 77.129823,
+            "min": 42.459215,
+            "max": 97.981156
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 41.71753,
+            "min": 10.135253,
+            "max": 61.071615
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 31.892636,
+            "min": 27.724991,
+            "max": 33.58047
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 76.357221,
+            "min": 41.763039,
+            "max": 97.286824
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 2.634738999999996,
+            "min": 1.8103939999999987,
+            "max": 2.7470549999999996
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 588,
+            "min": 586,
+            "max": 590
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        },
+        "fold_3": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "[": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 82.774272,
+            "min": 41.399134,
+            "max": 157.600625
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 41.653858,
+            "min": 10.920048,
+            "max": 53.761212
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 33.870999,
+            "min": 27.391085,
+            "max": 128.625293
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 81.907593,
+            "min": 40.389865,
+            "max": 155.954818
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 2.0787319999999987,
+            "min": 1.7619740000000021,
+            "max": 7.804875999999979
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 422,
+            "min": 420,
+            "max": 424
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        }
+      },
+      "warm": {
+        "original": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "The": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 52.319949,
+            "min": 42.102649,
+            "max": 78.575844
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 19.053595,
+            "min": 7.751392,
+            "max": 24.725038
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 30.91002,
+            "min": 26.933809,
+            "max": 52.685373
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 51.741647,
+            "min": 41.166183,
+            "max": 77.597763
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 3.4041500000000013,
+            "min": 3.321509999999993,
+            "max": 5.858795000000001
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 1914,
+            "min": 1910,
+            "max": 1916
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        },
+        "fold_1": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "[": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 39.243244,
+            "min": 35.583055,
+            "max": 85.512234
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 5.132095,
+            "min": 3.951254,
+            "max": 48.189237
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 30.7774,
+            "min": 28.404918,
+            "max": 33.91686
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 38.681245,
+            "min": 34.852976,
+            "max": 84.704313
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 2.463611,
+            "min": 2.160776999999996,
+            "max": 2.5982160000000007
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 760,
+            "min": 756,
+            "max": 762
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        },
+        "fold_2": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "[": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 58.258548,
+            "min": 36.910024,
+            "max": 61.978861
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 25.100895,
+            "min": 3.114119,
+            "max": 29.757569
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 30.503847,
+            "min": 28.882605,
+            "max": 45.00899
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 57.500555,
+            "min": 35.840786,
+            "max": 61.329725
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 1.8958129999999969,
+            "min": 1.7667050000000017,
+            "max": 2.230008999999999
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 589,
+            "min": 585,
+            "max": 591
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        },
+        "fold_3": {
+          "attempts": 5,
+          "validRuns": 5,
+          "errors": 0,
+          "nonemptyOutputs": 5,
+          "visibleOutputs": 5,
+          "oneOutputToken": 5,
+          "semanticCorrectOutputs": 0,
+          "semanticAssessment": "exact stripped output match",
+          "outputCounts": {
+            "[": 5
+          },
+          "wallMs": {
+            "samples": 5,
+            "median": 44.586731,
+            "min": 36.660568,
+            "max": 68.70185
+          },
+          "promptEvalMs": {
+            "samples": 5,
+            "median": 9.97226,
+            "min": 5.935714,
+            "max": 34.985825
+          },
+          "decodeMs": {
+            "samples": 5,
+            "median": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "loadMs": {
+            "samples": 5,
+            "median": 30.934303,
+            "min": 28.584754,
+            "max": 32.528783
+          },
+          "totalMs": {
+            "samples": 5,
+            "median": 43.900865,
+            "min": 35.971058,
+            "max": 68.053598
+          },
+          "otherServerMs": {
+            "samples": 5,
+            "median": 1.4505899999999983,
+            "min": 1.3998220000000074,
+            "max": 1.6740869999999966
+          },
+          "prompt_eval_count": {
+            "samples": 5,
+            "median": 423,
+            "min": 419,
+            "max": 425
+          },
+          "eval_count": {
+            "samples": 5,
+            "median": 1,
+            "min": 1,
+            "max": 1
+          },
+          "cachedInputTokens": {
+            "samples": 0,
+            "median": null,
+            "min": null,
+            "max": null
+          },
+          "cacheObservability": "no cached-token counter from this server; repeated-input timing is evidence only"
+        }
+      }
+    },
+    "comparisons": {
+      "prefix-disrupted": {
+        "fold_1": {
+          "medianWallSavingMs": 85.716224,
+          "medianWallSavingPercent": 49.324858413811626,
+          "medianWallSpeedup": 1.9733541312345386,
+          "promptTokensRemoved": 1154,
+          "medianPromptEvalSavingMs": 84.538392,
+          "medianDecodeSavingMs": 0.0,
+          "verdict": "faster with non-overlapping observed ranges",
+          "estimatedWallPlusSeparateHookMedianMs": 89.843048,
+          "estimatedSavingAfterSeparateHookMs": 83.935908,
+          "hookCombinationIsEstimate": true
+        },
+        "fold_2": {
+          "medianWallSavingMs": 96.64913299999999,
+          "medianWallSavingPercent": 55.61613167937318,
+          "medianWallSpeedup": 2.25307085172489,
+          "promptTokensRemoved": 1325,
+          "medianPromptEvalSavingMs": 98.199313,
+          "medianDecodeSavingMs": 0.0,
+          "verdict": "faster with non-overlapping observed ranges",
+          "estimatedWallPlusSeparateHookMedianMs": 78.910139,
+          "estimatedSavingAfterSeparateHookMs": 94.86881699999999,
+          "hookCombinationIsEstimate": true
+        },
+        "fold_3": {
+          "medianWallSavingMs": 91.004684,
+          "medianWallSavingPercent": 52.36806923848708,
+          "medianWallSpeedup": 2.0994320070854866,
+          "promptTokensRemoved": 1491,
+          "medianPromptEvalSavingMs": 98.262985,
+          "medianDecodeSavingMs": 0.0,
+          "verdict": "faster with non-overlapping observed ranges",
+          "estimatedWallPlusSeparateHookMedianMs": 84.554588,
+          "estimatedSavingAfterSeparateHookMs": 89.224368,
+          "hookCombinationIsEstimate": true
+        }
+      },
+      "warm": {
+        "fold_1": {
+          "medianWallSavingMs": 13.076705000000004,
+          "medianWallSavingPercent": 24.9937265802763,
+          "medianWallSpeedup": 1.3332218151995794,
+          "promptTokensRemoved": 1154,
+          "medianPromptEvalSavingMs": 13.921500000000002,
+          "medianDecodeSavingMs": 0.0,
+          "verdict": "ranges overlap; median difference is descriptive",
+          "estimatedWallPlusSeparateHookMedianMs": 41.023559999999996,
+          "estimatedSavingAfterSeparateHookMs": 11.296389000000005,
+          "hookCombinationIsEstimate": true
+        },
+        "fold_2": {
+          "medianWallSavingMs": -5.938598999999996,
+          "medianWallSavingPercent": -11.350544321058106,
+          "medianWallSpeedup": 0.8980647612432772,
+          "promptTokensRemoved": 1325,
+          "medianPromptEvalSavingMs": -6.0473,
+          "medianDecodeSavingMs": 0.0,
+          "verdict": "ranges overlap; median difference is descriptive",
+          "estimatedWallPlusSeparateHookMedianMs": 60.038864,
+          "estimatedSavingAfterSeparateHookMs": -7.7189149999999955,
+          "hookCombinationIsEstimate": true
+        },
+        "fold_3": {
+          "medianWallSavingMs": 7.733218000000001,
+          "medianWallSavingPercent": 14.78062985114913,
+          "medianWallSpeedup": 1.173442139097392,
+          "promptTokensRemoved": 1491,
+          "medianPromptEvalSavingMs": 9.081335000000001,
+          "medianDecodeSavingMs": 0.0,
+          "verdict": "ranges overlap; median difference is descriptive",
+          "estimatedWallPlusSeparateHookMedianMs": 46.367047,
+          "estimatedSavingAfterSeparateHookMs": 5.952902000000002,
+          "hookCombinationIsEstimate": true
+        }
+      }
+    },
+    "limiterEvidence": {
+      "dominantBaselineServerComponent": "promptEvalMs",
+      "baselineComponentMedianMs": 139.916843,
+      "baselineServerMedianMs": 173.183828,
+      "independentProcessProfiles": "profileRuns; Ollama process CPU deltas and service-side prefill/decode/load timers",
+      "loadedPlacement": {
+        "models": [
+          {
+            "name": "smollm2:135m",
+            "model": "smollm2:135m",
+            "size": 465315072,
+            "digest": "9077fe9d2ae1a4a41a868836b56b8163731a8fe16621397028c2c76f838c6907",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "llama",
+              "families": [
+                "llama"
+              ],
+              "parameter_size": "134.52M",
+              "quantization_level": "F16"
+            },
+            "expires_at": "2026-10-26T17:52:08.754977263+08:00",
+            "size_vram": 465315072,
+            "context_length": 4096
+          }
+        ]
+      }
+    },
+    "errors": 0,
+    "result": "passed",
+    "hookMedianMs": 1.7803159999999991,
+    "finalResources": {
+      "loadAverage": [
+        8.01171875,
+        11.86572265625,
+        11.14794921875
+      ],
+      "logicalCpus": 24,
+      "memory": {
+        "MemTotalKiB": 16091208,
+        "MemAvailableKiB": 3955236,
+        "SwapTotalKiB": 39459208,
+        "SwapFreeKiB": 21008816
+      },
+      "cpuPressure": "some avg10=0.00 avg60=0.10 avg300=0.47 total=55114102\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0",
+      "memoryPressure": "some avg10=0.47 avg60=1.14 avg300=1.75 total=110140799\nfull avg10=0.37 avg60=1.08 avg300=1.68 total=106852071",
+      "ioPressure": "some avg10=18.62 avg60=16.18 avg300=19.86 total=1546431398\nfull avg10=16.40 avg60=14.17 avg300=16.55 total=1323325593",
+      "cpuTicks": [
+        1317203,
+        44230,
+        879956,
+        12372934,
+        2119784,
+        95287,
+        46752,
+        0,
+        46263,
+        0
+      ]
+    },
+    "unloadReply": {
+      "model": "smollm2:135m",
+      "created_at": "2026-10-26T09:51:14.874529899Z",
+      "response": "",
+      "done": true,
+      "done_reason": "unload"
+    },
+    "unloadedOnlyNewlyLoadedSmallModel": true,
+    "finalPs": {
+      "models": []
+    },
+    "finishedAt": "2026-10-26T09:51:15.378622+00:00",
+    "inputFileSha256": "afd2c0d0e4d0af95006100aed2bebff62a3076e54fc37562a97db6c20154a7be",
+    "warmCacheEvidence": {
+      "original": {
+        "pairs": [
+          {
+            "trial": 0,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 121.616079,
+            "repeatPromptEvalMs": 19.053595,
+            "promptEvalSavingMs": 102.562484
+          },
+          {
+            "trial": 1,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 156.356532,
+            "repeatPromptEvalMs": 21.478504,
+            "promptEvalSavingMs": 134.87802799999997
+          },
+          {
+            "trial": 2,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 137.653774,
+            "repeatPromptEvalMs": 24.725038,
+            "promptEvalSavingMs": 112.928736
+          },
+          {
+            "trial": 3,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 165.605007,
+            "repeatPromptEvalMs": 7.751392,
+            "promptEvalSavingMs": 157.853615
+          },
+          {
+            "trial": 4,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 135.176255,
+            "repeatPromptEvalMs": 9.052226,
+            "promptEvalSavingMs": 126.124029
+          }
+        ],
+        "promptEvalSavingMs": {
+          "samples": 5,
+          "median": 126.124029,
+          "min": 102.562484,
+          "max": 157.853615
+        },
+        "interpretation": "immediate identical prompt repeat; duration difference supports cache effects but is not an exact cached-token count"
+      },
+      "fold_1": {
+        "pairs": [
+          {
+            "trial": 0,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 56.652453,
+            "repeatPromptEvalMs": 48.189237,
+            "promptEvalSavingMs": 8.463216000000003
+          },
+          {
+            "trial": 1,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 37.424704,
+            "repeatPromptEvalMs": 18.923023,
+            "promptEvalSavingMs": 18.501680999999998
+          },
+          {
+            "trial": 2,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 67.402373,
+            "repeatPromptEvalMs": 3.991638,
+            "promptEvalSavingMs": 63.410734999999995
+          },
+          {
+            "trial": 3,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 27.080948,
+            "repeatPromptEvalMs": 5.132095,
+            "promptEvalSavingMs": 21.948853
+          },
+          {
+            "trial": 4,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 70.224632,
+            "repeatPromptEvalMs": 3.951254,
+            "promptEvalSavingMs": 66.273378
+          }
+        ],
+        "promptEvalSavingMs": {
+          "samples": 5,
+          "median": 21.948853,
+          "min": 8.463216000000003,
+          "max": 66.273378
+        },
+        "interpretation": "immediate identical prompt repeat; duration difference supports cache effects but is not an exact cached-token count"
+      },
+      "fold_2": {
+        "pairs": [
+          {
+            "trial": 0,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 16.221932,
+            "repeatPromptEvalMs": 25.100895,
+            "promptEvalSavingMs": -8.878963000000002
+          },
+          {
+            "trial": 1,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 55.077362,
+            "repeatPromptEvalMs": 3.179682,
+            "promptEvalSavingMs": 51.89768
+          },
+          {
+            "trial": 2,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 33.353077,
+            "repeatPromptEvalMs": 3.114119,
+            "promptEvalSavingMs": 30.238958
+          },
+          {
+            "trial": 3,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 20.445071,
+            "repeatPromptEvalMs": 27.246131,
+            "promptEvalSavingMs": -6.80106
+          },
+          {
+            "trial": 4,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 41.34328,
+            "repeatPromptEvalMs": 29.757569,
+            "promptEvalSavingMs": 11.585711
+          }
+        ],
+        "promptEvalSavingMs": {
+          "samples": 5,
+          "median": 11.585711,
+          "min": -8.878963000000002,
+          "max": 51.89768
+        },
+        "interpretation": "immediate identical prompt repeat; duration difference supports cache effects but is not an exact cached-token count"
+      },
+      "fold_3": {
+        "pairs": [
+          {
+            "trial": 0,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 21.968521,
+            "repeatPromptEvalMs": 31.958809,
+            "promptEvalSavingMs": -9.990288
+          },
+          {
+            "trial": 1,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 39.014284,
+            "repeatPromptEvalMs": 5.935714,
+            "promptEvalSavingMs": 33.078570000000006
+          },
+          {
+            "trial": 2,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 32.990896,
+            "repeatPromptEvalMs": 8.319892,
+            "promptEvalSavingMs": 24.671004
+          },
+          {
+            "trial": 3,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 55.91885,
+            "repeatPromptEvalMs": 34.985825,
+            "promptEvalSavingMs": 20.933025
+          },
+          {
+            "trial": 4,
+            "identicalPromptHash": true,
+            "identicalInputCount": true,
+            "primerPromptEvalMs": 20.067116,
+            "repeatPromptEvalMs": 9.97226,
+            "promptEvalSavingMs": 10.094855999999998
+          }
+        ],
+        "promptEvalSavingMs": {
+          "samples": 5,
+          "median": 20.933025,
+          "min": -9.990288,
+          "max": 33.078570000000006
+        },
+        "interpretation": "immediate identical prompt repeat; duration difference supports cache effects but is not an exact cached-token count"
+      }
+    },
+    "allGenerationErrors": 0,
+    "measuredRequestCount": 40,
+    "semanticCorrectOutputs": 0,
+    "analysisNote": "Warm cache and aggregate counts computed from preserved raw runs; no new inference requests made during postprocessing.",
+    "expectedOutput": "OK"
+  },
+  "economics": {
+    "small": {
+      "schema_version": 1,
+      "generated_at_utc": "2026-10-26T09:49:04.757399+00:00",
+      "measurement": {
+        "tokenizer": "o200k_base",
+        "tiktoken_version": "0.14.0",
+        "token_scope": "Exact BPE count of the supplied text, not complete API/provider input.",
+        "provider_complete_billable_input_known": false,
+        "provider_accounting_certificate": false,
+        "marking_output_data_supplied_for_every_fold": true,
+        "timing_scope": "Single local text-encoding sample; not model prefill, TTFT, or generation latency.",
+        "financial_precision": "Python Decimal; exact decimal tariff arithmetic, strictly positive threshold, no float-money comparisons."
+      },
+      "text_measurements": [
+        {
+          "label": "original",
+          "text_bpe_tokens": 1745,
+          "utf8_bytes": 9048,
+          "unicode_codepoints": 9048,
+          "bpe_encoding_elapsed_ms_single_sample": 0.354701,
+          "mark_output_text_tokens_this_step": 0,
+          "mark_output_count_source": "not_supplied_assumed_zero",
+          "tokens_removed_vs_original": 0,
+          "token_reduction_vs_original_percent": "0.000000",
+          "tokens_removed_vs_previous": 0,
+          "token_reduction_vs_previous_percent": "0.000000",
+          "utf8_reduction_vs_original_percent": "0.000000"
+        },
+        {
+          "label": "fold_1",
+          "text_bpe_tokens": 641,
+          "utf8_bytes": 3047,
+          "unicode_codepoints": 3047,
+          "bpe_encoding_elapsed_ms_single_sample": 0.121958,
+          "mark_output_text_tokens_this_step": 416,
+          "mark_output_count_source": "o200k_base_text",
+          "tokens_removed_vs_original": 1104,
+          "token_reduction_vs_original_percent": "63.266476",
+          "tokens_removed_vs_previous": 1104,
+          "token_reduction_vs_previous_percent": "63.266476",
+          "utf8_reduction_vs_original_percent": "66.324050"
+        },
+        {
+          "label": "fold_2",
+          "text_bpe_tokens": 471,
+          "utf8_bytes": 2047,
+          "unicode_codepoints": 2047,
+          "bpe_encoding_elapsed_ms_single_sample": 0.090078,
+          "mark_output_text_tokens_this_step": 246,
+          "mark_output_count_source": "o200k_base_text",
+          "tokens_removed_vs_original": 1274,
+          "token_reduction_vs_original_percent": "73.008596",
+          "tokens_removed_vs_previous": 170,
+          "token_reduction_vs_previous_percent": "26.521061",
+          "utf8_reduction_vs_original_percent": "77.376216"
+        },
+        {
+          "label": "fold_3",
+          "text_bpe_tokens": 304,
+          "utf8_bytes": 1065,
+          "unicode_codepoints": 1065,
+          "bpe_encoding_elapsed_ms_single_sample": 0.069383,
+          "mark_output_text_tokens_this_step": 80,
+          "mark_output_count_source": "o200k_base_text",
+          "tokens_removed_vs_original": 1441,
+          "token_reduction_vs_original_percent": "82.578797",
+          "tokens_removed_vs_previous": 167,
+          "token_reduction_vs_previous_percent": "35.456476",
+          "utf8_reduction_vs_original_percent": "88.229443"
+        }
+      ],
+      "interpretation": [
+        "The first prompt is the original; later prompts are successive actual representations supplied by the caller.",
+        "Adjacent-layer and original-to-layer comparisons are alternative views of one hypothetical next input request. Never add their savings together.",
+        "Incremental comparisons charge only the current marking output; original-to-layer comparisons charge cumulative marking output. Neither view sums hypothetical savings from earlier requests.",
+        "Configured unfold token budgets and the other-cost reserve are one comparison's total reserve, not a guarantee that future unfolding is bounded. Default zero means no such reserve was supplied.",
+        "Input-only H=0 deliberately excludes marking and unfolding. Use marking_plus_configured_reserves to include declared operation costs.",
+        "Marking-output costs are a projection if the supplied marking text was generated offline rather than by the priced model. No paid model requests are made by this script.",
+        "If marking output is not supplied its cost is assumed zero, not measured. Supplied tool-argument text also excludes any additional billed output wrappers or reasoning; budget those separately when applicable.",
+        "BPE counts exclude provider wrappers, tool rendering, hidden billable instructions, routing changes, and future middleware changes. They must not be submitted as strict whole-prompt certificates.",
+        "Token and byte reductions are measured payload reductions. They do not establish faster model inference, lower end-to-end latency, equivalent answer quality, or net savings across an unbounded future task.",
+        "Official prices are a dated reference snapshot, not a claim about the user's provider contract, gateway, or live invoice."
+      ],
+      "profiles": [
+        {
+          "name": "openai_gpt_4_1_price_snapshot",
+          "model": "gpt-4.1",
+          "price_kind": "Official standard text tariff snapshot; reference only, not a model recommendation.",
+          "source_model_status": "Model page marked Deprecated on the snapshot date.",
+          "cache_write_assumption": "Official guide lists no additional cache-write charge for earlier models; cold/write cost uses the ordinary input rate.",
+          "sources": [
+            "https://developers.openai.com/api/docs/models/gpt-4.1",
+            "https://developers.openai.com/api/docs/guides/prompt-caching"
+          ],
+          "source_checked_on": "2026-10-26",
+          "prices_usd_per_million": {
+            "ordinary_input": "2",
+            "cached_input": "0.5",
+            "maximum_miss_or_write": "2",
+            "output": "8"
+          },
+          "incremental_previous_layer_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 641,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 416,
+                "mark_output_cost_usd": "0.003328",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00349",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.006818",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.00349",
+                  "candidate_text_input_cost_usd": "0.001282",
+                  "gross_text_input_saving_usd": "0.002208",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.002208",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003328",
+                      "saving_usd": "-0.001120",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.006818",
+                      "saving_usd": "-0.004610",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0008725",
+                  "candidate_text_input_cost_usd": "0.001282",
+                  "gross_text_input_saving_usd": "-0.0004095",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0004095",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003328",
+                      "saving_usd": "-0.0037375",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.006818",
+                      "saving_usd": "-0.0072275",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_1",
+              "after": "fold_2",
+              "before_text_tokens": 641,
+              "after_text_tokens": 471,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 246,
+                "mark_output_cost_usd": "0.001968",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00349",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.005458",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.001282",
+                  "candidate_text_input_cost_usd": "0.000942",
+                  "gross_text_input_saving_usd": "0.000340",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000340",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.001968",
+                      "saving_usd": "-0.001628",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.005458",
+                      "saving_usd": "-0.005118",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0003205",
+                  "candidate_text_input_cost_usd": "0.000942",
+                  "gross_text_input_saving_usd": "-0.0006215",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0006215",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.001968",
+                      "saving_usd": "-0.0025895",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.005458",
+                      "saving_usd": "-0.0060795",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_2",
+              "after": "fold_3",
+              "before_text_tokens": 471,
+              "after_text_tokens": 304,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 80,
+                "mark_output_cost_usd": "0.00064",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00349",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00413",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.000942",
+                  "candidate_text_input_cost_usd": "0.000608",
+                  "gross_text_input_saving_usd": "0.000334",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000334",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00064",
+                      "saving_usd": "-0.000306",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00413",
+                      "saving_usd": "-0.003796",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0002355",
+                  "candidate_text_input_cost_usd": "0.000608",
+                  "gross_text_input_saving_usd": "-0.0003725",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0003725",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00064",
+                      "saving_usd": "-0.0010125",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00413",
+                      "saving_usd": "-0.0045025",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "cumulative_original_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 641,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 416,
+                "mark_output_cost_usd": "0.003328",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00349",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.006818",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.00349",
+                  "candidate_text_input_cost_usd": "0.001282",
+                  "gross_text_input_saving_usd": "0.002208",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.002208",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003328",
+                      "saving_usd": "-0.001120",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.006818",
+                      "saving_usd": "-0.004610",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0008725",
+                  "candidate_text_input_cost_usd": "0.001282",
+                  "gross_text_input_saving_usd": "-0.0004095",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0004095",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003328",
+                      "saving_usd": "-0.0037375",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.006818",
+                      "saving_usd": "-0.0072275",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_2",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 471,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 662,
+                "mark_output_cost_usd": "0.005296",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00349",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.008786",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.00349",
+                  "candidate_text_input_cost_usd": "0.000942",
+                  "gross_text_input_saving_usd": "0.002548",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.002548",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005296",
+                      "saving_usd": "-0.002748",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.008786",
+                      "saving_usd": "-0.006238",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0008725",
+                  "candidate_text_input_cost_usd": "0.000942",
+                  "gross_text_input_saving_usd": "-0.0000695",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0000695",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005296",
+                      "saving_usd": "-0.0053655",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.008786",
+                      "saving_usd": "-0.0088555",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_3",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 304,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 742,
+                "mark_output_cost_usd": "0.005936",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00349",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.009426",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.00349",
+                  "candidate_text_input_cost_usd": "0.000608",
+                  "gross_text_input_saving_usd": "0.002882",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.002882",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005936",
+                      "saving_usd": "-0.003054",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.009426",
+                      "saving_usd": "-0.006544",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0008725",
+                  "candidate_text_input_cost_usd": "0.000608",
+                  "gross_text_input_saving_usd": "0.0002645",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.0002645",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005936",
+                      "saving_usd": "-0.0056715",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.009426",
+                      "saving_usd": "-0.0091615",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "normalized_synthetic_strong_cache",
+          "model": null,
+          "price_kind": "Synthetic normalized tariff, not a provider quote.",
+          "cache_write_assumption": "Assumed maximum miss/write charge 1.25x ordinary input; assumed output charge 5x input. USD units are illustrative.",
+          "sources": [],
+          "source_checked_on": null,
+          "prices_usd_per_million": {
+            "ordinary_input": "1",
+            "cached_input": "0.1",
+            "maximum_miss_or_write": "1.25",
+            "output": "5"
+          },
+          "incremental_previous_layer_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 641,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 416,
+                "mark_output_cost_usd": "0.00208",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00218125",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00426125",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.001745",
+                  "candidate_text_input_cost_usd": "0.000641",
+                  "gross_text_input_saving_usd": "0.001104",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.001104",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00208",
+                      "saving_usd": "-0.000976",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00426125",
+                      "saving_usd": "-0.00315725",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0001745",
+                  "candidate_text_input_cost_usd": "0.00080125",
+                  "gross_text_input_saving_usd": "-0.00062675",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.00062675",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00208",
+                      "saving_usd": "-0.00270675",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00426125",
+                      "saving_usd": "-0.00488800",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_1",
+              "after": "fold_2",
+              "before_text_tokens": 641,
+              "after_text_tokens": 471,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 246,
+                "mark_output_cost_usd": "0.00123",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00218125",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00341125",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.000641",
+                  "candidate_text_input_cost_usd": "0.000471",
+                  "gross_text_input_saving_usd": "0.000170",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000170",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00123",
+                      "saving_usd": "-0.001060",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00341125",
+                      "saving_usd": "-0.00324125",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0000641",
+                  "candidate_text_input_cost_usd": "0.00058875",
+                  "gross_text_input_saving_usd": "-0.00052465",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.00052465",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00123",
+                      "saving_usd": "-0.00175465",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00341125",
+                      "saving_usd": "-0.00393590",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_2",
+              "after": "fold_3",
+              "before_text_tokens": 471,
+              "after_text_tokens": 304,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 80,
+                "mark_output_cost_usd": "0.0004",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00218125",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00258125",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.000471",
+                  "candidate_text_input_cost_usd": "0.000304",
+                  "gross_text_input_saving_usd": "0.000167",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000167",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.0004",
+                      "saving_usd": "-0.000233",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00258125",
+                      "saving_usd": "-0.00241425",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0000471",
+                  "candidate_text_input_cost_usd": "0.00038",
+                  "gross_text_input_saving_usd": "-0.0003329",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0003329",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.0004",
+                      "saving_usd": "-0.0007329",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00258125",
+                      "saving_usd": "-0.00291415",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "cumulative_original_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 641,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 416,
+                "mark_output_cost_usd": "0.00208",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00218125",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00426125",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.001745",
+                  "candidate_text_input_cost_usd": "0.000641",
+                  "gross_text_input_saving_usd": "0.001104",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.001104",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00208",
+                      "saving_usd": "-0.000976",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00426125",
+                      "saving_usd": "-0.00315725",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0001745",
+                  "candidate_text_input_cost_usd": "0.00080125",
+                  "gross_text_input_saving_usd": "-0.00062675",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.00062675",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00208",
+                      "saving_usd": "-0.00270675",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00426125",
+                      "saving_usd": "-0.00488800",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_2",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 471,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 662,
+                "mark_output_cost_usd": "0.00331",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00218125",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00549125",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.001745",
+                  "candidate_text_input_cost_usd": "0.000471",
+                  "gross_text_input_saving_usd": "0.001274",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.001274",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00331",
+                      "saving_usd": "-0.002036",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00549125",
+                      "saving_usd": "-0.00421725",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0001745",
+                  "candidate_text_input_cost_usd": "0.00058875",
+                  "gross_text_input_saving_usd": "-0.00041425",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.00041425",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00331",
+                      "saving_usd": "-0.00372425",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00549125",
+                      "saving_usd": "-0.00590550",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_3",
+              "before_text_tokens": 1745,
+              "after_text_tokens": 304,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 742,
+                "mark_output_cost_usd": "0.00371",
+                "unfold_input_tokens_reserved": 1745,
+                "unfold_input_cost_reserved_usd": "0.00218125",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.00589125",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.001745",
+                  "candidate_text_input_cost_usd": "0.000304",
+                  "gross_text_input_saving_usd": "0.001441",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.001441",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00371",
+                      "saving_usd": "-0.002269",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00589125",
+                      "saving_usd": "-0.00445025",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0001745",
+                  "candidate_text_input_cost_usd": "0.00038",
+                  "gross_text_input_saving_usd": "-0.0002055",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0002055",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00371",
+                      "saving_usd": "-0.0039155",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.00589125",
+                      "saving_usd": "-0.00609675",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "large": {
+      "schema_version": 1,
+      "generated_at_utc": "2026-10-26T09:49:05.044134+00:00",
+      "measurement": {
+        "tokenizer": "o200k_base",
+        "tiktoken_version": "0.14.0",
+        "token_scope": "Exact BPE count of the supplied text, not complete API/provider input.",
+        "provider_complete_billable_input_known": false,
+        "provider_accounting_certificate": false,
+        "marking_output_data_supplied_for_every_fold": true,
+        "timing_scope": "Single local text-encoding sample; not model prefill, TTFT, or generation latency.",
+        "financial_precision": "Python Decimal; exact decimal tariff arithmetic, strictly positive threshold, no float-money comparisons."
+      },
+      "text_measurements": [
+        {
+          "label": "original",
+          "text_bpe_tokens": 16955,
+          "utf8_bytes": 89158,
+          "unicode_codepoints": 89158,
+          "bpe_encoding_elapsed_ms_single_sample": 1.993892,
+          "mark_output_text_tokens_this_step": 0,
+          "mark_output_count_source": "not_supplied_assumed_zero",
+          "tokens_removed_vs_original": 0,
+          "token_reduction_vs_original_percent": "0.000000",
+          "tokens_removed_vs_previous": 0,
+          "token_reduction_vs_previous_percent": "0.000000",
+          "utf8_reduction_vs_original_percent": "0.000000"
+        },
+        {
+          "label": "fold_1",
+          "text_bpe_tokens": 637,
+          "utf8_bytes": 3048,
+          "unicode_codepoints": 3048,
+          "bpe_encoding_elapsed_ms_single_sample": 0.12275,
+          "mark_output_text_tokens_this_step": 418,
+          "mark_output_count_source": "o200k_base_text",
+          "tokens_removed_vs_original": 16318,
+          "token_reduction_vs_original_percent": "96.242996",
+          "tokens_removed_vs_previous": 16318,
+          "token_reduction_vs_previous_percent": "96.242996",
+          "utf8_reduction_vs_original_percent": "96.581350"
+        },
+        {
+          "label": "fold_2",
+          "text_bpe_tokens": 467,
+          "utf8_bytes": 2048,
+          "unicode_codepoints": 2048,
+          "bpe_encoding_elapsed_ms_single_sample": 0.058512,
+          "mark_output_text_tokens_this_step": 248,
+          "mark_output_count_source": "o200k_base_text",
+          "tokens_removed_vs_original": 16488,
+          "token_reduction_vs_original_percent": "97.245650",
+          "tokens_removed_vs_previous": 170,
+          "token_reduction_vs_previous_percent": "26.687598",
+          "utf8_reduction_vs_original_percent": "97.702954"
+        },
+        {
+          "label": "fold_3",
+          "text_bpe_tokens": 300,
+          "utf8_bytes": 1066,
+          "unicode_codepoints": 1066,
+          "bpe_encoding_elapsed_ms_single_sample": 0.040647,
+          "mark_output_text_tokens_this_step": 82,
+          "mark_output_count_source": "o200k_base_text",
+          "tokens_removed_vs_original": 16655,
+          "token_reduction_vs_original_percent": "98.230610",
+          "tokens_removed_vs_previous": 167,
+          "token_reduction_vs_previous_percent": "35.760171",
+          "utf8_reduction_vs_original_percent": "98.804370"
+        }
+      ],
+      "interpretation": [
+        "The first prompt is the original; later prompts are successive actual representations supplied by the caller.",
+        "Adjacent-layer and original-to-layer comparisons are alternative views of one hypothetical next input request. Never add their savings together.",
+        "Incremental comparisons charge only the current marking output; original-to-layer comparisons charge cumulative marking output. Neither view sums hypothetical savings from earlier requests.",
+        "Configured unfold token budgets and the other-cost reserve are one comparison's total reserve, not a guarantee that future unfolding is bounded. Default zero means no such reserve was supplied.",
+        "Input-only H=0 deliberately excludes marking and unfolding. Use marking_plus_configured_reserves to include declared operation costs.",
+        "Marking-output costs are a projection if the supplied marking text was generated offline rather than by the priced model. No paid model requests are made by this script.",
+        "If marking output is not supplied its cost is assumed zero, not measured. Supplied tool-argument text also excludes any additional billed output wrappers or reasoning; budget those separately when applicable.",
+        "BPE counts exclude provider wrappers, tool rendering, hidden billable instructions, routing changes, and future middleware changes. They must not be submitted as strict whole-prompt certificates.",
+        "Token and byte reductions are measured payload reductions. They do not establish faster model inference, lower end-to-end latency, equivalent answer quality, or net savings across an unbounded future task.",
+        "Official prices are a dated reference snapshot, not a claim about the user's provider contract, gateway, or live invoice."
+      ],
+      "profiles": [
+        {
+          "name": "openai_gpt_4_1_price_snapshot",
+          "model": "gpt-4.1",
+          "price_kind": "Official standard text tariff snapshot; reference only, not a model recommendation.",
+          "source_model_status": "Model page marked Deprecated on the snapshot date.",
+          "cache_write_assumption": "Official guide lists no additional cache-write charge for earlier models; cold/write cost uses the ordinary input rate.",
+          "sources": [
+            "https://developers.openai.com/api/docs/models/gpt-4.1",
+            "https://developers.openai.com/api/docs/guides/prompt-caching"
+          ],
+          "source_checked_on": "2026-10-26",
+          "prices_usd_per_million": {
+            "ordinary_input": "2",
+            "cached_input": "0.5",
+            "maximum_miss_or_write": "2",
+            "output": "8"
+          },
+          "incremental_previous_layer_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 637,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 418,
+                "mark_output_cost_usd": "0.003344",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.03391",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.037254",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.03391",
+                  "candidate_text_input_cost_usd": "0.001274",
+                  "gross_text_input_saving_usd": "0.032636",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.032636",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003344",
+                      "saving_usd": "0.029292",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.037254",
+                      "saving_usd": "-0.004618",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0084775",
+                  "candidate_text_input_cost_usd": "0.001274",
+                  "gross_text_input_saving_usd": "0.0072035",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.0072035",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003344",
+                      "saving_usd": "0.0038595",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.037254",
+                      "saving_usd": "-0.0300505",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_1",
+              "after": "fold_2",
+              "before_text_tokens": 637,
+              "after_text_tokens": 467,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 248,
+                "mark_output_cost_usd": "0.001984",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.03391",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.035894",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.001274",
+                  "candidate_text_input_cost_usd": "0.000934",
+                  "gross_text_input_saving_usd": "0.000340",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000340",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.001984",
+                      "saving_usd": "-0.001644",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.035894",
+                      "saving_usd": "-0.035554",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0003185",
+                  "candidate_text_input_cost_usd": "0.000934",
+                  "gross_text_input_saving_usd": "-0.0006155",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0006155",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.001984",
+                      "saving_usd": "-0.0025995",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.035894",
+                      "saving_usd": "-0.0365095",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_2",
+              "after": "fold_3",
+              "before_text_tokens": 467,
+              "after_text_tokens": 300,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 82,
+                "mark_output_cost_usd": "0.000656",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.03391",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.034566",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.000934",
+                  "candidate_text_input_cost_usd": "0.0006",
+                  "gross_text_input_saving_usd": "0.000334",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000334",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.000656",
+                      "saving_usd": "-0.000322",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.034566",
+                      "saving_usd": "-0.034232",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0002335",
+                  "candidate_text_input_cost_usd": "0.0006",
+                  "gross_text_input_saving_usd": "-0.0003665",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0003665",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.000656",
+                      "saving_usd": "-0.0010225",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.034566",
+                      "saving_usd": "-0.0349325",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "cumulative_original_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 637,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 418,
+                "mark_output_cost_usd": "0.003344",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.03391",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.037254",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.03391",
+                  "candidate_text_input_cost_usd": "0.001274",
+                  "gross_text_input_saving_usd": "0.032636",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.032636",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003344",
+                      "saving_usd": "0.029292",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.037254",
+                      "saving_usd": "-0.004618",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0084775",
+                  "candidate_text_input_cost_usd": "0.001274",
+                  "gross_text_input_saving_usd": "0.0072035",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.0072035",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.003344",
+                      "saving_usd": "0.0038595",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.037254",
+                      "saving_usd": "-0.0300505",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_2",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 467,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 666,
+                "mark_output_cost_usd": "0.005328",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.03391",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.039238",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.03391",
+                  "candidate_text_input_cost_usd": "0.000934",
+                  "gross_text_input_saving_usd": "0.032976",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.032976",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005328",
+                      "saving_usd": "0.027648",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.039238",
+                      "saving_usd": "-0.006262",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0084775",
+                  "candidate_text_input_cost_usd": "0.000934",
+                  "gross_text_input_saving_usd": "0.0075435",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.0075435",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005328",
+                      "saving_usd": "0.0022155",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.039238",
+                      "saving_usd": "-0.0316945",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_3",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 300,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 748,
+                "mark_output_cost_usd": "0.005984",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.03391",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.039894",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.03391",
+                  "candidate_text_input_cost_usd": "0.0006",
+                  "gross_text_input_saving_usd": "0.03331",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.03331",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005984",
+                      "saving_usd": "0.027326",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.039894",
+                      "saving_usd": "-0.006584",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0084775",
+                  "candidate_text_input_cost_usd": "0.0006",
+                  "gross_text_input_saving_usd": "0.0078775",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.0078775",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.005984",
+                      "saving_usd": "0.0018935",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.039894",
+                      "saving_usd": "-0.0320165",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "normalized_synthetic_strong_cache",
+          "model": null,
+          "price_kind": "Synthetic normalized tariff, not a provider quote.",
+          "cache_write_assumption": "Assumed maximum miss/write charge 1.25x ordinary input; assumed output charge 5x input. USD units are illustrative.",
+          "sources": [],
+          "source_checked_on": null,
+          "prices_usd_per_million": {
+            "ordinary_input": "1",
+            "cached_input": "0.1",
+            "maximum_miss_or_write": "1.25",
+            "output": "5"
+          },
+          "incremental_previous_layer_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 637,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 418,
+                "mark_output_cost_usd": "0.00209",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.02119375",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.02328375",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.016955",
+                  "candidate_text_input_cost_usd": "0.000637",
+                  "gross_text_input_saving_usd": "0.016318",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.016318",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00209",
+                      "saving_usd": "0.014228",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02328375",
+                      "saving_usd": "-0.00696575",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0016955",
+                  "candidate_text_input_cost_usd": "0.00079625",
+                  "gross_text_input_saving_usd": "0.00089925",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.00089925",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00209",
+                      "saving_usd": "-0.00119075",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02328375",
+                      "saving_usd": "-0.02238450",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_1",
+              "after": "fold_2",
+              "before_text_tokens": 637,
+              "after_text_tokens": 467,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 248,
+                "mark_output_cost_usd": "0.00124",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.02119375",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.02243375",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.000637",
+                  "candidate_text_input_cost_usd": "0.000467",
+                  "gross_text_input_saving_usd": "0.000170",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000170",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00124",
+                      "saving_usd": "-0.001070",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02243375",
+                      "saving_usd": "-0.02226375",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0000637",
+                  "candidate_text_input_cost_usd": "0.00058375",
+                  "gross_text_input_saving_usd": "-0.00052005",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.00052005",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00124",
+                      "saving_usd": "-0.00176005",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02243375",
+                      "saving_usd": "-0.02295380",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "fold_2",
+              "after": "fold_3",
+              "before_text_tokens": 467,
+              "after_text_tokens": 300,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 82,
+                "mark_output_cost_usd": "0.00041",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.02119375",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.02160375",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.000467",
+                  "candidate_text_input_cost_usd": "0.0003",
+                  "gross_text_input_saving_usd": "0.000167",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.000167",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00041",
+                      "saving_usd": "-0.000243",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02160375",
+                      "saving_usd": "-0.02143675",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0000467",
+                  "candidate_text_input_cost_usd": "0.000375",
+                  "gross_text_input_saving_usd": "-0.0003283",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "-0.0003283",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00041",
+                      "saving_usd": "-0.0007383",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02160375",
+                      "saving_usd": "-0.02193205",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "cumulative_original_to_current": [
+            {
+              "before": "original",
+              "after": "fold_1",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 637,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 418,
+                "mark_output_cost_usd": "0.00209",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.02119375",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.02328375",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.016955",
+                  "candidate_text_input_cost_usd": "0.000637",
+                  "gross_text_input_saving_usd": "0.016318",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.016318",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00209",
+                      "saving_usd": "0.014228",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02328375",
+                      "saving_usd": "-0.00696575",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0016955",
+                  "candidate_text_input_cost_usd": "0.00079625",
+                  "gross_text_input_saving_usd": "0.00089925",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.00089925",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00209",
+                      "saving_usd": "-0.00119075",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02328375",
+                      "saving_usd": "-0.02238450",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_2",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 467,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 666,
+                "mark_output_cost_usd": "0.00333",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.02119375",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.02452375",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.016955",
+                  "candidate_text_input_cost_usd": "0.000467",
+                  "gross_text_input_saving_usd": "0.016488",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.016488",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00333",
+                      "saving_usd": "0.013158",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02452375",
+                      "saving_usd": "-0.00803575",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0016955",
+                  "candidate_text_input_cost_usd": "0.00058375",
+                  "gross_text_input_saving_usd": "0.00111175",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.00111175",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00333",
+                      "saving_usd": "-0.00221825",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02452375",
+                      "saving_usd": "-0.02341200",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "before": "original",
+              "after": "fold_3",
+              "before_text_tokens": 16955,
+              "after_text_tokens": 300,
+              "minimum_saving_usd": "0",
+              "operation_budget_components": {
+                "mark_output_tokens": 748,
+                "mark_output_cost_usd": "0.00374",
+                "unfold_input_tokens_reserved": 16955,
+                "unfold_input_cost_reserved_usd": "0.02119375",
+                "unfold_output_tokens_reserved": 0,
+                "unfold_output_cost_reserved_usd": "0",
+                "other_cost_reserved_usd": "0",
+                "total_H_usd": "0.02493375",
+                "formula": "H = mark_output_tokens * output_price / 1e6 + unfold_input_tokens * miss_price / 1e6 + unfold_output_tokens * output_price / 1e6 + other_cost_reserve"
+              },
+              "scenarios": {
+                "both_ordinary_input_no_write_premium": {
+                  "baseline_text_input_cost_usd": "0.016955",
+                  "candidate_text_input_cost_usd": "0.0003",
+                  "gross_text_input_saving_usd": "0.016655",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.016655",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00374",
+                      "saving_usd": "0.012915",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02493375",
+                      "saving_usd": "-0.00827875",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                },
+                "baseline_all_cached_candidate_all_miss": {
+                  "baseline_text_input_cost_usd": "0.0016955",
+                  "candidate_text_input_cost_usd": "0.000375",
+                  "gross_text_input_saving_usd": "0.0013205",
+                  "budgets": {
+                    "input_only_H_zero": {
+                      "non_input_overhead_H_usd": "0",
+                      "saving_usd": "0.0013205",
+                      "condition_strictly_above_minimum": true
+                    },
+                    "marking_output_only": {
+                      "non_input_overhead_H_usd": "0.00374",
+                      "saving_usd": "-0.0024195",
+                      "condition_strictly_above_minimum": false
+                    },
+                    "marking_plus_configured_reserves": {
+                      "non_input_overhead_H_usd": "0.02493375",
+                      "saving_usd": "-0.02361325",
+                      "condition_strictly_above_minimum": false
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
