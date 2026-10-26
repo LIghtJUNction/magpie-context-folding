@@ -129,16 +129,17 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
                 name = f"{prefix}.{label}" if prefix else label
                 body = getattr(node, "body", None)
                 # Multiline suites retain their entire header, including decorators.
-                # One-line suites are archived as whole statements.
+                # One-line functions remain readable without automatic folding.
                 first = body[0].lineno if body and body[0].lineno > node.lineno else node.lineno
                 if body and first > node.lineno:
                     first = min([first] + [d.lineno for d in getattr(body[0], "decorator_list", [])])
-                add(name, type(node).__name__, first, node.end_lineno, lines[node.lineno - 1].strip())
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.end_lineno > node.lineno:
+                    add(name, type(node).__name__, first, node.end_lineno, lines[node.lineno - 1].strip())
             for child in ast.iter_child_nodes(node):
                 walk(child, name)
         walk(tree)
 
-    opened = None
+    opened: list[tuple[str, int, tuple[str, str]]] = []
     for number, line in enumerate(lines, 1):
         match = _comment_marker(line, marker_styles)
         if match is None:
@@ -151,16 +152,14 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
             raise ValueError("Malformed source annotation")
         operation, name = marker.groups()
         if operation == "begin":
-            if opened is not None:
-                raise ValueError("Nested explicit regions are unsupported")
-            opened = (name, number, style)
+            opened.append((name, number, style))
         else:
-            if opened is None or (name, style) != (opened[0], opened[2]):
+            if not opened or (name, style) != (opened[-1][0], opened[-1][2]):
                 raise ValueError("Unmatched source annotation")
-            if number > opened[1] + 1:
-                add(name, "explicit", opened[1] + 1, number - 1, name)
-            opened = None
-    if opened is not None:
+            _, first, _ = opened.pop()
+            if number > first + 1:
+                add(name, "explicit", first + 1, number - 1, name)
+    if opened:
         raise ValueError("Unterminated source annotation")
     # Equal and crossing spans are ambiguous. Prefer explicit equal spans;
     # reject crossing ranges before the caller performs any archive writes.
@@ -183,6 +182,93 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
             "regions": regions}
 
 
+def annotate_python_functions(text: str) -> dict[str, Any]:
+    """Add explicit fold markers around multiline functions in valid Python source."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        raise ValueError("Invalid Python source; annotations unchanged") from None
+    # Validate existing markers before planning any edits, including their nesting.
+    discover_source(text, "python")
+    lines = _source_lines(text)
+    endings = [re.search(r"\r\n$|\r$|\n$", line) for line in lines]
+    default_newline = next((match.group() for match in endings if match), "\n")
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+    candidates = []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    decorator_lines = [token.start[0] for token in tokenize.generate_tokens(io.StringIO(normalized).readline)
+                       if token.type == tokenize.OP and token.string == "@"
+                       and not lines[token.start[0] - 1][:token.start[1]].strip()]
+
+    def walk(node, prefix=""):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{prefix}.{child.name}" if prefix else child.name
+                if not isinstance(child, ast.ClassDef) and child.end_lineno > child.lineno:
+                    start = child.lineno
+                    if child.decorator_list:
+                        first_decorator = child.decorator_list[0].lineno
+                        start = max(line for line in decorator_lines if line <= first_decorator)
+                    candidates.append((start, child.end_lineno, name))
+                walk(child, name)
+            else:
+                walk(child, prefix)
+    walk(tree)
+
+    existing = []
+    stack = []
+    for number in sorted(_python_comment_lines(text)):
+        match = _comment_marker(lines[number - 1], [("#", "")])
+        if match:
+            operation, name = _MARKER.fullmatch(match[1]).groups()
+            if operation == "begin":
+                stack.append((number, name))
+            else:
+                begin_line, _ = stack.pop()
+                existing.append((name, begin_line, number))
+
+    added = []
+    events: dict[int, list[tuple[tuple[int, int], str, str]]] = {}
+    for start, end, name in candidates:
+        if any(mark_name == name and first == start - 1 and last > end
+               for mark_name, first, last in existing):
+            continue
+        indent = re.match(r"[ \t]*", lines[start - 1]).group()
+        begin_newline = endings[start - 1].group() if endings[start - 1] else default_newline
+        end_newline = endings[end - 1].group() if endings[end - 1] else default_newline
+        # At a shared boundary, close inner functions first, then open siblings.
+        events.setdefault(offsets[start - 1], []).append(
+            ((1, -end), f"{indent}# @context-fold begin {name}", begin_newline))
+        # Existing child regions can close after the AST's last statement.
+        # Enclose those markers too when adding a previously unmarked parent.
+        close_line = max([end] + [last for _, first, last in existing
+                                  if start <= first <= end < last])
+        events.setdefault(offsets[close_line], []).append(
+            ((0, -start), f"{indent}# @context-fold end {name}", end_newline))
+        added.append({"name": name, "startLine": start, "endLine": end})
+    chunks = []
+    cursor = 0
+    for offset, markers in sorted(events.items()):
+        chunks.append(text[cursor:offset])
+        ordered = sorted(markers, key=lambda event: event[0])
+        if offset and text[offset - 1] not in "\r\n":
+            chunks.append(ordered[0][2])
+        for index, (_, marker, newline) in enumerate(ordered):
+            chunks.append(marker)
+            if offset < len(text) or text.endswith(("\r", "\n")) or index < len(ordered) - 1:
+                chunks.append(newline)
+        cursor = offset
+    chunks.append(text[cursor:])
+    output = "".join(chunks)
+    # Comments must preserve Python semantics and remain usable by the source API.
+    if ast.dump(ast.parse(output)) != ast.dump(tree):
+        raise ValueError("Annotations would change Python syntax; annotations unchanged")
+    discover_source(output, "python")
+    return {"text": output, "added": added, "skippedNested": 0}
+
+
 def select_regions(regions: list[dict], selectors: Any) -> set[str]:
     if not isinstance(selectors, list) or len(selectors) > 10000 or any(not isinstance(s, str) or not s for s in selectors):
         raise ValueError("Invalid source selectors")
@@ -197,7 +283,10 @@ def select_regions(regions: list[dict], selectors: Any) -> set[str]:
     return selected
 
 
-def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bool = False) -> dict:
+def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bool = False,
+                   *, expand_mode: str = "recursive") -> dict:
+    if expand_mode not in {"single", "recursive"}:
+        raise ValueError("Invalid source expansion mode")
     regions = annotation["regions"]
     expanded = select_regions(regions, [] if expand is None else expand)
     by_id = {r["id"]: r for r in regions}
@@ -215,7 +304,7 @@ def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bo
             continue
         parent, preserve = region["id"], keep_all
         while parent:
-            preserve = preserve or parent in kept or parent in expanded
+            preserve = preserve or parent in kept or (expand_mode == "recursive" and parent in expanded)
             parent = by_id[parent]["parentId"]
         payload = text[region["start"]:region["end"]]
         if preserve or region["id"] in protected or len(region["reference"]) >= len(payload):

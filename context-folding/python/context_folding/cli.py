@@ -4,8 +4,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import stat
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any, BinaryIO
+
+from .annotations import annotate_python_functions
 
 from .core import Client, FoldingError
 
@@ -23,6 +29,7 @@ TOOL_SCHEMA = {
         "commentStyles": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["start"], "properties": {"start": {"type": "string", "minLength": 1, "maxLength": 64}, "end": {"type": "string", "maxLength": 64}}, "additionalProperties": False}},
         "keep": {"type": "array", "items": {"type": "string"}},
         "expand": {"type": "array", "items": {"type": "string"}},
+        "expandMode": {"type": "string", "enum": ["single", "recursive"]},
         "files": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object"}},
         "id": {"type": "string"},
         "ids": {"type": "array", "items": {"type": "string"}},
@@ -243,8 +250,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--state", help="SQLite state file (also accepted after the command)")
     parser.add_argument("--project-dir", help="Project settings discovery directory (default: current directory)")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("rpc", "mcp", "call", *ACTIONS):
+    for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
         sub = commands.add_parser(command)
+        if command == "annotate-functions":
+            sub.add_argument("path")
+            sub.add_argument("--language", default="python")
+            sub.add_argument("--apply", action="store_true", help="Atomically write annotations to the file")
+            continue
         sub.add_argument("--state", default=argparse.SUPPRESS, help="SQLite state file")
         sub.add_argument("--project-dir", default=argparse.SUPPRESS, help="Project settings discovery directory")
         if command in ("rpc", "mcp"):
@@ -255,6 +267,8 @@ def _parser() -> argparse.ArgumentParser:
         sub.add_argument("--scope", required=True)
         for name in ("id", "text", "summary", "role", "disposition", "query", "name", "description", "path", "mode", "body", "sort", "order", "language"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS)
+        sub.add_argument("--expand-mode", choices=("single", "recursive"), default=argparse.SUPPRESS,
+                         help="Expansion depth for read and read-source (default: recursive)")
         for name in ("ids", "protected", "keep", "expand"):
             sub.add_argument("--" + name, nargs="*", default=argparse.SUPPRESS)
         for name in ("source", "value", "config", "marks", "files", "comment-styles"):
@@ -287,14 +301,69 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
         if hasattr(args, key):
             request["commentStyles" if key == "comment_styles" else key] = input_value(getattr(args, key), key in json_fields)
     request["action"] = args.command
+    if "expand_mode" in request:
+        request["expandMode"] = request.pop("expand_mode")
     if args.command == "put" and "text" not in request:
         request["text"] = input_value("-", False)
     return request
 
 
+def _annotate_functions(path: str, language: str, apply: bool) -> dict[str, Any]:
+    if language.lower() not in {"python", "py"}:
+        raise ValueError("Function annotation is supported only for Python files with the AST parser")
+    target = Path(path)
+    initial_stat = target.lstat()
+    if not stat.S_ISREG(initial_stat.st_mode):
+        raise ValueError("Path must be a regular, non-symlink source file")
+    original = target.read_bytes()
+    text = original.decode("utf-8", errors="strict")
+    result = annotate_python_functions(text)
+    encoded = result["text"].encode("utf-8")
+    result.update({"path": str(target), "language": "python", "applied": False})
+    if apply and encoded != original:
+        def verify_unchanged() -> None:
+            try:
+                current = target.lstat()
+                if (not stat.S_ISREG(current.st_mode)
+                        or (current.st_dev, current.st_ino) != (initial_stat.st_dev, initial_stat.st_ino)
+                        or target.read_bytes() != original):
+                    raise ValueError("File changed during annotation; no changes written")
+                after_read = target.lstat()
+                if (not stat.S_ISREG(after_read.st_mode)
+                        or (after_read.st_dev, after_read.st_ino) != (initial_stat.st_dev, initial_stat.st_ino)):
+                    raise ValueError("File changed during annotation; no changes written")
+            except OSError as exc:
+                raise ValueError("File changed during annotation; no changes written") from exc
+
+        verify_unchanged()
+        mode = stat.S_IMODE(initial_stat.st_mode)
+        fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, mode)
+            verify_unchanged()
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        result["applied"] = True
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "annotate-functions":
+        try:
+            result = _annotate_functions(args.path, args.language, args.apply)
+            _emit({"result": result})
+            return 0
+        except (OSError, UnicodeError, ValueError) as exc:
+            _emit({"error": {"code": "annotation_failed", "message": str(exc)}})
+            return 1
     if not args.state:
         parser.error("--state is required")
     try:
