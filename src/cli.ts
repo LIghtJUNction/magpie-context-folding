@@ -4,6 +4,7 @@ import type { ParseArgsConfig } from 'node:util';
 import { loadConfig } from './config.js';
 import { diagnostic, execute } from './tool.js';
 import { statistics } from './statistics.js';
+import { formatTokenCount } from './metrics.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
@@ -60,11 +61,14 @@ async function main(): Promise<void> {
       const m = data.metrics;
       console.log([
         `统计范围：${data.scope === 'global-lifetime' ? '全局累计' : '当前会话'}`,
-        `已批准折叠：${m.foldBatchesApproved} 批，${m.itemsFolded} 个条目，其中 ${m.recursiveItemsFolded} 次递归折叠`,
+        `折叠次数：${data.summary.foldCount}`,
+        `查看详情次数：${data.summary.detailViewCount}`,
+        `累计折叠 token（估算）：${data.summary.foldedTokensDisplay}`,
+        `折叠条目：${m.itemsFolded} 个，其中 ${m.recursiveItemsFolded} 次递归折叠`,
         `成功转换请求：${m.successfulHookRequests}；失败：${m.failedHookRequests}；未核实：${m.unverifiedHookRequests}；仅提示：${m.guideOnlyRequests}`,
         `成功带折叠请求：${m.successfulFoldedRequests}；失败：${m.failedFoldedRequests}；未核实：${m.unverifiedFoldedRequests}`,
-        `累计净减少 token（估算）：${m.estimatedTokenDelta}`,
-        `已验证比较的 token 减少下界：${m.certifiedTokenDeltaLower}`,
+        `累计净减少 token（成功请求估算）：${formatTokenCount(m.estimatedTokenDelta)}`,
+        `已验证比较的 token 减少下界：${formatTokenCount(m.certifiedTokenDeltaLower)}`,
         `已验证输入费节省下界：USD ${data.money.certifiedInputSavingLowerUsd}（${m.certifiedComparisons} 次比较）`,
         `复用请求：${m.replayRequests} 次，未重复计入金额`,
         `展开读取：原文 ${m.originalReadCalls} 次、历史层 ${m.layerReadCalls} 次；恢复条目：${m.itemsRestored}`,

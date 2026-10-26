@@ -76,7 +76,6 @@ const accountingSchema = z.object({
 export const optionsSchema = z.object({
   enabled: z.boolean().default(true),
   thresholdTokens: z.number().int().positive().default(32_000),
-  contextWindowTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   keepRecentMessages: z.number().int().min(0).default(4),
   headChars: z.number().int().min(0).max(1000).default(160),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
@@ -92,7 +91,6 @@ export const parseOptions = (value: unknown): Options => optionsSchema.parse(val
 const foldingSchema = z.object({
   enabled: optionsSchema.shape.enabled,
   threshold_tokens: optionsSchema.shape.thresholdTokens,
-  context_window_tokens: optionsSchema.shape.contextWindowTokens,
   keep_recent_messages: optionsSchema.shape.keepRecentMessages,
   head_chars: optionsSchema.shape.headChars,
   max_session_bytes: optionsSchema.shape.maxSessionBytes,
@@ -242,11 +240,11 @@ function fromOptions(input: unknown): Table {
   const parsed = explicitFields(validated(optionsSchema.partial().extend({
     accounting: accountingSchema.partial().optional(), policy: policyOptionsLayerSchema.optional(),
   }), input ?? {}, '<overrides>'), input ?? {});
-  const { enabled, thresholdTokens, contextWindowTokens, keepRecentMessages, headChars, maxSessionBytes, minimumSavingUsd,
+  const { enabled, thresholdTokens, keepRecentMessages, headChars, maxSessionBytes, minimumSavingUsd,
     gatewayTimeoutMs, accounting, policy } = parsed;
   return {
     ...(policy ? { policy: renameKeys(policy, false) } : {}),
-    folding: { enabled, threshold_tokens: thresholdTokens, context_window_tokens: contextWindowTokens, keep_recent_messages: keepRecentMessages,
+    folding: { enabled, threshold_tokens: thresholdTokens, keep_recent_messages: keepRecentMessages,
       head_chars: headChars, max_session_bytes: maxSessionBytes, minimum_saving_usd: minimumSavingUsd },
     magpie: { gateway_timeout_ms: gatewayTimeoutMs,
       ...(accounting ? { accounting: { url: accounting.url, timeout_ms: accounting.timeoutMs } } : {}) },
@@ -311,7 +309,7 @@ export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Opt
   const f = config.folding;
   const m = config.magpie;
   return validated(optionsSchema, {
-    enabled: f.enabled, thresholdTokens: f.threshold_tokens, contextWindowTokens: f.context_window_tokens,
+    enabled: f.enabled, thresholdTokens: f.threshold_tokens,
     keepRecentMessages: f.keep_recent_messages,
     headChars: f.head_chars, maxSessionBytes: f.max_session_bytes, minimumSavingUsd: f.minimum_saving_usd,
     gatewayTimeoutMs: m.gateway_timeout_ms, policy: renameKeys(config.policy, true),

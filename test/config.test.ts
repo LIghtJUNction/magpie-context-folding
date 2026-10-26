@@ -48,24 +48,19 @@ test('global and project TOML settings', async () => {
     assert.deepEqual(sources, { global: f.global, project: null });
   }));
 
-  await sequential('optional capacity maps shared TOML and strict camelCase overrides', () => fixture(async f => {
-    assert.equal((await loadOptions({}, f.project)).contextWindowTokens, undefined);
+  await sequential('model capacity cannot be set by plugin options or shared TOML', () => fixture(async f => {
+    assert.ok(!Object.hasOwn(await loadOptions({}, f.project), 'contextWindowTokens'));
+    assert.throws(() => parseOptions({ contextWindowTokens: 128000 }));
+    await assert.rejects(loadOptions({ contextWindowTokens: 128000 }, f.project), ConfigError);
+    await assert.rejects(loadOptions({ context_window_tokens: 128000 }, f.project), ConfigError);
     await f.file(f.global, '[folding]\ncontext_window_tokens=128000\n');
-    assert.equal((await loadOptions({}, f.project)).contextWindowTokens, 128000);
+    await assert.rejects(loadOptions({}, f.project), ConfigError);
+    await rm(f.global);
     await f.file(join(f.project, '.context-folding.toml'), '[folding]\ncontext_window_tokens=1\n');
-    assert.equal((await loadOptions({}, f.project)).contextWindowTokens, 1);
-    assert.equal((await loadOptions({ contextWindowTokens: Number.MAX_SAFE_INTEGER }, f.project)).contextWindowTokens, Number.MAX_SAFE_INTEGER);
-    for (const contextWindowTokens of [true, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null]) {
-      await assert.rejects(loadOptions({ contextWindowTokens }, f.project), ConfigError);
-    }
-    for (const value of ['true', '0', '1.5', '9007199254740992']) {
-      await f.file(join(f.project, '.context-folding.toml'), `[folding]\ncontext_window_tokens=${value}\n`);
-      await assert.rejects(loadOptions({}, f.project), ConfigError);
-    }
+    await assert.rejects(loadOptions({}, f.project), ConfigError);
     await f.file(join(f.project, '.context-folding.toml'), '[folding]\ncontextWindowTokens=128000\n');
     await assert.rejects(loadOptions({}, f.project), ConfigError);
     await rm(join(f.project, '.context-folding.toml'));
-    await assert.rejects(loadOptions({ context_window_tokens: 128000 }, f.project), ConfigError);
     await assert.rejects(loadOptions({ 'secret-key-token': 'secret-value' }, f.project), (error: unknown) => {
       assert.ok(error instanceof ConfigError);
       assert.ok(!error.message.includes('secret-key-token'));

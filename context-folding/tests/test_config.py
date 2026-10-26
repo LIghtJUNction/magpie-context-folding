@@ -61,18 +61,17 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(self.project_path.exists())
         self.assertFalse(self.xdg.exists())
 
-    def test_optional_context_capacity_shared_toml_and_precedence(self):
+    def test_model_capacity_cannot_be_set_by_shared_configuration(self):
         self.assertNotIn("context_window_tokens", self.load()["folding"])
+        with self.assertRaises(ConfigError):
+            self.load({"folding": {"context_window_tokens": 128000}})
         self.write(self.global_path, "[folding]\ncontext_window_tokens=128000\n")
-        self.assertEqual(self.load()["folding"]["context_window_tokens"], 128000)
+        with self.assertRaises(ConfigError):
+            self.load()
+        self.global_path.unlink()
         self.write(self.project_path, "[folding]\ncontext_window_tokens=1\n")
-        self.assertEqual(self.load()["folding"]["context_window_tokens"], 1)
-        self.assertEqual(self.load({"folding": {"context_window_tokens": 9007199254740991}})
-                         ["folding"]["context_window_tokens"], 9007199254740991)
-        for value in ("true", "0", "1.0", "9007199254740992"):
-            self.write(self.project_path, f"[folding]\ncontext_window_tokens={value}\n")
-            with self.subTest(value=value), self.assertRaises(ConfigError):
-                self.load()
+        with self.assertRaises(ConfigError):
+            self.load()
 
     def test_global_location_and_home_fallback(self):
         self.assertEqual(global_config_path(), self.global_path)
@@ -180,7 +179,6 @@ class ConfigTests(unittest.TestCase):
         invalid = {
             "folding.enabled": [0, "true", None],
             "folding.threshold_tokens": [True, 0, -1, 1.0],
-            "folding.context_window_tokens": [True, False, 0, -1, 1.0, 2.5, 9007199254740992, None],
             "folding.keep_recent_messages": [False, -1, 2.5],
             "folding.head_chars": [-1, 1001, True, 10.0],
             "folding.max_session_bytes": [0, 67108865, False],

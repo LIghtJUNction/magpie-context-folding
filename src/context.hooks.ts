@@ -99,7 +99,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
     const options = await loadOptions(ctx.options, ctx.cwd);
     if (!options.enabled) return input;
     const withBudget = (request: Record<string, unknown>, guide = '') =>
-      appendBudget(request, ctx.protocol, options.contextWindowTokens, guide);
+      appendBudget(request, ctx.protocol, guide);
     // Hooks cannot register tools. Only hints are possible without advertised recovery.
     if (!JSON.stringify(body.tools ?? body.config ?? {}).includes('context_folding')) return withBudget(body);
     const spans = extractSpans(body, ctx.protocol);
@@ -278,6 +278,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       if (!proof.approved) return finish(baseline, existing.size);
       snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: changeCount,
+        foldedTokensEstimated: String(estimateTokens(withoutGuide) - estimateTokens(candidate)),
         recursiveItemsFolded: entryChanges.filter(change => change.entry.folded !== undefined).length
           + grouped.changes.filter(change => change.group.folded !== undefined).length,
       });

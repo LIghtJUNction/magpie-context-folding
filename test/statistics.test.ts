@@ -63,6 +63,10 @@ test('batch and recursive counters, response-confirmed money, deduplication, rea
     let metrics = (await store.readStats()).metrics;
     assert.equal(metrics.foldBatchesApproved, 1);
     assert.equal(metrics.itemsFolded, 2, 'one approval folds both items in the same batch');
+    const firstFoldedTokens = metrics.foldedTokensEstimated;
+    assert.equal(firstFoldedTokens, String(Math.ceil(Buffer.byteLength(JSON.stringify(body)) / 4)
+      - Math.ceil(Buffer.byteLength(JSON.stringify(first)) / 4)));
+    assert.ok(BigInt(firstFoldedTokens) > 0n);
     assert.equal(metrics.certifiedComparisons, 0, 'a planned fold must not earn money before completion');
     await onResponse({}, { ...firstContext, success: false, request: first });
     await onResponse({}, { ...firstContext, success: false, request: first });
@@ -73,6 +77,7 @@ test('batch and recursive counters, response-confirmed money, deduplication, rea
     await onResponse({}, { ...replayContext, success: true, request: replay });
     metrics = (await store.readStats()).metrics;
     assert.equal(metrics.replayRequests, 1);
+    assert.equal(metrics.foldedTokensEstimated, firstFoldedTokens, 'replaying a fold is not a new fold');
     assert.equal(metrics.certifiedComparisons, 0, 'a replay cannot reuse the old certificate as a fresh monetary gain');
 
     await mark('Checks passed. '.repeat(70).slice(0, 1000));
@@ -92,6 +97,7 @@ test('batch and recursive counters, response-confirmed money, deduplication, rea
     assert.equal(metrics.foldBatchesApproved, 3);
     assert.equal(metrics.itemsFolded, 6);
     assert.equal(metrics.recursiveItemsFolded, 4);
+    assert.ok(BigInt(metrics.foldedTokensEstimated) > BigInt(firstFoldedTokens));
     assert.equal(metrics.successfulFoldedRequests, 2);
     assert.equal(metrics.certifiedComparisons, 1);
     assert.ok(BigInt(metrics.savingNanoUsdLower) > 0n);
@@ -107,16 +113,24 @@ test('batch and recursive counters, response-confirmed money, deduplication, rea
     assert.equal(session.metrics.originalReadCalls, 1);
     assert.equal(session.metrics.layerReadCalls, 1);
     assert.equal(session.metrics.readChars, 15);
+    assert.equal(session.summary.foldCount, 3);
+    assert.equal(session.summary.detailViewCount, 2);
+    assert.equal(session.summary.foldedTokensEstimated, metrics.foldedTokensEstimated);
+    assert.match(session.summary.foldedTokensDisplay, /^\d+(?:\.\d+)?K$/);
     assert.equal(session.money.actualBillSavingUsd, null);
     const bytesBefore = (await stat(join(directory, 'state.sqlite'))).size;
     await execute({ action: 'stats' });
     await execute({ action: 'stats' });
+    await execute({ scope, action: 'read', id: 'missing-entry' });
+    const afterFailedRead = JSON.parse(await execute({ scope, action: 'stats' }));
+    assert.equal(afterFailedRead.summary.detailViewCount, 2);
     assert.equal((await stat(join(directory, 'state.sqlite'))).size, bytesBefore);
     await execute({ scope, action: 'mark', marks: ids.map(id => ({ id, disposition: 'keep' })) });
     await execute({ scope, action: 'forget' });
     const lifetime = JSON.parse(await execute({ action: 'stats' }));
     assert.equal(lifetime.metrics.foldBatchesApproved, 3);
     assert.equal(lifetime.metrics.itemsRestored, 2);
+    assert.deepEqual(lifetime.summary, session.summary);
     assert.equal(lifetime.money.certifiedInputSavingLowerUsd, session.money.certifiedInputSavingLowerUsd);
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);

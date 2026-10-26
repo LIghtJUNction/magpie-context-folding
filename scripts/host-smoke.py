@@ -168,7 +168,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     }]})
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
         "spec": str(project), "options": {
-            "thresholdTokens": 32, "contextWindowTokens": 200_000, "keepRecentMessages": 1, "headChars": 80,
+            "thresholdTokens": 32, "keepRecentMessages": 1, "headChars": 80,
             "minimumSavingUsd": 0.000001,
             "accounting": {"url": upstream + "/accounting", "timeoutMs": 2000},
         },
@@ -270,9 +270,9 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 complete = {**outgoing, "model": body["model"]}
                 estimated = (len(serialized(complete).encode()) + 3) // 4
                 assert int(hint.group(1)) == estimated, "budget did not include its own complete request bytes"
-                assert "Capacity: 200000 tokens (configured)" in serialized(outgoing)
-                assert f"used ratio estimate: {estimated / 200000 * 100:.2f}%" in serialized(outgoing)
-                assert f"remaining estimate: {max(0, 200000 - estimated)} tokens" in serialized(outgoing)
+                assert "Capacity:" not in serialized(outgoing)
+                assert "used ratio" not in serialized(outgoing)
+                assert "remaining estimate" not in serialized(outgoing)
                 return outgoing
 
             first = send()
@@ -390,7 +390,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert other["messages"][2]["content"] == original, "a mark leaked into another session"
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun", "billing": "SYNTHETIC_ACCOUNTING_ONLY",
-                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "configured budget includes itself, percentage and remaining", "default historical-layer read persistently restores original", "explicit foldable re-enables folding", "default paste persistently restores original", "unprofitable fold refused", "session isolation"],
+                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "self-inclusive request estimate without plugin-owned model capacity", "default historical-layer read persistently restores original", "explicit foldable re-enables folding", "default paste persistently restores original", "unprofitable fold refused", "session isolation"],
                 "originalChars": len(original), "foldedChars": len(folded["messages"][2]["content"]),
                 "accountingRequests": len(fixture.accounting), "status": status,
             }))

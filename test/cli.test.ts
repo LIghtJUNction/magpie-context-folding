@@ -78,6 +78,26 @@ test('CLI keeps recovery available with disabled or broken config and redacts ef
   });
 });
 
+test('stats shows folding, detail views and compact token totals with exact JSON values', async () => {
+  await fixture(async (scope, directory, invoke) => {
+    await new Store(join(directory, 'state')).recordMetrics(scope, {
+      foldBatchesApproved: 7, originalReadCalls: 2, layerReadCalls: 3,
+      foldedTokensEstimated: '1250000000',
+    });
+    const result = await invoke(['stats', '--scope', scope]);
+    assert.equal(result.code, 0, result.err);
+    assert.ok(result.out.includes('折叠次数：7'));
+    assert.ok(result.out.includes('查看详情次数：5'));
+    assert.ok(result.out.includes('累计折叠 token（估算）：1.25B'));
+    const json = await invoke(['stats', '--scope', scope, '--json']);
+    assert.equal(json.code, 0, json.err);
+    assert.deepEqual(JSON.parse(json.out).summary, {
+      foldCount: 7, detailViewCount: 5,
+      foldedTokensEstimated: '1250000000', foldedTokensDisplay: '1.25B',
+    });
+  });
+});
+
 test('CLI invalid commands and arguments use stderr, exit 1 and never leak supplied secrets', async () => {
   await fixture(async (scope, _directory, invoke) => {
     for (const args of [ ['unknown-private-secret'], ['read'], ['read', '--scope', scope, '--id', 'a', '--offset', '1.5'],

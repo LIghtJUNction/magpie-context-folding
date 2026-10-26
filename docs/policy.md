@@ -61,7 +61,7 @@ All prices and monetary amounts must be finite and nonnegative. Each price range
 
 ## What the calculation proves
 
-Use complete bodies including system text, tools, provider fields, folding markers, summaries, the self-inclusive context budget, and the folding guide. The budget's UTF-8-bytes/4 estimate is a display estimate, never tokenizer or billing evidence. Capacity is configured explicitly; unknown capacity stays unknown. A guide newly added by folding belongs in `after`; do not add it to `before` merely to cancel its cost. Unchanged prefixes remain part of both complete requests because rewriting history may change cache eligibility.
+Use complete bodies including system text, tools, provider fields, folding markers, summaries, the self-inclusive context budget, and the folding guide. The budget's UTF-8-bytes/4 estimate is a display estimate, never tokenizer or billing evidence. Model window capacity belongs to the host and current model, not plugin configuration; the plugin does not infer capacity or utilization. A guide newly added by folding belongs in `after`; do not add it to `before` merely to cancel its cost. Unchanged prefixes remain part of both complete requests because rewriting history may change cache eligibility.
 
 Let `B0` and `B1` be `Buffer.byteLength(JSON.stringify(before))` and the equivalent for `after`. Under the caller's configured assumptions:
 
