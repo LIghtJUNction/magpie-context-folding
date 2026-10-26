@@ -278,13 +278,20 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             folded = send()
             folded_text = serialized(folded)
             assert "middle-evidence-1000" not in folded_text, "marked historical assistant text was not folded"
-            assert original[:80] in folded["messages"][2]["content"], "fold lost the opening excerpt"
-            assert summary in folded_text, "fold lost the model-supplied summary"
+            representation = folded["messages"][2]["content"]
+            assert representation.startswith(f"[context-folding id={entry_id} role=assistant]\nSummary (agent-written): {summary}\n"), "fold did not lead with the attributed summary"
+            assert f"Original UTF-16: inline [0,80); archived [0,{len(original)})" in representation, "fold lost the original range"
+            assert "Opening: " + serialized(original[:80]) in representation, "fold lost the quoted opening excerpt"
             assert folded["messages"][0] == first["messages"][0], "system instruction changed"
             assert folded["messages"][1] == first["messages"][1], "opening request changed"
             assert folded["tools"] == first["tools"], "client tool declarations changed"
             assert folded["messages"][-1]["content"].startswith(messages[-1]["content"]), "current request changed"
             assert fixture.accounting, "fold bypassed the accounting certificate gate"
+            candidate = fixture.accounting[-1]["after"]
+            assert candidate["model"] == body["model"], f"unexpected hook model: {candidate['model']}"
+            assert folded["model"] == "m1", f"unexpected routed model: {folded['model']}"
+            assert {**candidate, "model": "m1"} == folded, "routed accounting candidate differs from the full upstream request"
+            assert fixture.accounting[-1]["before"] == body, "accounting baseline changed"
 
             # Magpie finishes response hooks asynchronously; wait for the actual
             # successful response rather than crediting the proposed fold.
@@ -362,7 +369,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert other["messages"][2]["content"] == original, "a mark leaked into another session"
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun", "billing": "SYNTHETIC_ACCOUNTING_ONLY",
-                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "opening and summary retained", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "keep restores outgoing original", "unprofitable fold refused", "session isolation"],
+                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "keep restores outgoing original", "unprofitable fold refused", "session isolation"],
                 "originalChars": len(original), "foldedChars": len(folded["messages"][2]["content"]),
                 "accountingRequests": len(fixture.accounting), "status": status,
             }))

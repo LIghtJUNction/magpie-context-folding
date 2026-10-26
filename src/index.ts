@@ -11,7 +11,7 @@ export async function ContextFoldingPlugin() {
           scope: { type: 'string', description: 'Session capability from context-folding scope=...; do not share.' },
           action: { type: 'string', enum: ['list', 'mark', 'read', 'paste', 'status', 'stats', 'forget'] },
           marks: { type: 'array', items: { type: 'object', properties: {
-            id: { type: 'string' }, disposition: { type: 'string', enum: ['foldable', 'keep', 'unmarked'] }, summary: { type: 'string' },
+            id: { type: 'string' }, disposition: { type: 'string', enum: ['foldable', 'keep', 'unmarked'] }, summary: { type: 'string', description: 'Brief supported state of this entry: goal/constraints/done/blocker/next/evidence as relevant. Label user quotes, assistant judgments and tool evidence; never infer authorization. Omit repetition, stale one-shot instructions and unknown fields. Archive holds details.' },
           }, required: ['id', 'disposition'], additionalProperties: false } },
           id: { type: 'string' }, layer: { type: 'string', description: 'original or a layer ID from list/read' },
           path: { type: 'string', description: 'paste: absolute path to a new file; parent must exist. Omit offset/limit for full text.' },

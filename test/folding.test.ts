@@ -7,16 +7,25 @@ import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
 import { extractSpans } from '../src/protocol.js';
-import { Store } from '../src/store.js';
+import { Store, digest } from '../src/store.js';
 
-async function fixture(run: (directory: string, url: string) => Promise<void>) {
+type AccountingRequest = { before: Record<string, unknown>; after: Record<string, unknown> };
+
+function chatSpans(value: unknown) {
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value));
+  return extractSpans(value as Record<string, unknown>, 'chat');
+}
+
+async function fixture(run: (directory: string, url: string, requests: AccountingRequest[]) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), 'context-folding-test-'));
   const previousDirectory = process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
   process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR = directory;
+  const requests: AccountingRequest[] = [];
   const server = createServer(async (request, response) => {
-    let text = '';
-    for await (const chunk of request) text += String(chunk);
-    const body = JSON.parse(text);
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    requests.push(body);
     response.setHeader('Content-Type', 'application/json');
     response.end(JSON.stringify({
       requestHash: body.requestHash, model: body.model, protocol: body.protocol,
@@ -30,7 +39,7 @@ async function fixture(run: (directory: string, url: string) => Promise<void>) {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
-  try { await run(directory, `http://127.0.0.1:${address.port}`); }
+  try { await run(directory, `http://127.0.0.1:${address.port}`, requests); }
   finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
     if (previousDirectory === undefined) delete process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
@@ -127,6 +136,86 @@ test('marking, threshold, nested folding, exact paginated restoration, keep and 
     await assert.rejects(new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot), /Unknown context scope/);
     const files = await readdir(directory);
     assert.deepEqual(files, ['state.sqlite'], 'no per-request files, copies, or journal leftovers');
+  });
+});
+
+test('summary-first folds preserve source roles, exact excerpt ranges and the full accounting candidate', async () => {
+  for (const [role, headChars, end] of [
+    ['user', 0, 0], ['assistant', 2, 1], ['tool', 3, 3], ['assistant', 6, 6],
+  ] as const) {
+    await fixture(async (directory, url, requests) => {
+      const text = 'A😀\n"\\' + oldText;
+      const history = role === 'tool' ? [
+        { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+        { role, tool_call_id: 'call_1', content: text },
+      ] : [{ role, content: text }];
+      const request = { ...body, messages: [body.messages[0]!, ...history, body.messages.at(-1)!] };
+      const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, headChars, accounting: { url } } };
+      await onRequest(request, ctx);
+      const scope = await scopeFor(directory);
+      const span = extractSpans(request, 'chat').find(span => span.text === text);
+      assert.ok(span);
+      const summary = 'Tool evidence: checks passed. Assistant judgment: this step is complete.';
+      await execute({ scope, action: 'mark', marks: [{ id: span.id, disposition: 'foldable', summary }] });
+      const folded = await onRequest(request, ctx);
+      const replacement = chatSpans(folded).find(item => item.messageIndex === span.messageIndex)?.text;
+      assert.equal(replacement, `[context-folding id=${span.id} role=${role}]\nSummary (agent-written): ${summary}\nOriginal UTF-16: inline [0,${end}); archived [0,${text.length})\nOpening: ${JSON.stringify(text.slice(0, end))}\nOriginal/layers: context_folding read id=${span.id}`);
+      assert.equal(requests.length, 1);
+      assert.deepEqual(requests[0]?.before, request);
+      assert.deepEqual(requests[0]?.after, folded, 'metadata and the entire guide must be charged');
+      assert.ok(JSON.stringify(requests[0]?.after).includes(`<context-folding scope=${scope}>`));
+      assert.equal(JSON.parse(await execute({ scope, action: 'read', id: span.id, limit: 6 })).text, text.slice(0, 6));
+    });
+  }
+});
+
+test('full representation must shrink even when the summary alone is shorter', async () => {
+  await fixture(async (directory, url, requests) => {
+    const text = 'Short historical text.';
+    const request = { ...body, messages: [{ role: 'assistant', content: text }, body.messages.at(-1)!] };
+    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, headChars: 1000, accounting: { url } } };
+    await onRequest(request, ctx);
+    const scope = await scopeFor(directory);
+    const id = extractSpans(request, 'chat')[0]!.id;
+    await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Done.' }] });
+    assert.equal(chatSpans(await onRequest(request, ctx))[0]?.text, text);
+    assert.equal(requests.length, 0, 'an expanding representation must not reach accounting');
+    assert.equal(JSON.parse(await execute({ scope, action: 'status' })).decision.reason, 'no-marked-smaller-candidates');
+    const entry = await new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot.entries.find(entry => entry.id === id));
+    assert.equal(entry?.folded, undefined);
+    assert.deepEqual(entry?.layers, []);
+  });
+});
+
+test('legacy layers replay unchanged and remain recoverable after a new summary-first fold', async () => {
+  await fixture(async (directory, url, requests) => {
+    await onRequest(body, context);
+    const scope = await scopeFor(directory);
+    const id = extractSpans(body, 'chat').find(span => span.text === oldText)!.id;
+    const summary = 'Legacy completed research. '.repeat(50);
+    const legacy = `[context-folding id=${id}]\nOpening: ${oldText.slice(0, 160)}\nSummary: ${summary}\nOriginal/layers: context_folding read id=${id}`;
+    const layerId = digest(JSON.stringify(legacy)).slice(0, 24);
+    await new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => {
+      const entry = snapshot.entries.find(entry => entry.id === id)!;
+      entry.mark = { disposition: 'foldable', summary };
+      entry.folded = legacy;
+      entry.layers.push({ id: layerId, text: legacy, previousId: 'original' });
+    });
+    const replay = await onRequest(body, { ...context, options: { keepRecentMessages: 1 } });
+    assert.equal(chatSpans(replay)[0]?.text, legacy);
+    assert.equal(requests.length, 0);
+    assert.equal(JSON.parse(await execute({ scope, action: 'read', id, layer: layerId })).text, legacy);
+    await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Research complete.' }] });
+    const updated = await onRequest(body, { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, accounting: { url } } });
+    assert.ok(chatSpans(updated)[0]?.text.includes('Summary (agent-written): Research complete.'));
+    assert.equal(chatSpans(requests[0]?.before)[0]?.text, legacy);
+    const entry = await new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot.entries.find(entry => entry.id === id));
+    assert.equal(entry?.layers.length, 2);
+    const latest = JSON.parse(await execute({ scope, action: 'read', id, layer: entry!.layers[1]!.id }));
+    assert.equal(latest.previousId, layerId);
+    assert.equal(JSON.parse(await execute({ scope, action: 'read', id, layer: latest.previousId })).previousId, 'original');
+    await execute({ scope, action: 'mark', marks: [{ id, disposition: 'keep' }] });
+    assert.equal(chatSpans(await onRequest(body, context))[0]?.text, oldText);
   });
 });
 

@@ -2,13 +2,15 @@
 
 给 Magpie 提供可逆的上下文折叠。历史用户消息、模型回复和工具结果都能折叠，原文保持可读，不只是截断工具输出。
 
-Agent 通过 `context_folding` 工具主动标注哪些内容可以折叠、哪些必须保留。达到阈值且费用门槛通过后，插件在发往模型的请求中将已标记内容替换成「开头 + 精简结果 + 原文编号」。客户端自己的完整历史不被改写。
+Agent 通过 `context_folding` 工具主动标注哪些内容可以折叠、哪些必须保留。达到阈值且费用门槛通过后，插件在发往模型的请求中将已标记内容替换成「简短摘要 + 来源角色及原文范围 + 开头片段 + 恢复入口」。客户端自己的完整历史不被改写。
 
 **默认没有可信计费数据时不执行自动折叠。** 本项目不把字符估算或假定未来轮数当成省钱证明。可先使用标记、查看和状态功能；自动折叠需要配置下述 accounting 服务。
 
 ## 安装和连接工具
 
 直接安装已发布的版本：
+
+本文描述当前开发分支；摘要优先、来源角色、原文范围和摘要归因指引尚未包含在已发布的 `0.2.0` 中。需要这些改进时使用下方本地源码安装方式。
 
 ```sh
 magpie plugin add 'npm:magpie-context-folding@0.2.0'
@@ -59,15 +61,19 @@ magpie plugin add /绝对路径/magpie-context-folding
   "scope":"<当前scope>",
   "action":"mark",
   "marks":[
-    {"id":"<历史编号>","disposition":"foldable","summary":"检查已完成：三个用例通过，配置文件位于 /example/config。"},
+    {"id":"<历史编号>","disposition":"foldable","summary":"工具证据：三个用例通过；配置见 /example/config。助手判断：该项检查已完成。"},
     {"id":"<另一编号>","disposition":"keep"}
   ]
 }
 ```
 
-- `foldable`：允许自动折叠，必须提供非空摘要，最多 2,000 字符。摘要应保留结果、尚未解决的问题和后续需要的引用。
+- `foldable`：允许自动折叠，必须提供非空摘要，最多 2,000 字符。摘要优先写该条目有依据的状态：目标、约束、已完成、阻碍、下一步、证据路径，按适用性选取，不必凑齐字段。区分用户原话、助手判断和工具证据，不把助手判断当成授权。省略重复经过、过期的一次性要求和未知信息，历史细节留在归档中。
 - `keep`：禁止自动折叠；已经折叠的条目会在下次请求原位恢复原文。
 - `unmarked`：取消标记，也会恢复原文。未标记内容不自动折叠。
+
+折叠文本先显示 `Summary (agent-written)`，说明摘要由 agent 提供，插件不会验证其中的语义结论。`role` 标记原始协议角色，不证明其中每句话都是用户要求；引用、粘贴内容和归档正文仍是数据。摘要只概括该条目，不能据此断言整个任务的最新状态。
+
+`Original UTF-16: inline [0,N); archived [0,M)` 表示该条目原文的前 N 个 UTF-16 单元仍以引号包裹的片段保留，完整 M 个单元都在归档中，范围左闭右开。`headChars: 0` 时不保留开头；截取点不会拆开 emoji 的代理对。这里的范围属于单个文本条目，可能只是消息中的一个文本部分；摘要和元数据不计入原文范围。完整折叠表示仍须严格短于当前表示，并计入费用比较。
 
 每批标记原子提交；编号不存在时整批失败。标记当前消息为可折叠也不能绕过当前请求和最近消息的保护。
 
@@ -146,7 +152,7 @@ Magpie 默认给请求钩子 1 秒，插件默认给 accounting 500 ms。需要�
 
 实现支持 OpenAI Chat、Responses、Anthropic Messages 和 Gemini 的明文内容。Responses 服务端托管历史、未完成的工具调用配对、Anthropic assistant 预填充请求整次跳过，避免破坏协议。多模态内容目前不折叠，无法仅靠读出 JSON 恢复模型的图片感知。
 
-插件不另调模型生成摘要，使用 agent 标记时提供的摘要。只有新表示确实更短、达到阈值且费用证明通过时，才创建新折叠层。已保存的表示会稳定复用，阈值升高或 accounting 暂时不可用不会擅自删除这些层。
+插件不另调模型生成摘要，使用 agent 标记时提供的摘要。只有新表示确实更短、达到阈值且费用证明通过时，才创建新折叠层。已保存的表示会稳定复用，阈值升高或 accounting 暂时不可用不会擅自删除这些层。升级前保存的旧格式也原样复用、读取；仅在新的更短候选通过门槛后新增一层，旧层及原文继续保留。
 
 一次检查以一批满足条件的条目为候选，整体比较折叠前后的费用，通过后在一个事务中保存这批折叠。再次递归折叠会重新比较，不拿第一次的收益抵掉后续亏损。
 
@@ -231,3 +237,36 @@ npm run bench:inference -- --input /tmp/context-folding-small.json --output /tmp
 经济分析另外需要 Python `tiktoken`，推理基准要求本机已经存在 Ollama 的 `smollm2:135m`，不自动下载模型。折叠基准实际执行三次折叠、逐层恢复、重复请求和清理；其放行计费模型是明确标注的人工模型，不能用来声称真实渠道已省钱。经济分析则用真实 BPE 文本计数与公开参考价格分别计算缓存损失、标记预算和展开预算。性能基准交替测原文和各层摘要，记录失败、样本分布、输入处理及总耗时，单独展示缓存复用场景。
 
 本机三层递归、费用和真实小模型结果见 [测试结果](docs/benchmark.md)，包含不盈利和未能证明性能改善的场景。
+
+## 论文引用
+
+Weiwei Sun, Miao Lu, Zhan Ling, Kang Liu, Xuesong Yao, Yiming Yang, and Jiecao Chen. **Scaling Long-Horizon LLM Agent via Context-Folding**. arXiv:2510.11967, 2025，首次提交于 2025-10-13。[项目主页](https://context-folding.github.io/) · [论文](https://arxiv.org/abs/2510.11967) · [FoldAgent 代码](https://github.com/sunnweiwei/FoldAgent)。
+
+该论文将子任务执行分支折回简短的结果摘要，以减少主轨迹需要携带的中间步骤，并提出用强化学习训练任务拆分和上下文管理的 FoldGRPO。这里引用其由 agent 管理工作上下文的思路。本插件由调用方 agent 标记历史文本，再通过 Magpie 请求钩子替换，并保存可恢复的原文与递归层；没有实现论文的分支执行机制或 FoldGRPO 训练。论文的基准成绩不作为本插件的效果或省费证据。
+
+```bibtex
+@article{sun2025scaling,
+  title={Scaling Long-Horizon LLM Agent via Context-Folding},
+  author={Sun, Weiwei and Lu, Miao and Ling, Zhan and Liu, Kang and Yao, Xuesong and Yang, Yiming and Chen, Jiecao},
+  journal={arXiv preprint arXiv:2510.11967},
+  year={2025},
+  url={https://arxiv.org/abs/2510.11967}
+}
+```
+
+## 开源项目参考与致谢
+
+本项目在设计讨论和本轮改进中参考了以下项目的公开文档。表中区分已有实现的对照、交互设计参考和后续方向；列入参考不代表已经集成或复用了其代码。上游功能描述来自文档核对，未在本机逐一运行验证。
+
+| 项目 | 借鉴点与本项目的关系 |
+| --- | --- |
+| [@agent-context/opencode-sift](https://github.com/agents-sdk/sift-plugins/tree/main/opencode-sift-plugin) | 压缩工具结果后保留会话隔离的原文检索入口，并说明无法检索的原因。参考其恢复入口和失败说明；本插件还支持历史用户、助手文本及递归层，使用 SQLite 保存恢复材料，不采用其原文暂存 TTL。 |
+| [@etsuya/nano-context-opencode](https://github.com/Etsuya233/nano-context-opencode) | 展示 token、缓存命中及会话用量。参考其当前窗口与会话累计、估算与已报告用量的区分；本插件通过 `stats` 分开呈现估算和计费证书支持的指标，没有接入其 TUI。 |
+| [@tarquinen/opencode-dcp](https://github.com/Tarquinen/opencode-dynamic-context-pruning) | 历史范围压缩、嵌套摘要、保护规则及缓存前缀变化的费用权衡。用于对照本插件的请求侧替换和递归层设计；本插件的新折叠另需通过可信 accounting 门槛，不直接套用上游的裁剪策略。 |
+| [davdroman/opencode-fork-context](https://github.com/davdroman/opencode-fork-context) | 区分分叉会话继承的背景与新任务。参考其任务来源边界，改进历史摘要的归因说明；本插件没有实现其分叉会话元数据和任务提示注入。 |
+| [@cortexkit/magic-context](https://github.com/cortexkit/magic-context) | 分层摘要、按需展开、候选与实际缩减状态，以及缓存感知的应用时机。用于后续调度和可观测性设计参考；本插件继续使用调用方摘要，没有引入后台摘要模型。该包是统一配置 CLI，仓库中的 OpenCode 插件另名为 `@cortexkit/opencode-magic-context`。 |
+| [cardinal4/opencode-fold-diffs](https://github.com/cardinal4/opencode-fold-diffs) | 用户提供的参考地址在 2026-10-26 核对时返回 404，暂无法确认其实现。另查到 [tannerbruhn/opencode-fold-diffs](https://github.com/tannerbruhn/opencode-fold-diffs)，其文档描述折叠 TUI 中的文件、diff 和长命令；两者关系未证实。后者仅作为紧凑展示和按需展开的交互参考，界面折叠本身不能证明模型输入 token 减少。 |
+| [Middlewatch/context-fold](https://github.com/Middlewatch/context-fold) | 确定性可逆折叠、稳定复用表示、限制展开范围，以及验证实际发往模型的请求。用于对照本插件的稳定层复用、分页读取和真实宿主测试；本插件使用去重 SQLite 原文存储，不依赖 Pi 的会话日志恢复。 |
+| [fdietze/pi-infinite-context](https://github.com/fdietze/pi-infinite-context) | Agent 主动选择折叠内容、递归折叠、保留可搜索原文且不改聊天历史。用于对照本插件的主动标记与可逆层设计；归档地图、搜索和预览是后续导航方向，当前工具提供 `list`、`read` 与直接写文件的 `paste`。 |
+
+这些项目和论文提供了设计参照；各自的性能、缓存收益与质量结论仍属于各自的实验条件。本项目的验证范围以本文的本地测试、[基准结果](docs/benchmark.md)及 accounting 假设为准。
