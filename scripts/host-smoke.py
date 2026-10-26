@@ -168,7 +168,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     }]})
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
         "spec": str(project), "options": {
-            "thresholdTokens": 32, "keepRecentMessages": 1, "headChars": 80,
+            "thresholdTokens": 32, "contextWindowTokens": 200_000, "keepRecentMessages": 1, "headChars": 80,
             "minimumSavingUsd": 0.000001,
             "accounting": {"url": upstream + "/accounting", "timeoutMs": 2000},
         },
@@ -192,8 +192,8 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     command = [
         str(bwrap), "--die-with-parent", "--unshare-pid", "--ro-bind", "/", "/",
         "--proc", "/proc", "--dev", "/dev",
-        "--bind", str(directory), str(directory),
         "--bind", str(home), str(Path.home()),
+        "--bind", str(directory), str(directory),
         "--ro-bind", str(project), str(project),
         "--ro-bind", str(bun), str(bun),
         "--chdir", str(directory), str(magpie), "serve",
@@ -263,7 +263,17 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 reply = request_json(gateway + "/v1/chat/completions", body, session)
                 assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
                 assert len(fixture.upstream) == count + 1, "request did not reach the synthetic upstream exactly once"
-                return fixture.upstream[-1]
+                outgoing = fixture.upstream[-1]
+                hint = re.search(r"Current context length estimate: (\d+) tokens", serialized(outgoing))
+                assert hint, "upstream request did not include the estimated context budget"
+                # The hook runs before routing strips fake/ from the model name.
+                complete = {**outgoing, "model": body["model"]}
+                estimated = (len(serialized(complete).encode()) + 3) // 4
+                assert int(hint.group(1)) == estimated, "budget did not include its own complete request bytes"
+                assert "Capacity: 200000 tokens (configured)" in serialized(outgoing)
+                assert f"used ratio estimate: {estimated / 200000 * 100:.2f}%" in serialized(outgoing)
+                assert f"remaining estimate: {max(0, 200000 - estimated)} tokens" in serialized(outgoing)
+                return outgoing
 
             first = send()
             scope_match = re.search(r"scope=([a-f0-9]{64})", serialized(first))
@@ -310,7 +320,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             offset = 0
             expected_hash = hashlib.sha256(original.encode()).hexdigest()
             while True:
-                page = call({"scope": scope, "action": "read", "id": entry_id, "offset": offset, "limit": 5000})
+                page = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "offset": offset, "limit": 5000})
                 assert page["offset"] == offset and page["totalChars"] == len(original), "read pagination metadata changed"
                 assert page["sha256"] == expected_hash, "original archive digest changed"
                 restored_parts.append(page["text"])
@@ -320,44 +330,55 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 assert following > offset, "read pagination did not progress"
                 offset = following
             assert "".join(restored_parts) == original, "read did not restore historical text byte for byte"
-            call({"scope": "0" * 64, "action": "read", "id": entry_id}, expect_error=True)
+            call({"scope": "0" * 64, "action": "read", "peek": True, "id": entry_id}, expect_error=True)
             pasted_path = directory / "pasted-original.txt"
-            pasted = call({"scope": scope, "action": "paste", "id": entry_id, "path": str(pasted_path)})
+            pasted = call({"scope": scope, "action": "paste", "peek": True, "id": entry_id, "path": str(pasted_path)})
             assert pasted_path.read_text() == original, "paste did not write the full original"
             assert pasted["sha256"] == expected_hash and "text" not in pasted, "paste metadata leaked or changed text"
             assert pasted["bytes"] == len(original.encode()), "paste byte count changed"
-            call({"scope": scope, "action": "paste", "id": entry_id, "path": str(pasted_path)}, expect_error=True)
+            call({"scope": scope, "action": "paste", "peek": True, "id": entry_id, "path": str(pasted_path)}, expect_error=True)
             assert pasted_path.read_text() == original, "paste overwrote an existing file"
 
             # An equal-price synthetic tariff allows a second, smaller fold to
             # pass without pretending that mild compaction offsets deep cache
             # discounts. This phase tests the recursive layer mechanism only.
             fixture.cache_spread = False
-            current = call({"scope": scope, "action": "read", "id": entry_id, "limit": 1})
+            current = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "limit": 1})
             first_layer_id = current["currentLayer"]
             assert first_layer_id != "original", "first fold was not saved as a layer"
             shorter_summary = "Final result: three synthetic checks passed."
             call({"scope": scope, "action": "mark", "marks": [{"id": entry_id, "disposition": "foldable", "summary": shorter_summary}]})
             second = send()
             assert len(second["messages"][2]["content"]) < len(folded["messages"][2]["content"]), "second summary did not produce a smaller fold"
-            current = call({"scope": scope, "action": "read", "id": entry_id, "limit": 1})
+            current = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "limit": 1})
             second_layer_id = current["currentLayer"]
             assert second_layer_id not in ("original", first_layer_id), "second fold did not create its own layer"
-            second_layer = call({"scope": scope, "action": "read", "id": entry_id, "layer": second_layer_id})
+            second_layer = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "layer": second_layer_id})
             assert second_layer["text"] == second["messages"][2]["content"], "current layer did not match the second outgoing fold"
             assert second_layer["previousId"] == first_layer_id, "second layer did not point to the preceding fold"
-            first_layer = call({"scope": scope, "action": "read", "id": entry_id, "layer": second_layer["previousId"]})
+            first_layer = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "layer": second_layer["previousId"]})
             assert first_layer["text"] == folded["messages"][2]["content"], "intermediate fold was not recoverable"
             assert first_layer["previousId"] == "original", "intermediate layer did not link back to the original"
-            original_page = call({"scope": scope, "action": "read", "id": entry_id, "layer": first_layer["previousId"], "limit": 100})
+            original_page = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "layer": first_layer["previousId"], "limit": 100})
             assert original_page["text"] == original[:100] and original_page["previousId"] is None, "recursive traversal did not reach the original"
             send()
             repeated = next(entry for entry in call({"scope": scope, "action": "list"})["entries"] if entry["id"] == entry_id)
-            assert [layer["id"] for layer in repeated["layers"]] == [first_layer_id, second_layer_id], "unchanged repeated request created duplicate layers"
+            assert repeated["layers"] == 2 and repeated["currentLayer"] == second_layer_id, "unchanged repeated request changed or duplicated layers"
+            repeated_layer = call({"scope": scope, "action": "read", "peek": True, "id": entry_id, "layer": second_layer_id})
+            assert repeated_layer["previousId"] == first_layer_id and repeated_layer["text"] == second_layer["text"], "unchanged repeated request altered the saved layer chain"
 
-            call({"scope": scope, "action": "mark", "marks": [{"id": entry_id, "disposition": "keep"}]})
-            kept = send()
-            assert kept["messages"][2]["content"] == original, "keep did not restore the original outgoing text"
+            # Reading an old layer expresses persistent expansion, not just an
+            # observation. Only an explicit foldable mark may allow folding again.
+            call({"scope": scope, "action": "read", "id": entry_id, "layer": first_layer_id, "limit": 1})
+            for _ in range(2):
+                kept = send()
+                assert kept["messages"][2]["content"] == original, "default read did not persistently restore original"
+            call({"scope": scope, "action": "mark", "marks": [{"id": entry_id, "disposition": "foldable", "summary": shorter_summary}]})
+            assert "middle-evidence-1000" not in serialized(send()), "explicit foldable mark did not restore eligibility"
+            default_paste = directory / "persistent-expansion.txt"
+            call({"scope": scope, "action": "paste", "id": entry_id, "path": str(default_paste)})
+            assert default_paste.read_text() == original, "default paste lost original"
+            assert send()["messages"][2]["content"] == original, "default paste did not persistently restore original"
             fixture.refuse_saving = True
             call({"scope": scope, "action": "mark", "marks": [{"id": entry_id, "disposition": "foldable", "summary": "Unique synthetic rejection summary."}]})
             denied = send()
@@ -369,7 +390,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert other["messages"][2]["content"] == original, "a mark leaked into another session"
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun", "billing": "SYNTHETIC_ACCOUNTING_ONLY",
-                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "keep restores outgoing original", "unprofitable fold refused", "session isolation"],
+                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "configured budget includes itself, percentage and remaining", "default historical-layer read persistently restores original", "explicit foldable re-enables folding", "default paste persistently restores original", "unprofitable fold refused", "session isolation"],
                 "originalChars": len(original), "foldedChars": len(folded["messages"][2]["content"]),
                 "accountingRequests": len(fixture.accounting), "status": status,
             }))
@@ -404,7 +425,7 @@ def main() -> None:
     package = json.loads((project / "package.json").read_text())
     if not (project / package["main"]).exists() or not (project / package["magpie"]["hooks"]).exists():
         parser.error("package main or Magpie hook entry is missing")
-    with tempfile.TemporaryDirectory(prefix="magpie-context-folding-smoke-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="magpie-context-folding-smoke-", dir=os.environ.get("TMPDIR")) as temporary:
         run(Path(arguments.magpie).resolve(), Path(arguments.bun).resolve(), Path(arguments.bwrap).resolve(), Path(temporary), project)
 
 

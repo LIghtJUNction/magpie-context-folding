@@ -1,22 +1,67 @@
 #!/usr/bin/env bun
 import { parseArgs } from 'node:util';
+import type { ParseArgsConfig } from 'node:util';
+import { loadConfig } from './config.js';
+import { diagnostic, execute } from './tool.js';
 import { statistics } from './statistics.js';
 
-const usage = 'Usage: magpie-context-folding stats [--scope <scope>] [--json]';
-const [command, ...arguments_] = process.argv.slice(2);
-if (command !== 'stats') {
-  console.log(usage);
-  process.exitCode = command === undefined || command === '--help' ? 0 : 1;
-} else {
-  try {
-    const { values } = parseArgs({ args: arguments_, options: { scope: { type: 'string' }, json: { type: 'boolean' } } });
-    const data = await statistics(values.scope);
-    if (values.json) console.log(JSON.stringify(data, null, 2));
+const usage = `Usage: magpie-context-folding <command> [options]
+
+read   --scope S --id ID [--layer ID] [--offset N] [--limit N] [--peek] [--json]
+paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
+mark   --scope S --id ID --disposition keep|unmarked|foldable [--summary TEXT]
+mark   --scope S [--marks '<JSON array>'] (omit --marks or use --marks - to read stdin)
+list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
+       [--order asc|desc] [--offset N] [--limit N]
+status --scope S
+stats  [--scope S] [--json]
+config [--project-dir PATH]
+
+read writes the full exact text to stdout unless --limit selects a page; paste --path - does the same.
+Other archive commands and config write JSON.
+read/paste persist keep and restore all ancestor groups; --peek leaves folding unchanged.
+--json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
+
+const string = { type: 'string' } as const;
+const boolean = { type: 'boolean' } as const;
+const common = { json: boolean, help: boolean };
+const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean };
+const options: Record<string, ParseArgsConfig['options']> = {
+  read: { ...common, ...range },
+  paste: { ...common, ...range, path: string },
+  mark: { ...common, scope: string, id: string, disposition: string, summary: string, marks: string },
+  list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
+  status: { ...common, scope: string },
+  stats: { ...common, scope: string },
+  config: { ...common, 'project-dir': string },
+};
+class UsageError extends Error {}
+
+async function main(): Promise<void> {
+  const [command, ...argv] = process.argv.slice(2);
+  if (command === undefined || command === '--help' || command === '-h') {
+    console.log(usage);
+    return;
+  }
+  if (!Object.hasOwn(options, command)) throw new UsageError('Unknown command; use --help');
+  let values: Record<string, string | boolean | undefined>;
+  try { values = parseArgs({ args: argv, options: options[command], strict: true, allowPositionals: false }).values; }
+  catch { throw new UsageError('Invalid command options; use --help'); }
+  if (values.help) { console.log(usage); return; }
+  if (command === 'config') {
+    console.log(JSON.stringify(await loadConfig(values['project-dir'] as string | undefined)));
+    return;
+  }
+  if (command === 'stats') {
+    if (values.scope !== undefined && !/^[a-f0-9]{64}$/.test(String(values.scope))) throw new UsageError('Invalid scope');
+    const data = await statistics(values.scope as string | undefined);
+    if (values.json) console.log(JSON.stringify(data));
     else {
       const m = data.metrics;
       console.log([
         `统计范围：${data.scope === 'global-lifetime' ? '全局累计' : '当前会话'}`,
         `已批准折叠：${m.foldBatchesApproved} 批，${m.itemsFolded} 个条目，其中 ${m.recursiveItemsFolded} 次递归折叠`,
+        `成功转换请求：${m.successfulHookRequests}；失败：${m.failedHookRequests}；未核实：${m.unverifiedHookRequests}；仅提示：${m.guideOnlyRequests}`,
         `成功带折叠请求：${m.successfulFoldedRequests}；失败：${m.failedFoldedRequests}；未核实：${m.unverifiedFoldedRequests}`,
         `累计净减少 token（估算）：${m.estimatedTokenDelta}`,
         `已验证比较的 token 减少下界：${m.certifiedTokenDeltaLower}`,
@@ -27,8 +72,78 @@ if (command !== 'stats') {
         '金额以计费证书的假设为前提，不代表实际账单。未预留的标记、展开和输出费用不会自动扣除。',
       ].join('\n'));
     }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : 'Statistics unavailable');
-    process.exitCode = 1;
+    return;
   }
+  const args: Record<string, unknown> = { action: command };
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined || key === 'json' || key === 'help') continue;
+    if (['offset', 'limit', 'depth'].includes(key)) {
+      if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+        throw new UsageError('Expected a nonnegative integer for range/depth options');
+      }
+      args[key] = Number(value);
+    } else args[key] = value;
+  }
+  if (command === 'mark') {
+    if (values.marks !== undefined) {
+      if (values.id !== undefined || values.disposition !== undefined || values.summary !== undefined) {
+        throw new UsageError('Use --marks or individual mark fields, not both');
+      }
+      const source = values.marks === '-' ? await Bun.stdin.text() : String(values.marks);
+      try { args.marks = JSON.parse(source); }
+      catch { throw new UsageError('Invalid marks JSON; expected an array'); }
+    } else if (values.id === undefined && values.disposition === undefined && values.summary === undefined) {
+      if (process.stdin.isTTY) throw new UsageError('Provide --marks, individual mark fields, or a JSON array on stdin');
+      try { args.marks = JSON.parse(await Bun.stdin.text()); }
+      catch { throw new UsageError('Invalid marks JSON; expected an array'); }
+    } else {
+      args.marks = [{ id: values.id, disposition: values.disposition, ...(values.summary === undefined ? {} : { summary: values.summary }) }];
+    }
+    delete args.id;
+    delete args.disposition;
+    delete args.summary;
+  }
+  const stdoutRead = command === 'read' || (command === 'paste' && values.path === '-');
+  if (stdoutRead) {
+    const request: Record<string, unknown> = { ...args, action: 'read' };
+    delete request.path;
+    const page = async (input: Record<string, unknown>) => {
+      const result = JSON.parse(await execute(input)) as {
+        error?: string; text: string; nextOffset: number | null; sha256: string; totalChars: number;
+      };
+      if (result.error) throw new UsageError(result.error);
+      return result;
+    };
+    const result = await page({ ...request, limit: args.limit ?? 24000 });
+    const chunks = [result.text];
+    let nextOffset = result.nextOffset;
+    while (args.limit === undefined && nextOffset !== null) {
+      const next = await page({ ...request, peek: true, offset: nextOffset, limit: 24000 });
+      if (next.sha256 !== result.sha256 || next.totalChars !== result.totalChars) {
+        throw new UsageError('Context archive changed during reading; retry request');
+      }
+      chunks.push(next.text);
+      nextOffset = next.nextOffset;
+    }
+    result.text = chunks.join('');
+    result.nextOffset = nextOffset;
+    if (values.json) console.log(JSON.stringify(result));
+    else process.stdout.write(result.text);
+    return;
+  }
+  const result = JSON.parse(await execute(args)) as { error?: string };
+  if (result.error) throw new UsageError(result.error);
+  console.log(JSON.stringify(result));
+}
+
+// A consumer such as head may close stdout after receiving enough text.
+process.stdout.on('error', (error: NodeJS.ErrnoException) => {
+  if (error.code === 'EPIPE') process.exit(0);
+  console.error('Cannot write command output');
+  process.exitCode = 1;
+});
+try { await main(); }
+catch (error) {
+  console.error(error instanceof UsageError ? error.message : diagnostic(error));
+  process.exitCode = 1;
 }

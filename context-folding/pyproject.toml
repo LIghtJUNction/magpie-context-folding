@@ -1,0 +1,21 @@
+[build-system]
+requires = ["uv_build>=0.9,<0.14"]
+build-backend = "uv_build"
+
+[project]
+name = "context-folding"
+version = "0.1.0"
+description = "Host-neutral reversible context archive, transparent references, CLI and MCP server"
+requires-python = ">=3.10"
+license = "MIT"
+readme = "README.md"
+dependencies = ["tomli>=2.0.1; python_version < '3.11'"]
+
+[project.scripts]
+context-folding = "context_folding.cli:main"
+
+[tool.uv.build-backend]
+module-root = "python"
+
+[dependency-groups]
+dev = []

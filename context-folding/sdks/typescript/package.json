@@ -1,0 +1,17 @@
+{
+  "name": "@context-folding/python-bridge",
+  "version": "0.1.0",
+  "description": "Node.js subprocess bridge to the standalone Context Folding Python engine",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" } },
+  "files": ["dist/src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/client.test.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0" },
+  "license": "MIT"
+}

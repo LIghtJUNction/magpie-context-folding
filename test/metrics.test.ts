@@ -24,6 +24,64 @@ test('a batch and later request can accumulate counters without modifying prior 
   assert.equal(first.readChars, 0);
 });
 
+const hookCounters = ['successfulHookRequests', 'failedHookRequests', 'unverifiedHookRequests', 'guideOnlyRequests'] as const;
+
+test('stored metrics without hook counters parse with zero defaults', () => {
+  const legacy = JSON.parse(JSON.stringify(addMetrics(emptyMetrics(), {
+    successfulFoldedRequests: 3,
+    estimatedTokenDelta: '-41',
+  })));
+  for (const key of hookCounters) delete legacy[key];
+  const parsed = metricsSchema.parse(legacy);
+  for (const key of hookCounters) assert.equal(parsed[key], 0);
+  assert.equal(parsed.successfulFoldedRequests, 3);
+  assert.equal(parsed.estimatedTokenDelta, '-41');
+  assert.deepEqual(addMetrics(legacy, {}), parsed);
+  assert.deepEqual(metricsSchema.parse(JSON.parse(JSON.stringify(parsed))), parsed);
+});
+
+test('hook counters accumulate independently and guide-only overhead can produce a negative token delta', () => {
+  const first = addMetrics(emptyMetrics(), {
+    successfulHookRequests: 1,
+    guideOnlyRequests: 1,
+    estimatedTokenDelta: '-80',
+  });
+  const total = addMetrics(first, {
+    successfulHookRequests: 2,
+    failedHookRequests: 3,
+    unverifiedHookRequests: 4,
+    guideOnlyRequests: 5,
+    estimatedTokenDelta: '30',
+  });
+  assert.equal(total.successfulHookRequests, 3);
+  assert.equal(total.failedHookRequests, 3);
+  assert.equal(total.unverifiedHookRequests, 4);
+  assert.equal(total.guideOnlyRequests, 6);
+  assert.equal(total.estimatedTokenDelta, '-50');
+  assert.equal(total.successfulFoldedRequests, 0);
+  assert.equal(total.certifiedComparisons, 0);
+  assert.equal(total.savingNanoUsdLower, '0');
+  assert.equal(first.successfulHookRequests, 1);
+  assert.equal(first.guideOnlyRequests, 1);
+  assert.equal(first.failedHookRequests, 0);
+  assert.equal(first.unverifiedHookRequests, 0);
+  assert.equal(first.estimatedTokenDelta, '-80');
+  for (const key of hookCounters) assert.equal(emptyMetrics()[key], 0);
+});
+
+test('hook counters reject invalid values and overflow while omitted increments preserve totals', () => {
+  for (const key of hookCounters) {
+    for (const invalid of [-1, 0.25, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.throws(() => metricsSchema.parse({ ...emptyMetrics(), [key]: invalid }));
+      assert.throws(() => addMetrics(emptyMetrics(), { [key]: invalid }));
+    }
+    const full = addMetrics(emptyMetrics(), { [key]: Number.MAX_SAFE_INTEGER });
+    assert.deepEqual(addMetrics(full, { itemsFolded: 1 }), { ...full, itemsFolded: 1 });
+    assert.throws(() => addMetrics(full, { [key]: 1 }));
+    assert.equal(full[key], Number.MAX_SAFE_INTEGER);
+  }
+});
+
 test('token and fee totals stay exact beyond JavaScript safe integer precision', () => {
   const before = addMetrics(emptyMetrics(), {
     estimatedTokenDelta: '900719925474099312345',

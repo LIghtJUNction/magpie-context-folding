@@ -15,12 +15,23 @@ const markSchema = z.discriminatedUnion('disposition', [
 const layerSchema = z.object({
   id: z.string().min(1).max(128), text: z.string(), previousId: z.string().min(1).max(128),
 });
+const versionSchema = z.object({
+  series: z.string().min(1), number: z.number().int().positive(), kind: z.enum(['file', 'similar']),
+  previousId: z.string().optional(), path: z.string().optional(), range: z.string().optional(),
+  automatic: z.boolean().optional(), latest: z.boolean().optional(),
+  observations: z.array(z.string().regex(/^[a-f0-9]{64}$/)).optional(),
+});
+const groupSchema = z.object({
+  id: z.string().min(1), children: z.array(z.string()).min(2).max(100),
+  summary: z.string().trim().min(1).max(2000), enabled: z.boolean(), folded: z.string().optional(),
+});
 const entrySchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant', 'tool']), text: z.string(),
   mark: markSchema, folded: z.string().optional(), layers: z.array(layerSchema).default([]),
+  version: versionSchema.optional(), manual: z.boolean().optional(),
 });
 const snapshotSchema = z.object({
-  version: z.literal(1), entries: z.array(entrySchema),
+  version: z.literal(1), entries: z.array(entrySchema), groups: z.array(groupSchema).optional(),
   decision: z.record(z.string(), z.unknown()).default({}),
   metrics: metricsSchema.default(emptyMetrics),
 });
@@ -43,6 +54,7 @@ export type Entry = z.infer<typeof entrySchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Mark = z.infer<typeof markSchema>;
 export type Layer = z.infer<typeof layerSchema>;
+export type Group = z.infer<typeof groupSchema>;
 export interface StatsReport {
   metrics: Metrics;
   storage: { activeSessions: number; blobs: number; databaseBytes: number };
@@ -93,6 +105,41 @@ function validateLayers(snapshot: Snapshot): void {
       if (previous.has(layer.id)) throw new Error('Duplicate or reserved fold layer ID');
       if (!previous.has(layer.previousId)) throw new Error('Fold layer must reference original or an earlier layer');
       previous.add(layer.id);
+    }
+  }
+  const byId = new Map(snapshot.entries.map(entry => [entry.id, entry]));
+  const latestSeries = new Set<string>();
+  for (const entry of snapshot.entries) {
+    const version = entry.version;
+    if (version?.latest) {
+      if (latestSeries.has(version.series)) throw new Error('Multiple latest observations in one version series');
+      latestSeries.add(version.series);
+    }
+    if (!version?.previousId) continue;
+    const previous = byId.get(version.previousId)?.version;
+    if (!previous || previous.series !== version.series || previous.number >= version.number) {
+      throw new Error('Version must reference an earlier member of the same series');
+    }
+  }
+  const nodes = new Set(entries);
+  for (const group of snapshot.groups ?? []) {
+    if (nodes.has(group.id)) throw new Error('Duplicate archive node ID');
+    nodes.add(group.id);
+  }
+  const parents = new Map<string, string>();
+  for (const group of snapshot.groups ?? []) {
+    for (const child of group.children) {
+      if (!nodes.has(child) || parents.has(child)) throw new Error('Unknown or multiply parented group member');
+      parents.set(child, group.id);
+    }
+  }
+  for (const id of parents.keys()) {
+    const visited = new Set<string>();
+    let current: string | undefined = id;
+    while (current !== undefined) {
+      if (visited.has(current)) throw new Error('Cyclic fold group');
+      visited.add(current);
+      current = parents.get(current);
     }
   }
 }

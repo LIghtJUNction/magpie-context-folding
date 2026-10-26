@@ -84,7 +84,7 @@ test('full archive remains readable and pasteable when read statistics cannot gr
     stored.sessionLimitBytes = stored.payloadBytes;
     database.query('UPDATE sessions SET snapshot = ? WHERE scope = ?').run(JSON.stringify(stored), scope);
     database.close();
-    const read = await call({ action: 'read', scope, id: 'source', limit: 4 });
+    const read = await call({ action: 'read', scope, id: 'source', limit: 4, peek: true });
     assert.equal(read.text, text.slice(0, 4));
     assert.equal((await new Store().readStats(scope)).metrics.originalReadCalls, 9, 'failed metrics write may be omitted');
     const path = join(directory, 'recovered.txt');

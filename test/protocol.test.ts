@@ -147,6 +147,206 @@ test("guidance is appended after complete tool results without changing prior me
   }
 });
 
+function readExchange(protocol: Protocol, args: unknown = { path: "./src/file.ts" }, name = "read", output: unknown = "file contents"): Record<string, unknown> {
+  if (protocol === "chat") return { messages: [
+    { role: "assistant", content: "reading", tool_calls: [{ id: "read-1", type: "function", function: { name, arguments: typeof args === "string" ? args : JSON.stringify(args) } }] },
+    { role: "tool", tool_call_id: "read-1", content: output },
+  ] };
+  if (protocol === "responses") return { input: [
+    { type: "function_call", call_id: "read-1", name, arguments: typeof args === "string" ? args : JSON.stringify(args) },
+    { type: "function_call_output", call_id: "read-1", output },
+  ] };
+  if (protocol === "anthropic") return { messages: [
+    { role: "assistant", content: [{ type: "tool_use", id: "read-1", name, input: args }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "read-1", content: output }] },
+  ] };
+  return { contents: [
+    { role: "model", parts: [{ functionCall: { id: "read-1", name, args } }] },
+    { role: "user", parts: [{ functionResponse: { id: "read-1", name, response: { output } } }] },
+  ] };
+}
+
+const protocols: Protocol[] = ["chat", "responses", "anthropic", "gemini"];
+
+test("file reads expose raw path provenance across protocols without changing IDs or wire data", () => {
+  for (const protocol of protocols) {
+    for (const name of ["read", "Read", "read_file"]) {
+      for (const key of ["path", "file_path", "filePath", "absolute_path"]) {
+        const body = readExchange(protocol, { [key]: "../raw/./file.ts" }, name);
+        const original = structuredClone(body);
+        const spans = extractSpans(body, protocol);
+        const tool = spans.find((span) => span.role === "tool");
+        assert.deepEqual(tool?.source, { path: "../raw/./file.ts", range: "full" }, `${protocol}/${name}/${key}`);
+        assert.ok(spans.filter((span) => span.role !== "tool").every((span) => span.source === undefined));
+        const withoutSource = extractSpans(readExchange(protocol, { [key]: "../raw/./file.ts" }, "write"), protocol);
+        assert.deepEqual(spans.map((span) => span.id), withoutSource.map((span) => span.id));
+        assert.deepEqual(body, original);
+        assert.ok(tool);
+        const folded = replaceSpans(body, new Map([[tool.id, "folded"]]), protocol);
+        // Only the selected text leaf may change; arguments and IDs stay byte-for-byte intact.
+        const expected = structuredClone(original);
+        const outputSpan = extractSpans(expected, protocol).find((span) => span.role === "tool")!;
+        let parent: any = expected;
+        for (const part of outputSpan.path.slice(0, -1)) parent = parent[part];
+        parent[outputSpan.path.at(-1)!] = "folded";
+        assert.deepEqual(folded, expected);
+      }
+    }
+  }
+});
+
+test("read ranges distinguish full, offset/limit and line slices consistently", () => {
+  for (const protocol of protocols) {
+    const source = (args: Record<string, unknown>) => extractSpans(readExchange(protocol, { path: "a", ...args }), protocol).find((span) => span.role === "tool")?.source;
+    const ranges = [{}, { offset: 1 }, { limit: 10 }, { offset: 1, limit: 10 }, { offset: 2, limit: 10 }, { start_line: 1, end_line: 10 }, { start_line: 1 }, { end_line: 10 }];
+    assert.equal(new Set(ranges.map((args) => source(args)?.range)).size, ranges.length);
+    assert.equal(source({ startLine: 1, endLine: 10 })?.range, source({ start_line: 1, end_line: 10 })?.range);
+    assert.equal(source({ start: 1, end: 10 })?.range, source({ start_line: 1, end_line: 10 })?.range);
+    assert.deepEqual(source({ offset: 1, limit: 10 }), source({ limit: 10, offset: 1 }));
+    for (const args of [{ offset: -1 }, { offset: 1.5 }, { limit: 0 }, { limit: "10" }, { start_line: 5, end_line: 2 }, { start_line: 1, startLine: 2 }, { offset: 1, end_line: 10 }, { range: "1-10" }, { pages: "1" }]) {
+      assert.equal(source(args), undefined, `${protocol}/${JSON.stringify(args)}`);
+    }
+  }
+});
+
+test("only explicit valid read calls can identify file outputs", () => {
+  for (const protocol of protocols) {
+    for (const name of ["write", "Write", "edit", "bash", "cat", "mcp__read_file"]) {
+      assert.ok(extractSpans(readExchange(protocol, { path: "a", command: "cat a" }, name, "a: file contents"), protocol).every((span) => span.source === undefined));
+    }
+    for (const args of [{}, { path: "" }, { path: "  " }, { path: ["a"] }, { path: "a", file_path: "b" }, "malformed JSON", "null"]) {
+      assert.ok(extractSpans(readExchange(protocol, args), protocol).every((span) => span.source === undefined), `${protocol}/${JSON.stringify(args)}`);
+    }
+    for (const output of ["Error: could not read a", "ENOENT: a", "<tool_use_error>missing a</tool_use_error>", "File not found: a", "Permission denied: a", '{"error":"missing a"}']) {
+      assert.ok(extractSpans(readExchange(protocol, { path: "a" }, "read", output), protocol).every((span) => span.source === undefined), `${protocol}/${output}`);
+    }
+    const body = readExchange(protocol);
+    if (protocol === "chat") (body.messages as any[])[1].tool_call_id = "other";
+    else if (protocol === "responses") (body.input as any[])[1].call_id = "other";
+    else if (protocol === "anthropic") (body.messages as any[])[1].content[0].tool_use_id = "other";
+    else (body.contents as any[])[1].parts[0].functionResponse.id = "other";
+    assert.ok(extractSpans(body, protocol).every((span) => span.source === undefined), protocol);
+  }
+});
+
+test("failed, signed, multimodal and multiple text results never receive read provenance", () => {
+  for (const protocol of protocols) {
+    const bodies: Record<string, unknown>[] = [];
+    for (const flag of [{ is_error: true }, { isError: true }, { success: false }, { error: "missing" }, { status: "failed" }, { signature: "signed" }]) {
+      const body = readExchange(protocol);
+      const result = protocol === "chat" ? (body.messages as any[])[1]
+        : protocol === "responses" ? (body.input as any[])[1]
+          : protocol === "anthropic" ? (body.messages as any[])[1].content[0]
+            : (body.contents as any[])[1].parts[0].functionResponse.response;
+      Object.assign(result, flag);
+      bodies.push(body);
+    }
+    if (protocol !== "gemini") {
+      for (const output of [
+        [{ type: "text", text: "first" }, { type: "text", text: "second" }],
+        [{ type: "text", text: "text" }, { type: "image", source: { data: "AAAA" } }],
+        [{ type: "text", text: "text", signature: "signed" }],
+      ]) bodies.push(readExchange(protocol, { path: "a" }, "read", output));
+      const single = readExchange(protocol, { path: "a" }, "read", [{ type: "text", text: "file contents" }]);
+      assert.deepEqual(extractSpans(single, protocol).find((span) => span.role === "tool")?.source, { path: "a", range: "full" });
+    } else {
+      for (const response of [
+        { text: "first", output: "second" },
+        { output: "text", inlineData: { data: "AAAA" } },
+        { output: "text", nested: { text: "ambiguous" } },
+      ]) {
+        const body = readExchange(protocol);
+        (body.contents as any[])[1].parts[0].functionResponse.response = response;
+        bodies.push(body);
+      }
+      const signed = readExchange(protocol);
+      (signed.contents as any[])[1].parts[0].thoughtSignature = "signed";
+      bodies.push(signed);
+    }
+    for (const body of bodies) assert.ok(extractSpans(body, protocol).every((span) => span.source === undefined), `${protocol}/${JSON.stringify(body)}`);
+  }
+});
+
+test("duplicate IDs, multiple result envelopes and results preceding calls are ambiguous", () => {
+  for (const protocol of protocols) {
+    for (const change of ["duplicate-call", "duplicate-result", "result-first"]) {
+      const body = readExchange(protocol);
+      const items = (body.messages ?? body.input ?? body.contents) as unknown[];
+      if (change === "duplicate-call") items.splice(1, 0, structuredClone(items[0]));
+      else if (change === "duplicate-result") items.push(structuredClone(items[1]));
+      else items.reverse();
+      assert.ok(extractSpans(body, protocol).every((span) => span.source === undefined), `${protocol}/${change}`);
+    }
+  }
+});
+
+test("Gemini repeated same-name calls match by ID or FIFO, including failed results", () => {
+  const body = { contents: [
+    { role: "model", parts: [
+      { functionCall: { name: "read", args: { path: "a" } } },
+      { functionCall: { name: "read", args: { path: "b", offset: 5, limit: 10 } } },
+    ] },
+    { role: "user", parts: [
+      { functionResponse: { name: "read", response: { output: "first" } } },
+      { functionResponse: { name: "read", response: { output: "second" } } },
+    ] },
+  ] };
+  assert.deepEqual(extractSpans(body, "gemini").map((span) => span.source), [
+    { path: "a", range: "full" }, { path: "b", range: "offset:5:limit:10" },
+  ]);
+  const failed: any = structuredClone(body);
+  Object.assign(failed.contents[1].parts[0].functionResponse.response, { error: "failed" });
+  assert.deepEqual(extractSpans(failed, "gemini").map((span) => span.source?.path), [undefined, "b"]);
+  const identified: any = structuredClone(body);
+  identified.contents[0].parts[0].functionCall.id = "a";
+  identified.contents[0].parts[1].functionCall.id = "b";
+  identified.contents[1].parts[0].functionResponse.id = "b";
+  identified.contents[1].parts[1].functionResponse.id = "a";
+  assert.deepEqual(extractSpans(identified, "gemini").map((span) => span.source?.path), ["b", "a"]);
+});
+
+test("Gemini declines mixed-ID matching and attachments while preserving explicit-ID matching", () => {
+  const body: any = readExchange("gemini", { path: "identified" });
+  body.contents[0].parts.push({ functionCall: { name: "read", args: { path: "unnamed" } } });
+  body.contents[1].parts.push({ functionResponse: { name: "read", response: { output: "unnamed result" } } });
+  assert.deepEqual(extractSpans(body, "gemini").map((span) => span.source?.path), ["identified", undefined]);
+  const extra: any = readExchange("gemini");
+  delete extra.contents[0].parts[0].functionCall.id;
+  delete extra.contents[1].parts[0].functionResponse.id;
+  extra.contents[1].parts.push(structuredClone(extra.contents[1].parts[0]));
+  assert.ok(extractSpans(extra, "gemini").every((span) => span.source === undefined));
+  for (const change of ["parts", "inlineData", "signed-call"]) {
+    const attached: any = readExchange("gemini");
+    if (change === "parts") attached.contents[1].parts[0].functionResponse.parts = [{ inlineData: { data: "AAAA" } }];
+    else if (change === "inlineData") attached.contents[1].parts[0].inlineData = { data: "AAAA" };
+    else attached.contents[0].parts[0].thoughtSignature = "signature";
+    assert.ok(extractSpans(attached, "gemini").every((span) => span.source === undefined), change);
+  }
+});
+
+test("read result IDs select the corresponding file even when results are reordered", () => {
+  for (const protocol of protocols) {
+    const first: any = readExchange(protocol, { path: "a" }, "read", "first");
+    const second: any = readExchange(protocol, { path: "b" }, "read", "second");
+    const key = protocol === "responses" ? "input" : protocol === "gemini" ? "contents" : "messages";
+    if (protocol === "chat") {
+      second[key][0].tool_calls[0].id = "read-2";
+      second[key][1].tool_call_id = "read-2";
+    } else if (protocol === "responses") {
+      second[key][0].call_id = "read-2";
+      second[key][1].call_id = "read-2";
+    } else if (protocol === "anthropic") {
+      second[key][0].content[0].id = "read-2";
+      second[key][1].content[0].tool_use_id = "read-2";
+    } else {
+      second[key][0].parts[0].functionCall.id = "read-2";
+      second[key][1].parts[0].functionResponse.id = "read-2";
+    }
+    const body = { [key]: [first[key][0], second[key][0], second[key][1], first[key][1]] };
+    assert.deepEqual(extractSpans(body, protocol).filter((span) => span.role === "tool").map((span) => span.source?.path), ["b", "a"], protocol);
+  }
+});
+
 test("malformed and unknown content is ignored instead of being rewritten", () => {
   for (const protocol of ["chat", "responses", "anthropic", "gemini"] satisfies Protocol[]) {
     const body = { messages: [null, "invalid", { content: "missing role" }, { role: "unknown", content: "unknown role" }], input: [null, { type: "unknown", content: "opaque" }], contents: [null, { parts: [{ text: "no role" }] }] };

@@ -4,18 +4,20 @@
 
 Agent 通过 `context_folding` 工具主动标注哪些内容可以折叠、哪些必须保留。达到阈值且费用门槛通过后，插件在发往模型的请求中将已标记内容替换成「简短摘要 + 来源角色及原文范围 + 开头片段 + 恢复入口」。客户端自己的完整历史不被改写。
 
-**默认没有可信计费数据时不执行自动折叠。** 本项目不把字符估算或假定未来轮数当成省钱证明。可先使用标记、查看和状态功能；自动折叠需要配置下述 accounting 服务。
+**默认 cost 模式缺少费用证据时拒绝新增折叠。** 可配置 accounting 服务、本地证书脚本或保守费用边界；也可显式选择只比较完整请求字节的 bytes 模式，后者不认证金额节省。字符估算与假定未来轮数都不是省钱证明。策略接口和可信本地脚本组合见 [docs/policy.md](docs/policy.md)。
+
+不依赖 Magpie 的通用实现见 [context-folding 子项目](context-folding/README.md)：提供 Python SDK、CLI、JSON Lines RPC、MCP stdio，以及 Rust、TypeScript、C# 的持久 Python 桥接客户端。它与本页的 Magpie 插件是两套集成；通用实现由宿主显式应用渲染结果、解析工具参数引用，不使用本插件的 accounting 门槛。
 
 ## 安装和连接工具
 
 直接安装已发布的版本：
 
-本文描述当前开发分支；摘要优先、来源角色、原文范围和摘要归因指引尚未包含在已发布的 `0.2.0` 中。需要这些改进时使用下方本地源码安装方式。
+`0.3.0` 包含分组树、检索浏览、文件版本与相似历史导航、分层配置、请求预算及 CLI。根 npm 包只安装 Magpie 插件，不包含通用 Python/SDK 子项目；通用实现按自己的 README 单独安装。
 
 ```sh
-magpie plugin add 'npm:magpie-context-folding@0.2.0'
+magpie plugin add 'npm:magpie-context-folding@0.3.0'
 # 也可以安装 GitHub 的固定版本
-magpie plugin add 'github:LIghtJUNction/magpie-context-folding#v0.2.0'
+magpie plugin add 'github:LIghtJUNction/magpie-context-folding#v0.3.0'
 ```
 
 GitHub Release 同时托管 npm 格式安装包及 SHA-256 校验文件。Magpie 使用 Bun 直接加载包内 TypeScript 源码，不依赖安装时构建脚本，也不需要在源码仓库保存重复的编译产物。
@@ -28,7 +30,7 @@ npm run check
 magpie plugin add /绝对路径/magpie-context-folding
 ```
 
-开发检查需要 Bun、Node.js 和 npm。
+开发检查需要 Bun >= 1.4.0、Node.js >= 22 和 npm。
 
 包内同时提供 `magpie.hooks` 请求钩子和自定义工具。需要让使用 Magpie 的 agent 连接其 HTTP MCP 服务：
 
@@ -42,13 +44,15 @@ magpie plugin add /绝对路径/magpie-context-folding
 }
 ```
 
-具体配置文件及 HTTP transport 字段依客户端而异，使用客户端的 MCP 配置入口填写这个 URL。确认工具列表出现 `context_folding`。请求钩子不能替客户端注册工具；请求没有声明这个工具时，插件保留原请求且不创建存档。
+具体配置文件及 HTTP transport 字段依客户端而异，使用客户端的 MCP 配置入口填写这个 URL。确认工具列表出现 `context_folding`。请求钩子不能替客户端注册工具；请求没有声明这个工具时，不创建存档或执行折叠，仍为可安全处理的请求附加预算提示。
 
 客户端还需要通过 Magpie 提供稳定的会话标识，例如 `X-Magpie-Session`。没有稳定会话标识时不折叠。Magpie 的 MCP 工具调用不提供真实客户端会话 ID，因此工具显式接收当前请求提示中的 `scope`，而不是相信空的 `sessionID`。scope 是使用本地随机密钥计算的会话访问标识，不应转发给其他会话。
 
 ## Agent 的操作
 
-请求末尾只附带当前 scope、简短操作提示和最多 8 个可折叠历史编号；完整清单使用 `list` 分页查看。工具说明也保持精简，避免管理提示反复占用上下文。
+Agent 可根据任务进度和上下文压力，主动、及早标记不再帮助当前决策的历史，让可逆折叠尽可能先于宿主自身的上下文压缩发挥作用。时机和粒度由 agent 判断，没有固定操作顺序，也不要求每轮折叠。保留当前用户要求、最新文件观察、关键推理、未解决的矛盾和恢复入口，尊重明确的 `keep`/`unmarked` 决定。设计目标是用可逆折叠替代默认上下文压缩，同时保留精确恢复入口。当前实际替换仍受阈值、协议保护和费用门槛约束；请求钩子和通用 MCP 服务尚未接管客户端的 compaction（上下文压缩），也不能控制其阈值。本地缩短结果不能证明默认压缩已被替代或真实压缩已推迟。
+
+请求附带当前上下文预算；可归档的请求还附带 scope 与简短操作提示，完整清单使用 `list` 分页查看。预算使用完整请求 JSON 的 UTF-8 字节数除以四，明确标为估算，包含提示自身及工具声明。只有配置 `contextWindowTokens`（TOML 为 `folding.context_window_tokens`）时才显示容量、估算比例与剩余量；容量未配置则显示未知，不根据模型名猜测。当前 Magpie hook 未提供经过核实的窗口容量字段。
 
 ```json
 {"scope":"<当前scope>","action":"list"}
@@ -69,13 +73,33 @@ magpie plugin add /绝对路径/magpie-context-folding
 
 - `foldable`：允许自动折叠，必须提供非空摘要，最多 2,000 字符。摘要优先写该条目有依据的状态：目标、约束、已完成、阻碍、下一步、证据路径，按适用性选取，不必凑齐字段。区分用户原话、助手判断和工具证据，不把助手判断当成授权。省略重复经过、过期的一次性要求和未知信息，历史细节留在归档中。
 - `keep`：禁止自动折叠；已经折叠的条目会在下次请求原位恢复原文。
-- `unmarked`：取消标记，也会恢复原文。未标记内容不自动折叠。
+- `unmarked`：明确取消标记，也会恢复原文，并阻止自动策略重新选择该条目。尚未手动标记的历史可由显式配置的 `policy.auto_roles` 策略选择。
 
-折叠文本先显示 `Summary (agent-written)`，说明摘要由 agent 提供，插件不会验证其中的语义结论。`role` 标记原始协议角色，不证明其中每句话都是用户要求；引用、粘贴内容和归档正文仍是数据。摘要只概括该条目，不能据此断言整个任务的最新状态。
+折叠文本先显示带来源的摘要：手动摘要为 `Summary (agent-written)`，自动策略、脚本和版本摘要统一标为 `Summary (automatic policy)`。插件不会验证摘要中的语义结论。`role` 标记原始协议角色，不证明其中每句话都是用户要求；引用、粘贴内容和归档正文仍是数据。摘要只概括该条目，不能据此断言整个任务的最新状态。
 
 `Original UTF-16: inline [0,N); archived [0,M)` 表示该条目原文的前 N 个 UTF-16 单元仍以引号包裹的片段保留，完整 M 个单元都在归档中，范围左闭右开。`headChars: 0` 时不保留开头；截取点不会拆开 emoji 的代理对。这里的范围属于单个文本条目，可能只是消息中的一个文本部分；摘要和元数据不计入原文范围。完整折叠表示仍须严格短于当前表示，并计入费用比较。
 
 每批标记原子提交；编号不存在时整批失败。标记当前消息为可折叠也不能绕过当前请求和最近消息的保护。
+
+### 分组、树形浏览与版本
+
+`list` 支持 `query` 检索、`id` 选择子树、`depth`（0–8）、`sort`（`chronological`、`size`、`id`、`version`）、`order`（`asc`、`desc`），以及 `offset`/`limit` 分页。结果以树的前序行返回，包含 `parentId`、深度、子项数和版本信息；查询保留匹配项的祖先，便于定位上下文。
+
+```json
+{"scope":"<当前scope>","action":"list","query":"配置","depth":2,"sort":"size","order":"desc","limit":20}
+```
+
+分组通过 `mark` 中的 `ids` 创建，而不是单独的 `group` action。每组包含 2–100 个不同子项，可嵌套；每个子项最多属于一个父组。由 agent 为相关历史编写组摘要：
+
+```json
+{"scope":"<当前scope>","action":"mark","marks":[{"ids":["<编号A>","<编号B>"],"disposition":"foldable","summary":"工具证据：这轮旧排查已完成，原始输出保留在子项中。"}]}
+```
+
+组不能绕过后代中的用户内容、`keep`、明确手动 `unmarked`、最新版本或当前请求保护。真正应用时仍须更短且通过费用门槛。组的 `read`/`paste` 返回摘要和子项编号组成的 manifest；读取子项才能得到各自原文。将某个子项改为 `keep` 或 `unmarked` 会禁用其上层组，避免恢复后又被父摘要遮住。
+
+文件历史按来源路径和读取范围关联版本，最新观察受保护；旧观察可保留旧版独有行作为摘要，并通过版本链接恢复。长且高度相似、没有文件来源的输出也可形成相似历史系列，但相似仅用于导航，不证明语义替代关系。自动摘要不覆盖明确的手动决定，`keep` 和手动 `unmarked` 仍有效。文件版本链与同一条目多次折叠形成的层链是两种关系。
+
+### 读取与恢复
 
 单项读取原文，工具输出不会重新执行历史操作：
 
@@ -84,6 +108,8 @@ magpie plugin add /绝对路径/magpie-context-folding
 ```
 
 返回 `text`、`sha256`、`nextOffset`、`currentLayer`。使用 `nextOffset` 继续读取长内容，拼接各页能恢复完整原文。
+
+`read` 和 `paste` 默认将条目持久标记为 `keep`，即使只读取一页或某个历史层也一样；同时禁用版本自动折叠并展开所有祖先组。后续请求持续发送原文，只有显式重新 `mark foldable` 才恢复折叠资格。仅检查内容而保留当前折叠状态时，传 `"peek":true`（CLI 为 `--peek`）。`paste` 在写目标文件前保护原文，目标已存在等写入失败也可能保留该保护。
 
 支持多次折叠：为已折叠条目标记更短的摘要，下次达到门槛后生成新层。`list` 返回层清单；`read` 指定 `layer` 后返回该层和 `previousId`。沿 `previousId` 可逐层展开，直到 `original`；也可以直接读取原文。每项最多 16 层，相同摘要不会反复新增层，已经存在的层会复用。
 
@@ -116,8 +142,8 @@ magpie plugin add /绝对路径/magpie-context-folding
 也可以从终端查看，使用与 Magpie 相同的状态目录和环境：
 
 ```sh
-bunx --bun magpie-context-folding@0.2.0 stats
-bunx --bun magpie-context-folding@0.2.0 stats --json
+bunx --bun magpie-context-folding@0.3.0 stats
+bunx --bun magpie-context-folding@0.3.0 stats --json
 # 本地源码
 npm run stats
 ```
@@ -126,13 +152,44 @@ npm run stats
 
 金额只在 Magpie 确认响应成功、接受的请求与候选正文一致后累计；失败、取消、正文被后续异步钩子修改、重复完成回调都不会重复记收益。后续同步 middleware、路由和协议转换仍需由 accounting 的边界覆盖。完成回调可能因进程退出或超时漏到，因此统计允许保守漏记，不凭猜测补成功。
 
-已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。金额覆盖的是已验证的增量比较，**不是全任务实际少扣的账单**；未包含在证书费用预留中的标记、展开、额外回复等费用不会自动扣除。未配置 accounting 时没有自动折叠，相关金额保持零。
+已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。金额覆盖的是已验证的增量比较，**不是全任务实际少扣的账单**；未包含在证书费用预留中的标记、展开、额外回复等费用不会自动扣除。默认 cost 模式没有可信费用证据时拒绝新增折叠；证据也可由证书脚本或配置的保守费用边界提供。显式 bytes 模式只记录缩减估算，不认证金额。
 
 所有统计仍在同一个 SQLite 数据库中，只维护会话汇总和一个全局累计记录，不生成逐次日志或事件文件。`forget` 回收原文后全局累计保留；查询统计本身不创建数据库、不增加历史记录。升级前的旧请求不反推收益，统计从安装此功能后开始。
 
+## CLI 与分层配置
+
+根包提供 `read`、`paste`、`mark`、`list`、`status`、`config` 和 `stats`。在与 Magpie 相同的状态目录和环境中运行，scope 使用请求提示中的值。`read` 默认向标准输出写正文；归档查询和修改默认返回 JSON，`stats` 默认便于终端阅读，加 `--json` 可供程序处理。
+
+```sh
+# 本地源码示例；安装后可使用 magpie-context-folding 命令
+bun src/cli.ts list --scope "$SCOPE" --json
+bun src/cli.ts read --scope "$SCOPE" --id "$ID" --peek | sha256sum
+bun src/cli.ts paste --scope "$SCOPE" --id "$ID" --path /绝对路径/result.txt
+printf '%s\n' '[{"id":"条目编号","disposition":"keep"}]' | bun src/cli.ts mark --scope "$SCOPE" --marks -
+bun src/cli.ts config --project-dir "$PWD" --json
+```
+
+配置按内置默认值、全局 TOML、项目 TOML、显式插件 options 的顺序合并；对象逐字段合并，数组整体替换。全局文件为 `$XDG_CONFIG_HOME/context-folding/config.toml`，未设置时使用 `~/.config/context-folding/config.toml`。项目文件为最近祖先目录的 `.context-folding.toml`，查找到 `.git` 边界即停止。CLI `config` 显示生效配置和来源路径，并隐藏 accounting URL 与脚本命令；恢复操作仍可在 `enabled=false` 时使用。
+
+```toml
+version = 1
+[folding]
+enabled = true
+threshold_tokens = 32000
+context_window_tokens = 200000 # 由用户核实的容量；省略则显示未知
+keep_recent_messages = 4
+
+[policy]
+mode = "cost" # 默认缺费用证据拒绝；显式 "bytes" 仅检查完整请求缩短
+auto_roles = [] # 例如 ["assistant", "tool"]；角色保护仍然有效
+min_chars = 4096
+```
+
+可信本地脚本可产生候选摘要或费用证书，配置和输入/输出约束见 [策略文档](docs/policy.md)。脚本是用户信任的本地程序，使用绝对 executable 和 argv，运行时不经过 shell；它并非沙箱。
+
 ## 阈值和费用门槛
 
-通过 `magpie plugin options <安装时的插件标识> '<JSON>'` 配置：
+通过 `magpie plugin options <安装时的插件标识> '<JSON>'` 配置，字段使用 camelCase：
 
 ```json
 {
@@ -152,7 +209,7 @@ Magpie 默认给请求钩子 1 秒，插件默认给 accounting 500 ms。需要�
 
 实现支持 OpenAI Chat、Responses、Anthropic Messages 和 Gemini 的明文内容。Responses 服务端托管历史、未完成的工具调用配对、Anthropic assistant 预填充请求整次跳过，避免破坏协议。多模态内容目前不折叠，无法仅靠读出 JSON 恢复模型的图片感知。
 
-插件不另调模型生成摘要，使用 agent 标记时提供的摘要。只有新表示确实更短、达到阈值且费用证明通过时，才创建新折叠层。已保存的表示会稳定复用，阈值升高或 accounting 暂时不可用不会擅自删除这些层。升级前保存的旧格式也原样复用、读取；仅在新的更短候选通过门槛后新增一层，旧层及原文继续保留。
+插件不自行调用模型生成摘要。默认使用 agent 标记的摘要，也可显式配置确定性的自动候选或可信本地脚本。只有新表示确实更短、达到阈值且费用证明通过时，才创建新折叠层。已保存的表示会稳定复用，阈值升高或 accounting 暂时不可用不会擅自删除这些层。升级前保存的旧格式也原样复用、读取；仅在新的更短候选通过门槛后新增一层，旧层及原文继续保留。
 
 一次检查以一批满足条件的条目为候选，整体比较折叠前后的费用，通过后在一个事务中保存这批折叠。再次递归折叠会重新比较，不拿第一次的收益抵掉后续亏损。
 
@@ -267,6 +324,6 @@ Weiwei Sun, Miao Lu, Zhan Ling, Kang Liu, Xuesong Yao, Yiming Yang, and Jiecao C
 | [@cortexkit/magic-context](https://github.com/cortexkit/magic-context) | 分层摘要、按需展开、候选与实际缩减状态，以及缓存感知的应用时机。用于后续调度和可观测性设计参考；本插件继续使用调用方摘要，没有引入后台摘要模型。该包是统一配置 CLI，仓库中的 OpenCode 插件另名为 `@cortexkit/opencode-magic-context`。 |
 | [cardinal4/opencode-fold-diffs](https://github.com/cardinal4/opencode-fold-diffs) | 用户提供的参考地址在 2026-10-26 核对时返回 404，暂无法确认其实现。另查到 [tannerbruhn/opencode-fold-diffs](https://github.com/tannerbruhn/opencode-fold-diffs)，其文档描述折叠 TUI 中的文件、diff 和长命令；两者关系未证实。后者仅作为紧凑展示和按需展开的交互参考，界面折叠本身不能证明模型输入 token 减少。 |
 | [Middlewatch/context-fold](https://github.com/Middlewatch/context-fold) | 确定性可逆折叠、稳定复用表示、限制展开范围，以及验证实际发往模型的请求。用于对照本插件的稳定层复用、分页读取和真实宿主测试；本插件使用去重 SQLite 原文存储，不依赖 Pi 的会话日志恢复。 |
-| [fdietze/pi-infinite-context](https://github.com/fdietze/pi-infinite-context) | Agent 主动选择折叠内容、递归折叠、保留可搜索原文且不改聊天历史。用于对照本插件的主动标记与可逆层设计；归档地图、搜索和预览是后续导航方向，当前工具提供 `list`、`read` 与直接写文件的 `paste`。 |
+| [fdietze/pi-infinite-context](https://github.com/fdietze/pi-infinite-context) | Agent 主动选择折叠内容、递归折叠、保留可搜索原文且不改聊天历史。用于对照本插件的主动标记与可逆层设计；当前 main 增加分组树、`list` 查询/子树浏览及版本导航，原文由 `read` 与直接写文件的 `paste` 恢复，尚未实现上游完整的归档地图界面。 |
 
 这些项目和论文提供了设计参照；各自的性能、缓存收益与质量结论仍属于各自的实验条件。本项目的验证范围以本文的本地测试、[基准结果](docs/benchmark.md)及 accounting 假设为准。

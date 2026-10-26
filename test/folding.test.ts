@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { onRequest } from '../src/context.hooks.js';
+import { onRequest, onResponse } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
 import { extractSpans } from '../src/protocol.js';
 import { Store, digest } from '../src/store.js';
@@ -64,10 +64,13 @@ async function scopeFor(directory: string) {
   return new Store(directory).scopeFor(JSON.stringify([context.session, '', '', '']));
 }
 
-test('no MCP tool leaves request untouched and creates no archive', async () => {
+test('no MCP tool still reports budget without creating an archive', async () => {
   await fixture(async directory => {
     const withoutTool = { ...body, tools: [] };
-    assert.equal(await onRequest(withoutTool, context), withoutTool);
+    const result = await onRequest(withoutTool, context);
+    assert.ok(JSON.stringify(result).includes('<context-budget>'));
+    assert.ok(JSON.stringify(result).includes('Capacity: unknown'));
+    assert.ok(!JSON.stringify(result).includes('<context-folding scope='));
     assert.deepEqual(await readdir(directory), []);
   });
 });
@@ -109,16 +112,16 @@ test('marking, threshold, nested folding, exact paginated restoration, keep and 
     const latest = entry.layers.at(-1);
     const previous = entry.layers.at(-2);
     assert.ok(latest && previous);
-    const latestRead = JSON.parse(await execute({ scope, action: 'read', id, layer: latest.id }));
+    const latestRead = JSON.parse(await execute({ scope, action: 'read', id, layer: latest.id, peek: true }));
     assert.equal(latestRead.previousId, previous.id);
-    const previousRead = JSON.parse(await execute({ scope, action: 'read', id, layer: latestRead.previousId }));
+    const previousRead = JSON.parse(await execute({ scope, action: 'read', id, layer: latestRead.previousId, peek: true }));
     assert.equal(previousRead.previousId, entry.layers[0]?.id);
-    const firstRead = JSON.parse(await execute({ scope, action: 'read', id, layer: previousRead.previousId }));
+    const firstRead = JSON.parse(await execute({ scope, action: 'read', id, layer: previousRead.previousId, peek: true }));
     assert.equal(firstRead.previousId, 'original');
     let text = '';
     let offset: number | null = 0;
     while (offset !== null) {
-      const result = JSON.parse(await execute({ scope, action: 'read', id, offset, limit: 10000 }));
+      const result = JSON.parse(await execute({ scope, action: 'read', id, offset, limit: 10000, peek: true }));
       text += result.text;
       offset = result.nextOffset;
     }
@@ -204,7 +207,7 @@ test('legacy layers replay unchanged and remain recoverable after a new summary-
     const replay = await onRequest(body, { ...context, options: { keepRecentMessages: 1 } });
     assert.equal(chatSpans(replay)[0]?.text, legacy);
     assert.equal(requests.length, 0);
-    assert.equal(JSON.parse(await execute({ scope, action: 'read', id, layer: layerId })).text, legacy);
+    assert.equal(JSON.parse(await execute({ scope, action: 'read', id, layer: layerId, peek: true })).text, legacy);
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Research complete.' }] });
     const updated = await onRequest(body, { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, accounting: { url } } });
     assert.ok(chatSpans(updated)[0]?.text.includes('Summary (agent-written): Research complete.'));
@@ -219,9 +222,9 @@ test('legacy layers replay unchanged and remain recoverable after a new summary-
   });
 });
 
-test('missing accounting refuses folding and unknown marks are atomic', async () => {
+test('explicit byte policy folds without accounting and unknown marks are atomic', async () => {
   await fixture(async directory => {
-    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1 } };
+    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, policy: { mode: 'bytes' } } };
     await onRequest(body, ctx);
     const scope = await scopeFor(directory);
     const id = extractSpans(body, 'chat').find(span => span.text === oldText)?.id;
@@ -234,10 +237,97 @@ test('missing accounting refuses folding and unknown marks are atomic', async ()
     assert.equal(before.entries.find((entry: { id: string }) => entry.id === id).disposition, 'unmarked');
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'summary' }] });
     const result = await onRequest(body, ctx);
-    assert.ok(JSON.stringify(result).includes(JSON.stringify(oldText).slice(1, -1)));
+    assert.ok(!JSON.stringify(result).includes(JSON.stringify(oldText).slice(1, -1)));
+    assert.ok(Buffer.byteLength(JSON.stringify(result)) < Buffer.byteLength(JSON.stringify(body)));
     const status = JSON.parse(await execute({ scope, action: 'status' }));
-    assert.equal(status.decision.reason, 'trusted-accounting-required');
+    assert.equal(status.decision.reason, 'bytes-smaller-no-cost-proof');
+    assert.equal(status.folded, 1);
     assert.ok(JSON.parse(await execute({ scope: '0'.repeat(64), action: 'read', id })).error);
+  });
+});
+
+test('default cost gate refuses marked folds without evidence while recovery remains usable when disabled', async () => {
+  await fixture(async directory => {
+    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 0 } };
+    await onRequest(body, ctx);
+    const scope = await scopeFor(directory);
+    const id = extractSpans(body, 'chat').find(span => span.text === oldText)!.id;
+    await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Completed research.' }] });
+    const output = await onRequest(body, ctx);
+    assert.equal(chatSpans(output).find(span => span.id === id)?.text, oldText);
+    assert.equal(JSON.parse(await execute({ scope, action: 'status' })).decision.reason, 'policy-cost-bounds-missing');
+    assert.equal(await onRequest(body, { ...context, options: { enabled: false } }), body);
+    const recovered = JSON.parse(await execute({ scope, action: 'read', id, limit: 10 }));
+    assert.equal(recovered.text, oldText.slice(0, 10));
+    assert.equal(recovered.kept, true);
+  });
+});
+
+test('script gets only eligible originals and a missing summary uses truthful recovery fallback', async () => {
+  await fixture(async directory => {
+    const request = { ...body, messages: [
+      { role: 'user', content: 'Current user requirements.' },
+      { role: 'assistant', content: oldText },
+      { role: 'assistant', content: 'Keep this explicit decision.' },
+      { role: 'assistant', content: 'Leave this explicitly unmarked.' },
+    ] };
+    await onRequest(request, context);
+    const scope = await scopeFor(directory);
+    const spans = extractSpans(request, 'chat');
+    const id = spans[1]!.id;
+    await execute({ scope, action: 'mark', marks: [
+      { id: spans[2]!.id, disposition: 'keep' },
+      { id: spans[3]!.id, disposition: 'unmarked' },
+    ] });
+    const source = `let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
+      const request=JSON.parse(input);
+      if(request.spans.length!==1||request.spans[0].id!==${JSON.stringify(id)})process.exit(2);
+      process.stdout.write(JSON.stringify({marks:[{id:request.spans[0].id,disposition:'foldable'}]}));
+    });`;
+    const output = await onRequest(request, { ...context, options: {
+      thresholdTokens: 1, keepRecentMessages: 0,
+      policy: { mode: 'bytes', minChars: 0, autoRoles: ['user', 'assistant'],
+        script: { command: [process.execPath, '-e', source] } },
+    } });
+    const result = chatSpans(output);
+    assert.ok(result[1]!.text.includes('Summary (automatic policy): Archived assistant text'));
+    assert.ok(result[1]!.text.includes('read the original for details'));
+    for (const index of [0, 2, 3]) assert.equal(result[index]!.text, spans[index]!.text);
+    const saved = await new Store(directory).transaction(scope, false, 64 * 1024 * 1024,
+      snapshot => snapshot.entries.find(entry => entry.id === id));
+    assert.equal(saved?.text, oldText);
+    assert.equal(saved?.manual, false);
+    assert.equal(saved?.layers.length, 1);
+  });
+});
+
+test('empty eligible requests get a configured self-inclusive budget without archiving', async () => {
+  await fixture(async directory => {
+    const request = { ...body, messages: [] };
+    const output = await onRequest(request, { ...context, options: { contextWindowTokens: 128000 } });
+    const text = JSON.stringify(output);
+    const used = Number(text.match(/length estimate: (\d+) tokens/)?.[1]);
+    assert.equal(used, Math.ceil(Buffer.byteLength(text) / 4));
+    assert.ok(text.includes('Capacity: 128000 tokens (configured)'));
+    assert.ok(text.includes('used ratio estimate:'));
+    assert.ok(!text.includes('<context-folding scope='));
+    assert.deepEqual(await readdir(directory), []);
+  });
+});
+
+test('hook configuration errors return the original and redact unknown secret names and values', async () => {
+  await fixture(async directory => {
+    const messages: string[] = [];
+    const previous = console.error;
+    console.error = (...args: unknown[]) => { messages.push(args.join(' ')); };
+    try {
+      assert.equal(await onRequest(body, { ...context, options: { 'secret-key-token': 'secret-value' } }), body);
+    } finally { console.error = previous; }
+    assert.equal(messages.length, 1);
+    assert.ok(messages[0]!.includes('[context-folding]'));
+    assert.ok(!messages[0]!.includes('secret-key-token'));
+    assert.ok(!messages[0]!.includes('secret-value'));
+    assert.deepEqual(await readdir(directory), []);
   });
 });
 
@@ -252,6 +342,94 @@ test('threshold and archive limit keep the original safe', async () => {
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'summary' }] });
     assert.ok(JSON.stringify(await onRequest(body, ctx)).includes(JSON.stringify(oldText).slice(1, -1)));
     assert.equal(JSON.parse(await execute({ scope, action: 'status' })).decision.reason, 'below-threshold');
+  });
+});
+
+test('disabled folding preserves recovery and clears stale request statistics', async () => {
+  await fixture(async directory => {
+    await onRequest(body, context);
+    const scope = await scopeFor(directory);
+    const id = extractSpans(body, 'chat').find(span => span.text === oldText)!.id;
+    const state: Record<string, unknown> = { contextFoldingStatistics: { stale: true } };
+    assert.equal(await onRequest(body, { ...context, state, options: { enabled: false } }), body);
+    assert.equal(state.contextFoldingStatistics, undefined);
+    const recovered = JSON.parse(await execute({ action: 'read', scope, id, peek: true, limit: 100 }));
+    assert.equal(recovered.text, oldText.slice(0, 100));
+  });
+});
+
+test('automatic scripts see only safe undecided spans and missing summaries retain truthful attribution', async () => {
+  await fixture(async directory => {
+    const texts = ['historical assistant A ', 'manual kept B ', 'manual unmarked C ', 'current user D ', 'recent assistant E ']
+      .map(text => text.repeat(500));
+    const request = { ...body, messages: texts.map((content, index) => ({ role: index === 3 ? 'user' : 'assistant', content })) };
+    await onRequest(request, context);
+    const scope = await scopeFor(directory);
+    const spans = extractSpans(request, 'chat');
+    await execute({ action: 'mark', scope, marks: [
+      { id: spans[1]!.id, disposition: 'keep' }, { id: spans[2]!.id, disposition: 'unmarked' },
+    ] });
+    const capture = join(directory, 'candidate-input.json');
+    const script = { command: [process.execPath, '--eval',
+      `let input='';for await(const chunk of process.stdin)input+=chunk;const value=JSON.parse(input);await Bun.write(${JSON.stringify(capture)},input);console.log(JSON.stringify({marks:value.spans.map(span=>({id:span.id,disposition:'foldable'}))}));`] };
+    const options = { thresholdTokens: 1, keepRecentMessages: 1, policy: { mode: 'bytes', minChars: 1,
+      autoRoles: ['user', 'assistant'], script } };
+    const output = await onRequest(request, { ...context, options });
+    const candidates = JSON.parse(await readFile(capture, 'utf8')).spans;
+    assert.deepEqual(candidates.map((span: { id: string }) => span.id), [spans[0]!.id]);
+    assert.ok(chatSpans(output)[0]!.text.includes('Summary (automatic policy): Archived assistant text'));
+    for (let index = 1; index < texts.length; index++) assert.ok(chatSpans(output)[index]!.text.startsWith(texts[index]!));
+    await execute({ action: 'mark', scope, marks: [{ id: spans[0]!.id, disposition: 'keep' }] });
+    assert.ok(chatSpans(await onRequest(request, { ...context, options }))[0]!.text.startsWith(texts[0]!));
+    const pendingCall = { ...request, messages: [...request.messages, { role: 'assistant', content: '',
+      tool_calls: [{ id: 'pending', type: 'function', function: { name: 'read', arguments: '{}' } }] }] };
+    await rm(capture);
+    assert.deepEqual(await onRequest(pendingCall, { ...context, options }), pendingCall);
+    assert.ok(!(await readdir(directory)).includes('candidate-input.json'));
+  });
+});
+
+test('zero recent messages allows the final completed assistant span while retaining current user text', async () => {
+  await fixture(async () => {
+    const request = { ...body, messages: [{ role: 'user', content: 'Current task.' }, { role: 'assistant', content: oldText }] };
+    const output = await onRequest(request, { ...context, options: { thresholdTokens: 1, keepRecentMessages: 0,
+      policy: { mode: 'bytes', autoRoles: ['user', 'assistant'], minChars: 1 } } });
+    assert.ok(chatSpans(output)[0]!.text.startsWith('Current task.'));
+    assert.ok(chatSpans(output)[1]!.text.includes('Summary (automatic policy):'));
+  });
+});
+
+test('accounting endpoint wins over script and configured cost; a failing selected script refuses fallback', async () => {
+  await fixture(async (directory, url, requests) => {
+    const policy = { autoRoles: ['user'], minChars: 1,
+      certificateScript: { command: ['/nonexistent-context-folding-certificate'] },
+      cost: { bytesPerTokenLower: 4, bytesPerTokenUpper: 4,
+        input: { lower: 1, upper: 1 }, cacheRead: { lower: 1, upper: 1 }, cacheWrite: { lower: 1, upper: 1 } } };
+    const options = { thresholdTokens: 1, keepRecentMessages: 1, policy };
+    const refused = await onRequest(body, { ...context, options });
+    assert.equal(chatSpans(refused)[0]!.text, oldText);
+    const scope = await scopeFor(directory);
+    assert.equal(JSON.parse(await execute({ action: 'status', scope })).decision.reason, 'policy-certificate-script-failed');
+    const output = await onRequest(body, { ...context, options: { ...options, accounting: { url } } });
+    assert.ok(chatSpans(output)[0]!.text.includes('Summary (automatic policy):'));
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0]!.before, body);
+    assert.deepEqual(requests[0]!.after, output);
+  });
+});
+
+test('byte approvals update estimates but never certify token or fee savings', async () => {
+  await fixture(async directory => {
+    const state = {};
+    const output = await onRequest(body, { ...context, state, options: { thresholdTokens: 1, keepRecentMessages: 1,
+      policy: { mode: 'bytes', autoRoles: ['user'], minChars: 1 } } });
+    await onResponse({}, { state, success: true, request: output });
+    const metrics = (await new Store(directory).readStats(await scopeFor(directory))).metrics;
+    assert.equal(metrics.successfulFoldedRequests, 1);
+    assert.ok(BigInt(metrics.estimatedTokenDelta) > 0n);
+    assert.equal(metrics.certifiedComparisons, 0);
+    assert.equal(metrics.certifiedTokenDeltaLower, '0');
+    assert.equal(metrics.savingNanoUsdLower, '0');
   });
 });
 

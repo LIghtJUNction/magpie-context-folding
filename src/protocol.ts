@@ -10,6 +10,7 @@ export interface Span {
   path: Path;
   messageIndex: number;
   protectedReason?: string;
+  source?: { path: string; range: string };
 }
 
 type Candidate = Omit<Span, "id">;
@@ -135,6 +136,171 @@ function geminiSpans(body: Record<string, unknown>): Candidate[] {
   return candidates;
 }
 
+type Source = NonNullable<Span["source"]>;
+
+function readSource(name: unknown, value: unknown): Source | undefined {
+  if (name !== "read" && name !== "Read" && name !== "read_file") return;
+  if (typeof value === "string") {
+    try { value = JSON.parse(value); } catch { return; }
+  }
+  if (!isRecord(value)) return;
+  const args = value;
+  const paths = ["path", "file_path", "filePath", "absolute_path"].filter((key) => key in args).map((key) => args[key]);
+  const path = paths[0];
+  if (typeof path !== "string" || !path.trim() || paths.some((entry) => entry !== path)) return;
+  const controls = [
+    ["offset"], ["limit"], ["start_line", "startLine", "start"], ["end_line", "endLine", "end"],
+  ];
+  const values: (number | undefined)[] = [];
+  for (const aliases of controls) {
+    const entries = aliases.filter((key) => key in args).map((key) => args[key]);
+    const first = entries[0];
+    if (entries.length && (typeof first !== "number" || !Number.isSafeInteger(first) || first < 0 || entries.some((entry) => entry !== first))) return;
+    values.push(first as number | undefined);
+  }
+  const [offset, limit, start, end] = values;
+  if (limit === 0 || (start !== undefined && end !== undefined && end < start)) return;
+  if ((offset !== undefined || limit !== undefined) && (start !== undefined || end !== undefined)) return;
+  // Unknown slicing controls must not accidentally label a partial read as a full read.
+  if (["range", "line_range", "lines", "pages"].some((key) => key in args)) return;
+  const range = offset !== undefined || limit !== undefined
+    ? `offset:${offset ?? "default"}:limit:${limit ?? "default"}`
+    : start !== undefined || end !== undefined
+      ? `start:${start ?? "default"}:end:${end ?? "default"}`
+      : "full";
+  return { path, range };
+}
+
+function unsafeReadResult(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(unsafeReadResult);
+  if (!isRecord(value)) return false;
+  if (["signature", "thoughtSignature", "encrypted_content", "encryptedContent", "error", "inlineData", "inline_data", "fileData", "file_data", "image_url", "audio", "input_audio"].some((key) => key in value)
+    || (typeof value.type === "string" && /^(?:image|image_url|input_image|input_audio|audio|file|input_file|thinking|redacted_thinking)$/.test(value.type))
+    || value.is_error === true || value.isError === true || value.success === false || value.thought === true
+    || (typeof value.status === "string" && /^(?:error|failed|failure|cancelled|canceled|incomplete)$/i.test(value.status))) return true;
+  return Object.values(value).some((entry) => (isRecord(entry) || Array.isArray(entry)) && unsafeReadResult(entry));
+}
+
+function singleReadText(value: unknown, types: ReadonlySet<string>): boolean {
+  if (typeof value === "string") {
+    if (!value.length || /^\s*(?:error\b|failed\b|ENOENT\b|EACCES\b|EPERM\b|file not found\b|no such file or directory\b|permission denied\b|<tool_use_error>)/i.test(value)) return false;
+    try { if (unsafeReadResult(JSON.parse(value))) return false; } catch { /* Ordinary file text. */ }
+    return true;
+  }
+  return Array.isArray(value) && value.length === 1 && isRecord(value[0])
+    && typeof value[0].type === "string" && types.has(value[0].type)
+    && !unsafeReadResult(value[0]) && singleReadText(value[0].text, types)
+    && !Object.keys(value[0]).some((key) => !["type", "text", "annotations"].includes(key));
+}
+
+function attachReadSources(body: Record<string, unknown>, protocol: Protocol, candidates: Candidate[]): void {
+  type Call = { id: unknown; name: unknown; args: unknown; safe: boolean };
+  type Result = { id: unknown; name?: unknown; path: Path; safe: boolean };
+  const events: ({ call: Call } | { result: Result })[] = [];
+  const items = protocol === "responses" ? body.input : protocol === "gemini" ? body.contents : body.messages;
+  if (!Array.isArray(items)) return;
+  for (const [index, item] of items.entries()) {
+    if (!isRecord(item)) continue;
+    if (protocol === "chat") {
+      if (item.role === "assistant" && Array.isArray(item.tool_calls)) {
+        for (const call of item.tool_calls) {
+          if (isRecord(call) && isRecord(call.function)) events.push({ call: {
+            id: call.id, name: call.function.name, args: call.function.arguments, safe: !unsafeReadResult(call),
+          } });
+        }
+      } else if (item.role === "tool") events.push({ result: {
+        id: item.tool_call_id, path: ["messages", index, "content"],
+        safe: !unsafeReadResult(item) && singleReadText(item.content, chatTextTypes),
+      } });
+    } else if (protocol === "responses") {
+      if (item.type === "function_call") events.push({ call: { id: item.call_id, name: item.name, args: item.arguments, safe: !unsafeReadResult(item) } });
+      else if (item.type === "function_call_output") events.push({ result: {
+        id: item.call_id, path: ["input", index, "output"], safe: !unsafeReadResult(item) && singleReadText(item.output, responseTextTypes),
+      } });
+    } else {
+      const parts = protocol === "gemini" ? item.parts : item.content;
+      if (!Array.isArray(parts)) continue;
+      for (const [partIndex, part] of parts.entries()) {
+        if (!isRecord(part)) continue;
+        const safe = !unsafeReadResult(part);
+        if (protocol === "anthropic") {
+          if (item.role === "assistant" && part.type === "tool_use") events.push({ call: { id: part.id, name: part.name, args: part.input, safe } });
+          else if (item.role === "user" && part.type === "tool_result") events.push({ result: {
+            id: part.tool_use_id, path: ["messages", index, "content", partIndex, "content"], safe: safe && singleReadText(part.content, chatTextTypes),
+          } });
+        } else if (item.role === "model" || item.role === "user") {
+          if (item.role === "model" && isRecord(part.functionCall)) {
+            const call = part.functionCall;
+            events.push({ call: { id: call.id, name: call.name, args: call.args, safe } });
+          }
+          if (item.role === "user" && isRecord(part.functionResponse)) {
+            const response = part.functionResponse;
+            const output = response.response;
+            const textKeys = isRecord(output) ? ["text", "output", "result", "content"].filter((key) => typeof output[key] === "string") : [];
+            events.push({ result: {
+              id: response.id, name: response.name, path: ["contents", index, "parts", partIndex, "functionResponse", "response"],
+              safe: safe && isRecord(output) && textKeys.length === 1 && singleReadText(output[textKeys[0]!], chatTextTypes)
+                && !Object.values(output).some((entry) => isRecord(entry) || Array.isArray(entry))
+                && Object.keys(part).every((key) => key === "functionResponse")
+                && !Array.isArray(response.parts),
+            } });
+          }
+        }
+      }
+    }
+  }
+  // Duplicate IDs or multiple result envelopes cannot identify a single file version.
+  const callCounts = new Map<string, number>();
+  const resultCounts = new Map<string, number>();
+  for (const event of events) {
+    const id = "call" in event ? event.call.id : event.result.id;
+    const counts = "call" in event ? callCounts : resultCounts;
+    if (typeof id === "string") counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const identifiedNames = new Set(events.flatMap((event) => "call" in event && event.call.id !== undefined ? [event.call.name] : []));
+  const unnamedCounts = new Map<unknown, { calls: number; results: number }>();
+  for (const event of events) {
+    const entry = "call" in event ? event.call : event.result;
+    if (entry.id !== undefined) continue;
+    const count = unnamedCounts.get(entry.name) ?? { calls: 0, results: 0 };
+    if ("call" in event) count.calls++;
+    else count.results++;
+    unnamedCounts.set(entry.name, count);
+  }
+  const pending = new Map<string, Call>();
+  const unnamed = new Map<string, Call[]>();
+  for (const event of events) {
+    if ("call" in event) {
+      const call = event.call;
+      if (typeof call.id === "string" && call.id) pending.set(call.id, call);
+      else if (protocol === "gemini" && call.id === undefined && typeof call.name === "string") {
+        const queue = unnamed.get(call.name) ?? [];
+        queue.push(call);
+        unnamed.set(call.name, queue);
+      }
+      continue;
+    }
+    const result = event.result;
+    let call: Call | undefined;
+    if (typeof result.id === "string" && result.id) {
+      call = pending.get(result.id);
+      pending.delete(result.id);
+      if (callCounts.get(result.id) !== 1 || resultCounts.get(result.id) !== 1) continue;
+    } else if (protocol === "gemini" && result.id === undefined && typeof result.name === "string") {
+      // Without IDs, consume same-name calls in wire order, including failed reads.
+      // A mixture of ID-bearing and ID-less calls with this name is ambiguous.
+      const count = unnamedCounts.get(result.name);
+      if (identifiedNames.has(result.name) || !count || count.calls !== count.results) continue;
+      call = unnamed.get(result.name)?.shift();
+    }
+    if (!call || !call.safe || !result.safe || (protocol === "gemini" && call.name !== result.name)) continue;
+    const source = readSource(call.name, call.args);
+    if (!source) continue;
+    const spans = candidates.filter((candidate) => candidate.role === "tool" && result.path.every((part, index) => candidate.path[index] === part));
+    if (spans.length === 1) spans[0]!.source = source;
+  }
+}
+
 function hasPendingCalls(body: Record<string, unknown>, protocol: Protocol): boolean {
   const pending = new Map<string, number>();
   const add = (id: unknown): void => {
@@ -195,6 +361,7 @@ export function extractSpans(body: Record<string, unknown>, protocol: Protocol):
     case "anthropic": candidates = anthropicSpans(body); break;
     case "gemini": candidates = geminiSpans(body); break;
   }
+  attachReadSources(body, protocol, candidates);
   const occurrences = new Map<string, number>();
   const reason = protectionReason(body, protocol);
   return candidates.map((candidate) => {
