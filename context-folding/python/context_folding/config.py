@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -17,10 +18,11 @@ except ModuleNotFoundError:  # Python 3.10
 MAX_CONFIG_BYTES = 1024 * 1024
 DEFAULTS: dict[str, dict[str, Any]] = {
     "folding": {
+        "mode": "intelligence",
         "enabled": True,
-        "threshold_tokens": 32000,
-        "keep_recent_messages": 4,
-        "head_chars": 160,
+        "threshold_tokens": 64000,
+        "keep_recent_messages": 12,
+        "head_chars": 400,
         "max_session_bytes": 67108864,
         "minimum_saving_usd": 0.000001,
     },
@@ -34,13 +36,18 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "auto_purge": False,
     },
     "magpie": {},
-    "policy": {"mode": "cost", "auto_roles": [], "min_chars": 4096,
+    "policy": {"mode": "bytes", "auto_roles": ["tool"], "min_chars": 12000, "summary_chars": 1600,
                "minimum_saving_usd": 0.000001},
 }
 _KEYS = {
     **{section: set(values) for section, values in DEFAULTS.items()},
-    "magpie": {"gateway_timeout_ms", "accounting"},
-    "policy": {"mode", "auto_roles", "min_chars", "minimum_saving_usd", "cost", "script", "certificate_script"},
+    "magpie": {"recovery_tool_name", "gateway_timeout_ms", "accounting"},
+    "policy": {"mode", "auto_roles", "min_chars", "summary_chars", "minimum_saving_usd", "cost", "script", "certificate_script"},
+}
+_MODES = {
+    "intelligence": (64000, 12, 400, ["tool"], 12000, 1600),
+    "balanced": (32000, 6, 160, ["tool"], 4096, 800),
+    "economy": (8192, 2, 0, ["assistant", "tool"], 2048, 320),
 }
 
 
@@ -160,6 +167,12 @@ def _validate(data: Any, source: str | Path) -> None:
             elif name == "gc.strength":
                 valid = isinstance(value, str) and value in _STRENGTHS
                 expected = "expected off, conservative, balanced, or aggressive"
+            elif name == "folding.mode":
+                valid = isinstance(value, str) and value in {*_MODES, "agentic"}
+                expected = "expected intelligence, balanced, economy, or agentic"
+            elif name == "magpie.recovery_tool_name":
+                valid = isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", value) is not None
+                expected = "expected a recovery tool identifier"
             elif name == "magpie.accounting":
                 _validate_accounting(value, source)
                 continue
@@ -208,6 +221,8 @@ def _validate_policy(data: dict, source: str | Path, *, complete: bool = False) 
                      and len(set(value)) == len(value))
         elif key == "min_chars":
             valid = _number(value, 0, _SAFE_COUNT, integer=True)
+        elif key == "summary_chars":
+            valid = _number(value, 256, 2000, integer=True)
         elif key == "minimum_saving_usd":
             valid = _number(value, 0)
         elif key in {"script", "certificate_script"}:
@@ -305,7 +320,7 @@ def load_config(project_dir: str | os.PathLike[str] | None = None,
     Optional accounting settings are omitted unless configured, and require a
     URL after merging. Source-path discovery is available through separate helpers.
     """
-    result = deepcopy(DEFAULTS)
+    result = {}
     accounting_source: str | Path = "<overrides>"
     policy_source: str | Path = "<overrides>"
     explicit_policy_minimum = False
@@ -332,6 +347,17 @@ def load_config(project_dir: str | os.PathLike[str] | None = None,
             apply_layer(project_data, project_path)
     if overrides is not None:
         apply_layer(overrides, "<overrides>")
+    explicit = result
+    selected = explicit.get("folding", {}).get("mode", "intelligence")
+    threshold, recent, head, roles, minimum, summary = _MODES["intelligence" if selected == "agentic" else selected]
+    result = deepcopy(DEFAULTS)
+    result["folding"].update(mode=selected, threshold_tokens=threshold, keep_recent_messages=recent, head_chars=head)
+    result["policy"].update(auto_roles=deepcopy(roles), min_chars=minimum, summary_chars=summary)
+    _merge(result, explicit)
+    explicit_policy = explicit.get("policy", {})
+    if "mode" not in explicit_policy and (result["magpie"].get("accounting") or explicit_policy.get("cost")
+                                          or explicit_policy.get("certificate_script")):
+        result["policy"]["mode"] = "cost"
     accounting = result["magpie"].get("accounting")
     if accounting is not None:
         if "url" not in accounting:

@@ -168,6 +168,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     }]})
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
         "spec": str(project), "options": {
+            "mode": "agentic", "policy": {"autoRoles": []},
             "thresholdTokens": 32, "keepRecentMessages": 1, "headChars": 80,
             "minimumSavingUsd": 0.000001,
             "accounting": {"url": upstream + "/accounting", "timeoutMs": 2000},
@@ -279,6 +280,11 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             scope_match = re.search(r"scope=([a-f0-9]{64})", serialized(first))
             assert scope_match, "gateway hook did not append a scope guide"
             scope = scope_match.group(1)
+            for strategy in ("economy", "balanced", "intelligence"):
+                selected = call({"scope": scope, "action": "mode", "mode": strategy})
+                assert selected["effectiveOnNextRequest"] is True
+                send()
+                assert call({"scope": scope, "action": "status"})["decision"]["activeMode"] == strategy
             entries = call({"scope": scope, "action": "list"})["entries"]
             entry = next((entry for entry in entries if entry["role"] == "assistant" and entry["chars"] == len(original)), None)
             assert entry is not None, "historical assistant text was not inventoried"
@@ -390,7 +396,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert other["messages"][2]["content"] == original, "a mark leaked into another session"
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun", "billing": "SYNTHETIC_ACCOUNTING_ONLY",
-                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "self-inclusive request estimate without plugin-owned model capacity", "default historical-layer read persistently restores original", "explicit foldable re-enables folding", "default paste persistently restores original", "unprofitable fold refused", "session isolation"],
+                "checks": ["MCP discovery", "agentic switches all three strategies on real requests", "historical assistant mark and automatic fold", "summary first with role, original ranges and quoted opening", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "self-inclusive request estimate without plugin-owned model capacity", "default historical-layer read persistently restores original", "explicit foldable re-enables folding", "default paste persistently restores original", "unprofitable fold refused", "session isolation"],
                 "originalChars": len(original), "foldedChars": len(folded["messages"][2]["content"]),
                 "accountingRequests": len(fixture.accounting), "status": status,
             }))

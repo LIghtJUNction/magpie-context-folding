@@ -43,7 +43,7 @@ test('a paused unchanged replay returns the original request after concurrent re
     assert.ok(extractSpans(folded as Record<string, unknown>, 'chat')[0]!.text.startsWith('[context-folding'));
     const replay = await onRequest(body, ctx);
     assert.ok(isDeepStrictEqual(replay, folded), 'Precondition: unchanged history must replay the same fold');
-    const pending = onRequest(body, { ...ctx, options: { ...ctx.options, policy: { mode: 'bytes', autoRoles: ['assistant'], script: {
+    const pending = onRequest(body, { ...ctx, options: { ...ctx.options, policy: { mode: 'bytes', autoRoles: ['assistant'], minChars: 1, script: {
       command: [process.execPath, '-e', `await Bun.stdin.text(); const r = await fetch('http://127.0.0.1:${address.port}'); process.stdout.write(await r.text());`],
       timeoutMs: 10_000,
     } } } });

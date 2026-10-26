@@ -42,11 +42,11 @@ class ConfigTests(unittest.TestCase):
     def test_missing_sources_return_independent_defaults_without_writing(self):
         settings = self.load()
         self.assertEqual(set(settings), {"folding", "annotations", "gc", "magpie", "policy"})
-        self.assertEqual(settings["policy"], {"mode": "cost", "auto_roles": [],
-                                             "min_chars": 4096, "minimum_saving_usd": 0.000001})
+        self.assertEqual(settings["policy"], {"mode": "bytes", "auto_roles": ["tool"],
+                                             "min_chars": 12000, "summary_chars": 1600, "minimum_saving_usd": 0.000001})
         self.assertEqual(settings["folding"], {
-            "enabled": True, "threshold_tokens": 32000, "keep_recent_messages": 4,
-            "head_chars": 160, "max_session_bytes": 67108864,
+            "mode": "intelligence", "enabled": True, "threshold_tokens": 64000, "keep_recent_messages": 12,
+            "head_chars": 400, "max_session_bytes": 67108864,
             "minimum_saving_usd": 0.000001,
         })
         self.assertEqual(settings["annotations"], {"enabled": True, "default_fold": True, "keep": []})
@@ -114,7 +114,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(project_config_path(grandchild), nearest)
         settings = load_config(grandchild)
         self.assertEqual(settings["folding"]["head_chars"], 30)
-        self.assertEqual(settings["folding"]["threshold_tokens"], 32000)
+        self.assertEqual(settings["folding"]["threshold_tokens"], 64000)
 
     def test_git_root_checked_but_never_its_parent_for_git_directory_or_file(self):
         self.write(self.root / ".context-folding.toml", "[folding]\nhead_chars=999\n")
@@ -127,7 +127,7 @@ class ConfigTests(unittest.TestCase):
                     marker.rmdir()
                     marker.write_text("gitdir: /unused\n", encoding="utf-8")
                 self.assertIsNone(project_config_path(child))
-                self.assertEqual(load_config(child)["folding"]["head_chars"], 160)
+                self.assertEqual(load_config(child)["folding"]["head_chars"], 400)
                 self.write(self.project_path, "[folding]\nhead_chars=20\n")
                 self.assertEqual(load_config(child)["folding"]["head_chars"], 20)
                 self.project_path.unlink()

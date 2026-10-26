@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
 import type { Metrics } from './metrics.js';
+import { modeSchema, strategySchema } from './modes.js';
 
 const markSchema = z.discriminatedUnion('disposition', [
   z.object({ disposition: z.literal('unmarked') }),
@@ -32,6 +33,7 @@ const entrySchema = z.object({
 });
 const snapshotSchema = z.object({
   version: z.literal(1), entries: z.array(entrySchema), groups: z.array(groupSchema).optional(),
+  configuredMode: modeSchema.optional(), agenticMode: strategySchema.optional(), appliedMode: strategySchema.optional(),
   decision: z.record(z.string(), z.unknown()).default({}),
   metrics: metricsSchema.default(emptyMetrics),
 });

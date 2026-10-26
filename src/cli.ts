@@ -16,6 +16,7 @@ list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size
        [--order asc|desc] [--offset N] [--limit N]
 status --scope S
 stats  [--scope S] [--json]
+mode   --scope S [--mode intelligence|balanced|economy]
 config [--project-dir PATH]
 
 read writes the full exact text to stdout unless --limit selects a page; paste --path - does the same.
@@ -34,6 +35,7 @@ const options: Record<string, ParseArgsConfig['options']> = {
   list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
   status: { ...common, scope: string },
   stats: { ...common, scope: string },
+  mode: { ...common, scope: string, mode: string },
   config: { ...common, 'project-dir': string },
 };
 class UsageError extends Error {}

@@ -32,9 +32,9 @@ test('global and project TOML settings', async () => {
   await sequential('defaults and backwards compatible parseOptions', () => fixture(async f => {
     const options = await loadOptions(undefined, f.project);
     assert.equal(options.enabled, true);
-    assert.equal(options.thresholdTokens, 32_000);
-    assert.equal(options.keepRecentMessages, 4);
-    assert.equal(options.headChars, 160);
+    assert.equal(options.thresholdTokens, 64_000);
+    assert.equal(options.keepRecentMessages, 12);
+    assert.equal(options.headChars, 400);
     assert.equal(options.maxSessionBytes, 67_108_864);
     assert.equal(options.minimumSavingUsd, 0.000001);
     assert.equal(options.accounting, undefined);
@@ -92,13 +92,13 @@ test('global and project TOML settings', async () => {
     const child = join(f.project, 'nested');
     await mkdir(child);
     assert.equal(await projectConfigPath(child), null);
-    assert.equal((await loadOptions({}, child)).headChars, 160);
+    assert.equal((await loadOptions({}, child)).headChars, 400);
     await f.file(join(f.project, '.context-folding.toml'), '[folding]\nhead_chars=20\nthreshold_tokens=999\n');
     assert.equal((await loadOptions({}, child)).headChars, 20);
     const nearest = join(child, '.context-folding.toml');
     await f.file(nearest, '[folding]\nhead_chars=30\n');
     assert.equal(await projectConfigPath(child), nearest);
-    assert.equal((await loadOptions({}, child)).thresholdTokens, 32_000);
+    assert.equal((await loadOptions({}, child)).thresholdTokens, 64_000);
     await rm(nearest);
     await rm(join(f.project, '.context-folding.toml'));
     await rm(join(f.project, '.git'), { recursive: true });

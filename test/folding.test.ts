@@ -153,7 +153,7 @@ test('summary-first folds preserve source roles, exact excerpt ranges and the fu
         { role, tool_call_id: 'call_1', content: text },
       ] : [{ role, content: text }];
       const request = { ...body, messages: [body.messages[0]!, ...history, body.messages.at(-1)!] };
-      const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, headChars, accounting: { url } } };
+      const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, headChars, accounting: { url }, policy: { autoRoles: [] } } };
       await onRequest(request, ctx);
       const scope = await scopeFor(directory);
       const span = extractSpans(request, 'chat').find(span => span.text === text);
@@ -209,7 +209,7 @@ test('legacy layers replay unchanged and remain recoverable after a new summary-
     assert.equal(requests.length, 0);
     assert.equal(JSON.parse(await execute({ scope, action: 'read', id, layer: layerId, peek: true })).text, legacy);
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Research complete.' }] });
-    const updated = await onRequest(body, { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, accounting: { url } } });
+    const updated = await onRequest(body, { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, headChars: 0, accounting: { url }, policy: { autoRoles: [] } } });
     assert.ok(chatSpans(updated)[0]?.text.includes('Summary (agent-written): Research complete.'));
     assert.equal(chatSpans(requests[0]?.before)[0]?.text, legacy);
     const entry = await new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot.entries.find(entry => entry.id === id));
@@ -246,9 +246,9 @@ test('explicit byte policy folds without accounting and unknown marks are atomic
   });
 });
 
-test('default cost gate refuses marked folds without evidence while recovery remains usable when disabled', async () => {
+test('explicit cost gate refuses marked folds without evidence while recovery remains usable when disabled', async () => {
   await fixture(async directory => {
-    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 0 } };
+    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 0, policy: { mode: 'cost' } } };
     await onRequest(body, ctx);
     const scope = await scopeFor(directory);
     const id = extractSpans(body, 'chat').find(span => span.text === oldText)!.id;
