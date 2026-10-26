@@ -36,9 +36,21 @@ function oldDifferences(oldText: string, newText: string): string | undefined {
   return JSON.stringify(unique);
 }
 
+function matchesSource(entry: Entry, span: Span, cwd?: string): boolean {
+  if (entry.version?.kind !== 'file') return true;
+  const path = span.source && (isAbsolute(span.source.path) || cwd)
+    ? resolve(cwd ?? '/', span.source.path) : undefined;
+  return path !== undefined && path === entry.version.path && span.source?.range === entry.version.range;
+}
+
 // The strings are quoted evidence; similarity never establishes semantic supersession.
 export function trackVersions(snapshot: Snapshot, spans: Span[], cwd?: string, observations?: ReadonlyMap<string, string>): Set<string> {
   const byId = new Map(snapshot.entries.map(entry => [entry.id, entry]));
+  for (const span of spans) {
+    const entry = byId.get(span.id);
+    // Equal text and a shifted occurrence suffix cannot transfer file provenance.
+    if (entry && !matchesSource(entry, span, cwd)) throw new Error('Archive source identity mismatch');
+  }
   const heads = new Map<string, Entry>();
   for (const entry of snapshot.entries) {
     if (entry.version && (!heads.has(entry.version.series)

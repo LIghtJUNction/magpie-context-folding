@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
-import { Store, digest } from './store.js';
+import { ScopeConflictError, Store, digest } from './store.js';
 import type { Snapshot } from './store.js';
 import { addMetrics } from './metrics.js';
 import { statistics } from './statistics.js';
@@ -33,6 +33,15 @@ const argsSchema = z.discriminatedUnion('action', [
 ]);
 
 class ToolError extends Error {}
+
+async function retryArchiveRead<T>(read: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await read(); }
+    catch (error) {
+      if (!(error instanceof ScopeConflictError) || attempt >= 2) throw error;
+    }
+  }
+}
 
 /** Never expose OS paths, capabilities, parser input or archived text in diagnostics. */
 export function diagnostic(error: unknown): string {
@@ -127,7 +136,7 @@ export async function execute(input: unknown): Promise<string> {
     if (args.action === 'stats') return JSON.stringify(await statistics(args.scope));
     const store = new Store();
     if (args.action === 'read' || args.action === 'paste') {
-      const source = await store.transaction(args.scope, false, 64 * 1024 * 1024, snapshot => {
+      const recover = () => store.transaction(args.scope, false, 64 * 1024 * 1024, snapshot => {
         let entry = snapshot.entries.find(entry => entry.id === args.id);
         const group = snapshot.groups?.find(group => group.id === args.id);
         if (!entry && !group) throw new ToolError('Unknown entry or group');
@@ -153,6 +162,8 @@ export async function execute(input: unknown): Promise<string> {
           nextOffset: end < text.length ? end : null, totalChars: text.length, sha256: digest(text),
         };
       });
+      // Re-read current state and reapply keep; file creation stays outside retries.
+      const source = await retryArchiveRead(recover);
       if (args.action === 'paste') {
         // Exclusive creation also refuses symlinks and never truncates an existing destination.
         await writeFile(args.path, source.text, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
@@ -171,7 +182,7 @@ export async function execute(input: unknown): Promise<string> {
     }
     const maxBytes = args.action === 'mark' && args.marks.some(mark => mark.disposition === 'foldable')
       ? (await loadOptions()).maxSessionBytes : 64 * 1024 * 1024;
-    const result = await store.transaction(args.scope, false, maxBytes, (snapshot) => {
+    const operation = () => store.transaction(args.scope, false, maxBytes, (snapshot) => {
       switch (args.action) {
         case 'list': return browse(snapshot, args);
         case 'mark': return applyMarks(snapshot, args.marks);
@@ -190,6 +201,8 @@ export async function execute(input: unknown): Promise<string> {
         }
       }
     });
+    const result = args.action === 'list' || args.action === 'status'
+      ? await retryArchiveRead(operation) : await operation();
     return JSON.stringify(result);
   } catch (error) {
     return JSON.stringify({ error: diagnostic(error) });

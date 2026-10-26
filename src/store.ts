@@ -50,6 +50,20 @@ const textRowSchema = z.object({ text: z.string() });
 const numberRowSchema = z.object({ value: z.number().int().nonnegative() });
 const metadataRowSchema = z.object({ value: z.string() });
 
+export class ScopeConflictError extends Error {
+  constructor() { super('Context scope changed concurrently; retry request'); }
+}
+
+function assertSameSession(current: unknown, original: { revision: number; rawSnapshot: string | null }): void {
+  if (current === null) {
+    if (original.rawSnapshot === null) return;
+  } else {
+    const session = sessionRowSchema.parse(current);
+    if (session.revision === original.revision && session.snapshot === original.rawSnapshot) return;
+  }
+  throw new ScopeConflictError();
+}
+
 export type Entry = z.infer<typeof entrySchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Mark = z.infer<typeof markSchema>;
@@ -337,12 +351,12 @@ export class Store {
         if (row === null) {
           if (!create) throw new Error('Unknown context scope');
           database.exec('COMMIT');
-          return { revision: 0, snapshot: snapshotSchema.parse({ version: 1, entries: [], decision: {} }) };
+          return { revision: 0, rawSnapshot: null, snapshot: snapshotSchema.parse({ version: 1, entries: [], decision: {} }) };
         }
         const session = sessionRowSchema.parse(row);
         const snapshot = decode(database, storedSnapshotSchema.parse(JSON.parse(session.snapshot)));
         database.exec('COMMIT');
-        return { revision: session.revision, snapshot };
+        return { revision: session.revision, rawSnapshot: session.snapshot, snapshot };
       } catch (error) {
         if (database.inTransaction) database.exec('ROLLBACK');
         throw error;
@@ -363,7 +377,13 @@ export class Store {
     // may stay the same size or shrink while over quota; only growth is rejected.
     const allowedBytes = original.revision > 0 ? Math.max(maxBytes, Buffer.byteLength(before)) : maxBytes;
     if (payloadBytes > allowedBytes) throw new Error('Session archive full; original request retained');
-    if (original.revision > 0 && before === after) return result;
+    if (original.revision > 0 && before === after) {
+      await this.database(database => {
+        signal?.throwIfAborted();
+        assertSameSession(database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope), original);
+      });
+      return result;
+    }
     const { stored, blobs } = encode(snapshot);
     const serialized = JSON.stringify({ ...stored, payloadBytes, sessionLimitBytes: maxBytes });
     const metricsDelta = metricsDifference(previousMetrics, snapshot.metrics);
@@ -375,7 +395,7 @@ export class Store {
       try {
         const current: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
         const revision = current === null ? 0 : sessionRowSchema.parse(current).revision;
-        if (revision !== original.revision) throw new Error('Context scope changed concurrently; retry request');
+        assertSameSession(current, original);
         const insertBlob = database.query('INSERT OR IGNORE INTO blobs (hash, text) VALUES (?, ?)');
         for (const [hash, text] of blobs) insertBlob.run(hash, text);
         if (snapshot.entries.length === 0 && snapshot.decision.reason === 'explicitly-forgotten') {
