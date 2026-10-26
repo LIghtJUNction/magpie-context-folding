@@ -6,6 +6,7 @@ prove lexical context, and other languages have no lexer here.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import hmac
 import json
@@ -81,7 +82,8 @@ def client(root: Path, token: str, cwd: str) -> Client:
     return Client(root / (token + ".sqlite3"), project_dir=cwd)
 
 
-def fold(event: dict, archive: Client, scope: str) -> dict:
+def fold(event: dict, archive: Client, scope: str, *, selectors: list[str] | None = None,
+         expand_mode: str = "recursive", recovery: str | None = None) -> dict:
     if event.get("hook_event_name") != "PostToolUse" or event.get("tool_name") != "Read":
         return {}
     response = event.get("tool_response")
@@ -102,15 +104,16 @@ def fold(event: dict, archive: Client, scope: str) -> dict:
     if file["startLine"] != 1 or file["numLines"] != count or file["totalLines"] != count:
         return {}
     annotation = discover_source(text, "python")
-    result = archive.read_source(scope, text=text, language="python", mode="folded", limit=24000)
-    if result.get("nextOffset") is not None or result.get("parser") != "python-ast":
+    result = archive.read_source(scope, text=text, language="python", mode="folded", limit=24000,
+                                 expand=[] if selectors is None else selectors, expandMode=expand_mode)
+    if result.get("parser") != "python-ast":
         return {}
     selected = {r["id"]: r for r in annotation["regions"]}
     regions = result.get("foldedRegions", [])
     if not regions:
         return {}
     # Store the exact response, including every extra host metadata field.
-    recovery = archive.put(scope, json.dumps(response, ensure_ascii=False))["id"]
+    recovery = recovery or archive.put(scope, json.dumps(response, ensure_ascii=False))["id"]
     chunks, cursor = [], 0
     for folded in regions:
         region = selected[folded["id"]]
@@ -136,7 +139,16 @@ def fold(event: dict, archive: Client, scope: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "updatedToolOutput": updated}}
 
 
-def expand(root: Path, identifier: str, region_id: str | None = None) -> dict:
+def expand(root: Path, identifier: str, region_id: str | list[str] | None = None,
+           expand_mode: str | None = None) -> dict:
+    # Without a mode, retain the original full-response / exact-region recovery.
+    # An explicit mode returns a selective view of the complete Read response.
+    if expand_mode is not None and expand_mode not in ("single", "recursive"):
+        raise ValueError("Invalid source expansion mode")
+    if expand_mode is not None:
+        selectors = [] if region_id is None else [region_id] if isinstance(region_id, str) else region_id
+        if not isinstance(selectors, list) or any(not isinstance(s, str) or not s for s in selectors):
+            raise ValueError("Invalid source selectors")
     token = os.environ.get(ENV, "")
     if not re.fullmatch(r"[0-9a-f]{64}", token):
         raise ValueError("No host session binding; start a session with the plugin enabled")
@@ -156,6 +168,12 @@ def expand(root: Path, identifier: str, region_id: str | None = None) -> dict:
     response = json.loads("".join(parts))
     if not isinstance(response, dict) or response.get("type") != "text" or not isinstance(response.get("file"), dict):
         raise ValueError("Not an archived Read response")
+    if expand_mode is not None:
+        with client(root, token, cwd) as archive:
+            output = fold({"hook_event_name": "PostToolUse", "tool_name": "Read",
+                           "tool_response": response}, archive, token, selectors=selectors,
+                          expand_mode=expand_mode, recovery=identifier)
+        return output.get("hookSpecificOutput", {}).get("updatedToolOutput", response)
     if region_id is not None:
         file = response["file"]
         regions = discover_source(file["content"], "python")["regions"]
@@ -174,8 +192,16 @@ def main() -> int:
     command = sys.argv[1:]
     try:
         root = private_root()
-        if len(command) in (2, 3) and command[0] == "expand":
-            print(json.dumps(expand(root, *command[1:]), ensure_ascii=False))
+        if command and command[0] == "expand":
+            parser = argparse.ArgumentParser(prog="claude-read.py expand")
+            parser.add_argument("identifier")
+            parser.add_argument("regions", nargs="*")
+            parser.add_argument("--expand-mode", choices=("single", "recursive"))
+            options = parser.parse_args(command[1:])
+            if options.expand_mode is None and len(options.regions) > 1:
+                raise ValueError("Multiple selectors require --expand-mode")
+            regions = options.regions if options.expand_mode else next(iter(options.regions), None)
+            print(json.dumps(expand(root, options.identifier, regions, options.expand_mode), ensure_ascii=False))
             return 0
         if command not in (["start"], ["hook"]):
             raise ValueError("Expected start, hook, or expand ID")

@@ -57,6 +57,56 @@ class ClaudeReadTests(unittest.TestCase):
                 with patch.dict(os.environ, {ENV: ''}), self.assertRaises(ValueError):
                     expand(root, identifier)
 
+    def test_selective_nested_expansion_preserves_response_and_recovery(self):
+        padding = lambda name, indent: ''.join(f'{indent}{name}_{i} = {i}  # ' + 'x' * 70 + '\n' for i in range(15))
+        source = ('def root():\n' + padding('root_before', '    ') +
+                  '    def left():\n' + padding('left_before', '        ') +
+                  '        def leaf():\n' + padding('leaf_payload', '            ') +
+                  '    def right():\n' + padding('right_payload', '        ') +
+                  'def other():\n' + padding('other_payload', '    ') + 'tail = 1')
+        for newline in ('\n', '\r\n', '\r'):
+            with self.subTest(newline=newline), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                original = event(source.replace('\n', newline))
+                token = binding(key(root), original['session_id'], original['cwd'])
+                with patch.dict(os.environ, {'CLAUDE_ENV_FILE': str(root / 'env'), ENV: token}):
+                    start(original, root)
+                    with client(root, token, original['cwd']) as archive:
+                        output = fold(original, archive, token)
+                    text = output['hookSpecificOutput']['updatedToolOutput']['file']['content']
+                    identifier = re.search(r' expand ([0-9a-f]{24}) ', text).group(1)
+                    single = expand(root, identifier, ['root.left'], 'single')
+                    recursive = expand(root, identifier, ['root.left'], 'recursive')
+                    for response in (single, recursive):
+                        self.assertIn('root_before_0', response['file']['content'])
+                        self.assertIn('left_before_0', response['file']['content'])
+                        self.assertNotIn('right_payload_0', response['file']['content'])
+                        self.assertNotIn('other_payload_0', response['file']['content'])
+                        self.assertEqual(len(response['file']['content'].splitlines()), original['tool_response']['file']['numLines'])
+                        self.assertEqual({**response['file'], 'content': ''}, {**original['tool_response']['file'], 'content': ''})
+                        self.assertEqual(response['extra'], original['tool_response']['extra'])
+                        self.assertTrue(response['file']['content'].endswith('tail = 1'))
+                        for archived_id, region in re.findall(r' expand (\S+) ([0-9a-f]+)\]', response['file']['content']):
+                            self.assertEqual(archived_id, identifier)
+                            self.assertNotIn('NOT SOURCE', expand(root, archived_id, region)['file']['content'])
+                    self.assertNotIn('leaf_payload_0', single['file']['content'])
+                    self.assertIn('leaf_payload_0', recursive['file']['content'])
+                    leaf_id = re.search(r' expand [0-9a-f]{24} ([0-9a-f]+)\]', single['file']['content']).group(1)
+                    leaf = expand(root, identifier, [leaf_id], 'single')
+                    self.assertIn('leaf_payload_0', leaf['file']['content'])
+                    self.assertNotIn('right_payload_0', leaf['file']['content'])
+                    multiple = expand(root, identifier, ['root.left', 'root.right'], 'recursive')
+                    self.assertIn('leaf_payload_0', multiple['file']['content'])
+                    self.assertIn('right_payload_0', multiple['file']['content'])
+                    self.assertNotIn('other_payload_0', multiple['file']['content'])
+                    self.assertEqual(expand(root, identifier, ['*'], 'single'), original['tool_response'])
+                    self.assertEqual(expand(root, identifier, [], 'single'), output['hookSpecificOutput']['updatedToolOutput'])
+                    for mode in ('single', 'recursive'):
+                        with self.assertRaises(Exception):
+                            expand(root, identifier, ['root.left', 'unknown'], mode)
+                    with self.assertRaises(ValueError):
+                        expand(root, identifier, ['root'], 'invalid')
+
     def test_unsafe_schema_partial_source_and_non_python_unchanged(self):
         with tempfile.TemporaryDirectory() as directory, client(Path(directory), 'test', os.getcwd()) as archive:
             cases = []
@@ -95,6 +145,13 @@ class ClaudeReadTests(unittest.TestCase):
             restored = run(['expand', identifier])
             self.assertEqual(restored.returncode, 0, restored.stderr)
             self.assertEqual(json.loads(restored.stdout), original['tool_response'])
+            selective = run(['expand', identifier, '*', '--expand-mode', 'single'])
+            self.assertEqual(selective.returncode, 0, selective.stderr)
+            self.assertEqual(json.loads(selective.stdout), original['tool_response'])
+            for args in ([identifier, 'unknown', '--expand-mode', 'recursive'],
+                         [identifier, '*', '--expand-mode', 'invalid'],
+                         [identifier, '*', 'work']):
+                self.assertNotEqual(run(['expand', *args]).returncode, 0)
             for candidate in ({**original, 'session_id': ''}, {**original, 'cwd': ''}, event('def broken(:\n')):
                 self.assertEqual(run(['hook'], candidate).stdout, '')
             environment[ENV] = '0' * 64

@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import math
 import os
 import stat
 import sys
-import tempfile
+import secrets
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -253,9 +254,12 @@ def _parser() -> argparse.ArgumentParser:
     for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
         sub = commands.add_parser(command)
         if command == "annotate-functions":
-            sub.add_argument("path")
+            sub.add_argument("path", help="Python source file or project directory")
             sub.add_argument("--language", default="python")
-            sub.add_argument("--apply", action="store_true", help="Atomically write annotations to the file")
+            sub.add_argument("--exclude", action="append", default=[], metavar="GLOB",
+                             help="Exclude a relative path or basename (repeatable; directories are pruned)")
+            sub.add_argument("--apply", action="store_true",
+                             help="Preflight all files, then replace atomically per file; write errors may leave a partial batch (default: preview)")
             continue
         sub.add_argument("--state", default=argparse.SUPPRESS, help="SQLite state file")
         sub.add_argument("--project-dir", default=argparse.SUPPRESS, help="Project settings discovery directory")
@@ -308,49 +312,179 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
     return request
 
 
-def _annotate_functions(path: str, language: str, apply: bool) -> dict[str, Any]:
+_ANNOTATION_SKIP_DIRS = frozenset({
+    ".git", ".hg", ".svn", ".venv", "venv", "env", "__pycache__",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".nox",
+    "node_modules", "build", "dist", ".eggs",
+})
+
+
+def _annotation_plan(path: str, language: str) -> tuple:
     if language.lower() not in {"python", "py"}:
         raise ValueError("Function annotation is supported only for Python files with the AST parser")
     target = Path(path)
     initial_stat = target.lstat()
     if not stat.S_ISREG(initial_stat.st_mode):
         raise ValueError("Path must be a regular, non-symlink source file")
-    original = target.read_bytes()
+    if initial_stat.st_nlink != 1:
+        raise ValueError("Source file must not have multiple hard links")
+    with target.open("rb") as stream:
+        original = stream.read(MAX_INPUT_BYTES + 1)
+    if len(original) > MAX_INPUT_BYTES:
+        raise ValueError("Source file exceeds the 8 MiB limit")
     text = original.decode("utf-8", errors="strict")
     result = annotate_python_functions(text)
     encoded = result["text"].encode("utf-8")
+    if len(encoded) > MAX_INPUT_BYTES:
+        raise ValueError("Annotated source exceeds the 8 MiB limit")
     result.update({"path": str(target), "language": "python", "applied": False})
-    if apply and encoded != original:
-        def verify_unchanged() -> None:
-            try:
-                current = target.lstat()
-                if (not stat.S_ISREG(current.st_mode)
-                        or (current.st_dev, current.st_ino) != (initial_stat.st_dev, initial_stat.st_ino)
-                        or target.read_bytes() != original):
-                    raise ValueError("File changed during annotation; no changes written")
-                after_read = target.lstat()
-                if (not stat.S_ISREG(after_read.st_mode)
-                        or (after_read.st_dev, after_read.st_ino) != (initial_stat.st_dev, initial_stat.st_ino)):
-                    raise ValueError("File changed during annotation; no changes written")
-            except OSError as exc:
-                raise ValueError("File changed during annotation; no changes written") from exc
+    # Snapshot ancestor identities too: a directory swapped for a symlink must
+    # not redirect an otherwise unchanged file outside the selected project.
+    parents = [(parent, parent.lstat()) for parent in target.absolute().parents]
+    if any(not stat.S_ISDIR(info.st_mode) for _, info in parents):
+        raise ValueError("Source ancestors must be non-symlink directories")
+    return target, initial_stat, original, encoded, result, parents
 
-        verify_unchanged()
-        mode = stat.S_IMODE(initial_stat.st_mode)
-        fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+
+def _annotation_parent_fd(plan: tuple) -> int:
+    target, _, _, _, _, parents = plan
+    expected = {parent: info for parent, info in parents}
+    fd = os.open(target.absolute().anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        parent_path = Path(target.absolute().anchor)
+        for part in target.absolute().parent.parts[1:]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+            parent_path /= part
+            info, current = expected[parent_path], os.fstat(fd)
+            if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                raise ValueError("File changed during annotation; refusing write")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _verify_annotation(plan: tuple, parent_fd: int | None = None) -> None:
+    target, initial, original, _, _, parents = plan
+    try:
+        for parent, info in parents:
+            current = parent.lstat()
+            if (not stat.S_ISDIR(current.st_mode)
+                    or (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino)):
+                raise ValueError("File changed during annotation; refusing write")
+        owned_fd = parent_fd is None
+        if owned_fd:
+            parent_fd = _annotation_parent_fd(plan)
         try:
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.chmod(temporary, mode)
-            verify_unchanged()
-            os.replace(temporary, target)
+            current = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                    or (current.st_dev, current.st_ino, current.st_mode) != (initial.st_dev, initial.st_ino, initial.st_mode)):
+                raise ValueError("File changed during annotation; refusing write")
+            source_fd = os.open(target.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+            with os.fdopen(source_fd, "rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if ((opened.st_dev, opened.st_ino, opened.st_mode, opened.st_nlink)
+                        != (initial.st_dev, initial.st_ino, initial.st_mode, 1)
+                        or stream.read(MAX_INPUT_BYTES + 1) != original):
+                    raise ValueError("File changed during annotation; refusing write")
+            after_read = os.stat(target.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (after_read.st_dev, after_read.st_ino, after_read.st_mode, after_read.st_nlink) != (initial.st_dev, initial.st_ino, initial.st_mode, 1):
+                raise ValueError("File changed during annotation; refusing write")
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
-        result["applied"] = True
+            if owned_fd:
+                os.close(parent_fd)
+    except OSError as exc:
+        raise ValueError("File changed during annotation; refusing write") from exc
+
+
+def _apply_annotation(plan: tuple) -> dict[str, Any]:
+    target, initial, original, encoded, result, _ = plan
+    if encoded == original:
+        return result
+    _verify_annotation(plan)
+    parent_fd = _annotation_parent_fd(plan)
+    temporary = None
+    try:
+        # All mutation uses the same opened directory, even if its pathname is
+        # renamed or redirected between the last validation and replacement.
+        candidate = f".{target.name}.{secrets.token_hex(16)}"
+        fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=parent_fd)
+        temporary = candidate
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fchmod(stream.fileno(), stat.S_IMODE(initial.st_mode))
+            os.fsync(stream.fileno())
+        _verify_annotation(plan, parent_fd)
+        os.replace(temporary, target.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        temporary = None
+        os.fsync(parent_fd)
+    finally:
+        try:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+        finally:
+            os.close(parent_fd)
+    result["applied"] = True
     return result
+
+
+def _annotate_functions(path: str, language: str, apply: bool) -> dict[str, Any]:
+    plan = _annotation_plan(path, language)
+    return _apply_annotation(plan) if apply else plan[4]
+
+
+def _annotate_project(path: str, language: str, apply: bool,
+                      exclude: list[str]) -> dict[str, Any]:
+    root = Path(path).absolute()
+    if not stat.S_ISDIR(root.lstat().st_mode):
+        raise ValueError("Project path must be a non-symlink directory")
+    if language.lower() not in {"python", "py"}:
+        raise ValueError("Function annotation is supported only for Python files with the AST parser")
+    if any(not pattern or Path(pattern).is_absolute() or ".." in Path(pattern).parts for pattern in exclude):
+        raise ValueError("Exclusions must be nonempty relative glob patterns")
+
+    def excluded(candidate: Path) -> bool:
+        relative = candidate.relative_to(root).as_posix()
+        return any(fnmatch.fnmatchcase(relative, pattern) or fnmatch.fnmatchcase(candidate.name, pattern)
+                   for pattern in exclude)
+
+    def walk_error(error: OSError) -> None:
+        raise error
+
+    plans = []
+    total_bytes = 0
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
+        parent = Path(directory)
+        dirs[:] = sorted(name for name in dirs if name not in _ANNOTATION_SKIP_DIRS
+                         and not name.endswith(".egg-info")
+                         and not (parent / name).is_symlink() and not excluded(parent / name))
+        for name in sorted(files):
+            target = parent / name
+            if target.suffix.lower() not in {".py", ".pyi"} or excluded(target) or target.is_symlink():
+                continue
+            plan = _annotation_plan(str(target), language)
+            total_bytes += len(plan[2]) + len(plan[3])
+            if len(plans) >= 10000 or total_bytes > 64 * 1024 * 1024:
+                raise ValueError("Project annotation exceeds the 10000 file or 64 MiB planning limit")
+            plans.append(plan)
+    if apply:
+        # Validate the entire batch before the first write; each replacement is
+        # atomic, but filesystem errors during commit can leave a partial batch.
+        for plan in plans:
+            _verify_annotation(plan)
+        for plan in plans:
+            _apply_annotation(plan)
+    results = [plan[4] for plan in plans]
+    return {"path": str(root), "language": "python", "files": results,
+            "applied": any(result["applied"] for result in results),
+            "changedFiles": sum(plan[2] != plan[3] for plan in plans)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -358,7 +492,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "annotate-functions":
         try:
-            result = _annotate_functions(args.path, args.language, args.apply)
+            target = Path(args.path)
+            if stat.S_ISDIR(target.lstat().st_mode):
+                result = _annotate_project(args.path, args.language, args.apply, args.exclude)
+            else:
+                if args.exclude:
+                    raise ValueError("--exclude requires a project directory")
+                result = _annotate_functions(args.path, args.language, args.apply)
             _emit({"result": result})
             return 0
         except (OSError, UnicodeError, ValueError) as exc:
