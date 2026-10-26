@@ -57,6 +57,10 @@ Optional `source: {"path":"/absolute/file","range":"full"}` records file provena
 
 ## Source annotations and compact reads
 
+When creating or modifying source code, agents should proactively add paired `@context-fold begin NAME` / `@context-fold end NAME` comments around meaningful regions, using valid language-specific comment syntax. Do not annotate or fold one-line functions; the overhead outweighs their likely benefit. Preserve program behavior, syntax and project conventions; keep markers balanced and properly nested, and place them outside strings. Use the source-annotation tool when available to help add or check markers, following its actual documented interface, and inspect its result and validate the changed code. markref is intended to recognize the same markers; this does not imply that support has been released or run.
+
+For a Python source file, preview function markers with `uv run --project context-folding python -m context_folding annotate-functions /absolute/path/module.py`; add `--apply` to write the resulting comments atomically. This command currently handles one Python file at a time; it refuses unsupported languages. It does not make ordinary host file reads automatically use the compact view.
+
 `annotate` discovers foldable source regions, archives the exact original and each region, and stores annotations in SQLite. `read-source` performs the same operation and returns a compact read immediately. These operations never edit source files. Python functions, classes and compound blocks are discovered with Python's AST and tokenizer, including nested functions. Every discovered region starts foldable unless kept or explicitly unmarked. A region is replaced only when its recovery reference is shorter than its payload.
 
 ```python
@@ -69,7 +73,7 @@ with Client("/absolute/private/archive.sqlite", project_dir="/project") as clien
     ])
 ```
 
-Select `expand` and `keep` by exact region name, region ID, or `"*"`. Expanding a nested region reveals its ancestors while unrelated siblings remain foldable; expanding or keeping a parent reveals its descendants. `keep` persists on this archived original. `marks: [{"name":"Service.handle","disposition":"foldable"}]` explicitly overrides a previous keep or a configured keep pattern; `unmarked` prevents folding. Whole-entry `keep` and explicit `unmarked` are also respected. Changed source creates a new original; manual region marks do not transfer automatically to changed text.
+Select `expand` and `keep` by exact region name, region ID, or `"*"`. `expandMode: "single"` reveals only the selected regions and their ancestors while foldable descendants and unrelated siblings remain folded. `expandMode: "recursive"` reveals selected regions and their descendants; this is the default for backward compatibility. A descriptive comment immediately above a marker stays visible when that region is folded, unless an enclosing region hides it. `keep` persists on this archived original. `marks: [{"name":"Service.handle","disposition":"foldable"}]` explicitly overrides a previous keep or a configured keep pattern; `unmarked` prevents folding. Whole-entry `keep` and explicit `unmarked` are also respected. Changed source creates a new original; manual region marks do not transfer automatically to changed text.
 
 The default `read` of an annotated entry is folded. Use `mode: "original"` for exact original pagination, or `expand: ["*"]` to inspect all annotated code. `paste` always writes the exact original. Resolving the references in a complete compact view reproduces the original, including Unicode, CRLF, and a missing final newline. Read responses include the original ID/reference/hash; folded views additionally report their parser, limitations and folded region names/references. `sha256`, `totalChars`, offsets and `nextOffset` describe the selected view; `originalSha256` and `originalChars` describe the archived original.
 

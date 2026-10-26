@@ -1,4 +1,9 @@
+import ast
+import json
+import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +61,199 @@ def document(count=257, style="#", newline="\n", name="region", prefix="", suffi
 
 
 class AnnotationTests(unittest.TestCase):
+    def test_function_marker_generation_nested_and_idempotent(self):
+        from context_folding.annotations import annotate_python_functions
+        source = '@decorator\r\nasync def outer():\r\n    def inner():\r\n        return 1\r\n    return inner()'
+        marked = annotate_python_functions(source)
+        self.assertEqual(len(marked["added"]), 2)
+        self.assertIn("# @context-fold begin outer.inner\r\n", marked["text"])
+        self.assertEqual(annotate_python_functions(marked["text"])["text"], marked["text"])
+        parsed = discover_source(marked["text"], "python")
+        self.assertEqual({item["name"] for item in parsed["regions"]}, {"outer", "outer.inner"})
+        self.assertEqual(ast.dump(ast.parse(marked["text"])), ast.dump(ast.parse(source)))
+        restored = marked["text"]
+        for marker in ("# @context-fold begin outer\r\n",
+                       "    # @context-fold begin outer.inner\r\n",
+                       "    # @context-fold end outer.inner\r\n",
+                       "\r\n# @context-fold end outer"):
+            self.assertEqual(restored.count(marker), 1)
+            restored = restored.replace(marker, "", 1)
+        self.assertEqual(restored, source)
+
+    def test_function_marker_boundaries_and_newlines(self):
+        from context_folding.annotations import annotate_python_functions
+        sources = [
+            "def outer():\n    def z():\n        def a():\n            return 1",
+            "def first(): return 1\ndef second(): return 2\n",
+            "@(\n    decorator\n)\ndef work():\n    return 1\n",
+            "def outer():\n    @(\n        decorator\n    )\n    def inner(): return 1\n",
+            "class A:\n\t@decorate\n\tasync def work(self):\n\t\treturn 1\nclass B:\n\tdef work(self): return 2",
+            "if True:\n    def work():\n        return '''line\n# @context-fold begin fake\n'''\n",
+            "def work():\n    return (\n        1\n    ) # trailing comment\n\n# footer\n",
+            "def outer():\n    # @context-fold begin outer.inner\n    def inner(): return 1\n    # @context-fold end outer.inner\n",
+            "# preamble\nvalue = 1\n",
+            "",
+        ]
+        for source in sources:
+            for newline in ("\n", "\r\n", "\r"):
+                for final_newline in (False, True):
+                    original = source.rstrip("\n") + ("\n" if final_newline else "")
+                    original = original.replace("\n", newline)
+                    with self.subTest(source=source, newline=newline, final=final_newline):
+                        marked = annotate_python_functions(original)["text"]
+                        self.assertEqual(ast.dump(ast.parse(marked)), ast.dump(ast.parse(original)))
+                        self.assertEqual(marked.endswith(("\r", "\n")), original.endswith(("\r", "\n")))
+                        self.assertEqual(annotate_python_functions(marked)["text"], marked)
+                        self.assertEqual(annotate_python_functions(marked)["added"], [])
+                        discover_source(marked, "python")
+                        if newline == "\r\n":
+                            self.assertNotIn("\n", marked.replace("\r\n", ""))
+        marked = annotate_python_functions(sources[0])["text"]
+        self.assertLess(marked.index("end outer.z.a"), marked.index("end outer.z\n"))
+        self.assertTrue(marked.endswith("end outer"))
+
+    def test_one_line_functions_are_not_automatically_marked_or_discovered(self):
+        from context_folding.annotations import annotate_python_functions
+        sources = [
+            "def work(): return 1\n",
+            "async def work(): return 1; return 2\n",
+            "@decorator\ndef work(): return 1\n",
+            "@(\n    decorator\n)\ndef work(): return 1\n",
+            "class Worker:\n    def work(self): return 1\n",
+            "def outer():\n    def inner(): return 1\n    return inner()\n",
+        ]
+        for source in sources:
+            for newline in ("\n", "\r\n", "\r"):
+                original = source.replace("\n", newline)
+                with self.subTest(source=source, newline=newline):
+                    result = annotate_python_functions(original)
+                    functions = [region for region in discover_source(original, "python")["regions"]
+                                 if region["kind"] in {"FunctionDef", "AsyncFunctionDef"}]
+                    expected = ["outer"] if "def outer" in source else []
+                    self.assertEqual([region["name"] for region in functions], expected)
+                    self.assertEqual([region["name"] for region in result["added"]], expected)
+                    if not expected:
+                        self.assertEqual(result["text"], original)
+                    else:
+                        self.assertNotIn("@context-fold begin outer.inner", result["text"])
+                    self.assertEqual(ast.dump(ast.parse(original)), ast.dump(ast.parse(result["text"])))
+                    self.assertEqual(annotate_python_functions(result["text"])["text"], result["text"])
+        explicit = "# @context-fold begin chosen\ndef work(): return 1\n# @context-fold end chosen\n"
+        self.assertEqual(annotate_python_functions(explicit)["text"], explicit)
+        regions = discover_source(explicit, "python")["regions"]
+        self.assertEqual([(region["name"], region["kind"]) for region in regions], [("chosen", "explicit")])
+        from context_folding.cli import _annotate_functions
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "single.py"
+            original = sources[0].encode()
+            path.write_bytes(original)
+            result = _annotate_functions(str(path), "python", True)
+            self.assertFalse(result["applied"])
+            self.assertEqual(result["added"], [])
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_function_marker_rejects_invalid_source_and_markers(self):
+        from context_folding.annotations import annotate_python_functions
+        for source in ("def broken(:\n", "# @context-fold begin missing\ndef work(): pass\n",
+                       "# @context-fold wat x\ndef work(): pass\n"):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                annotate_python_functions(source)
+
+    def test_function_marker_real_cli(self):
+        environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "python"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "source.py"
+            original = b"def work():\r\n    return 3"
+            path.write_bytes(original)
+            path.chmod(0o640)
+            command = [sys.executable, "-m", "context_folding", "annotate-functions", str(path)]
+            preview = subprocess.run(command, env=environment, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            result = json.loads(preview.stdout)["result"]
+            self.assertFalse(result["applied"])
+            self.assertEqual(path.read_bytes(), original)
+            applied = subprocess.run(command + ["--apply"], env=environment, capture_output=True, text=True)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            self.assertTrue(json.loads(applied.stdout)["result"]["applied"])
+            self.assertEqual(path.read_bytes(), result["text"].encode())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+            repeated = subprocess.run(command + ["--apply"], env=environment, capture_output=True, text=True)
+            self.assertEqual(repeated.returncode, 0, repeated.stderr)
+            self.assertFalse(json.loads(repeated.stdout)["result"]["applied"])
+            rejected = subprocess.run(command + ["--language", "javascript", "--apply"], env=environment, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 1)
+            self.assertEqual(json.loads(rejected.stdout)["error"]["code"], "annotation_failed")
+            self.assertEqual(path.read_bytes(), result["text"].encode())
+
+    def test_function_marker_cli_preview_apply_and_language_rejection(self):
+        from context_folding.cli import _annotate_functions
+        from context_folding.annotations import annotate_python_functions
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "source.py"
+            original = b"def work():\n    return 3"
+            path.write_bytes(original)
+            preview = _annotate_functions(str(path), "python", False)
+            self.assertEqual(path.read_bytes(), original)
+            self.assertFalse(preview["applied"])
+            applied = _annotate_functions(str(path), "py", True)
+            self.assertTrue(applied["applied"])
+            self.assertEqual(path.read_text(), annotate_python_functions(original.decode())["text"])
+            self.assertFalse(_annotate_functions(str(path), "python", True)["applied"])
+            with self.assertRaisesRegex(ValueError, "only for Python"):
+                _annotate_functions(str(path), "typescript", True)
+
+    def test_function_marker_rejects_concurrent_changes(self):
+        from unittest.mock import patch
+        from context_folding import cli
+        original = b"def work():\n    return 3\n"
+        for stage in ("annotation", "write"):
+            for change in ("content", "identity", "symlink"):
+                with self.subTest(stage=stage, change=change), tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "source.py"
+                    path.write_bytes(original)
+
+                    def mutate():
+                        if change == "content":
+                            path.write_bytes(b"def changed():\n    return 4\n")
+                        else:
+                            replacement = Path(directory) / "replacement.py"
+                            replacement.write_bytes(original)
+                            path.unlink()
+                            if change == "symlink":
+                                path.symlink_to(replacement)
+                            else:
+                                replacement.rename(path)
+
+                    if stage == "annotation":
+                        real = cli.annotate_python_functions
+                        def intercept(text):
+                            result = real(text)
+                            mutate()
+                            return result
+                        mocked = patch.object(cli, "annotate_python_functions", side_effect=intercept)
+                    else:
+                        real = cli.os.chmod
+                        def intercept(*args, **kwargs):
+                            real(*args, **kwargs)
+                            mutate()
+                        mocked = patch.object(cli.os, "chmod", side_effect=intercept)
+                    with mocked, self.assertRaisesRegex(ValueError, "changed during annotation"):
+                        cli._annotate_functions(str(path), "python", True)
+                    self.assertEqual(path.read_bytes(), b"def changed():\n    return 4\n" if change == "content" else original)
+                    self.assertEqual(list(Path(directory).glob(".source.py.*")), [])
+
+    def test_nested_regions_are_supported_and_crossing_regions_rejected(self):
+        source = ('# @context-fold begin outer\ndef outer():\n'
+                  '    # @context-fold begin outer.inner\n'
+                  '    def inner(): return 1\n'
+                  '    # @context-fold end outer.inner\n'
+                  '    return inner()\n# @context-fold end outer\n')
+        result = discover_source(source, "python")
+        self.assertEqual({region["name"] for region in result["regions"]}, {"outer", "outer.inner"})
+        crossing = '# @context-fold begin a\n# @context-fold begin b\npass\n# @context-fold end a\n# @context-fold end b\n'
+        with self.assertRaisesRegex(ValueError, "Unmatched"):
+            discover_source(crossing, "python")
+
     def test_default_folds_only_strictly_more_than_256_lines(self):
         client = MemoryClient()
         for count in (0, 1, 255, 256):
@@ -291,7 +489,7 @@ class SourceIntegrationTests(unittest.TestCase):
 
     def test_paths_read_only_atomic_batch_and_schema(self):
         from context_folding import FoldingError
-        from context_folding.cli import TOOL_SCHEMA
+        from context_folding.cli import TOOL_SCHEMA, _parser, _request
         import json
         path = Path(self.directory.name) / "source.py"
         path.write_bytes(self.SOURCE.encode())
@@ -311,6 +509,10 @@ class SourceIntegrationTests(unittest.TestCase):
             self.assertEqual(self.client.call({"action": "status", "scope": "s"}), before)
         schema = json.loads((Path(__file__).parents[1] / "protocol.json").read_text())
         self.assertEqual(schema["properties"], TOOL_SCHEMA["properties"])
+        parsed = _parser().parse_args(["read", "--scope", "s", "--state", "state.sqlite", "--expand-mode", "single"])
+        self.assertEqual(_request(parsed)["expandMode"], "single")
+        parsed = _parser().parse_args(["read", "--scope", "s", "--state", "state.sqlite", "--expand-mode", "recursive"])
+        self.assertEqual(_request(parsed)["expandMode"], "recursive")
 
     def test_explicit_fallback_invalid_markers_and_python_string_safety(self):
         from context_folding import FoldingError

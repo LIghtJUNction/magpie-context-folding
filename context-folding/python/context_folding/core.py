@@ -572,6 +572,9 @@ class Client:
             _error("Invalid read mode")
         if node.get("annotation") and request["action"] == "read":
             from .annotations import compact_source, select_regions
+            expand_mode = request.get("expandMode", "recursive")
+            if expand_mode not in ("single", "recursive"):
+                _error("Invalid source expand mode")
             select_regions(node["annotation"]["regions"], request.get("expand", []))
             if mode == "folded":
                 annotation = {**node["annotation"], "regions": [dict(r) for r in node["annotation"]["regions"]]}
@@ -580,7 +583,8 @@ class Client:
                         region["disposition"] = "keep"
                 view = compact_source(text, annotation, request.get("expand", []),
                                       node["mark"]["disposition"] == "keep" or
-                                      bool(node.get("manual") and node["mark"]["disposition"] == "unmarked"))
+                                      bool(node.get("manual") and node["mark"]["disposition"] == "unmarked"),
+                                      expand_mode=expand_mode)
                 text = view.pop("text")
                 source_view = view
             source_view.update(mode=mode, reference=_ref(node["id"]),
