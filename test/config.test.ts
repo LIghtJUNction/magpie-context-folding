@@ -168,9 +168,18 @@ test('global and project TOML settings', async () => {
       + '[policy.cost]\nbytes_per_token_lower=1\nbytes_per_token_upper=8\n'
       + '[policy.cost.input]\nlower=2\nupper=4\n[policy.cost.cache_read]\nlower=0.1\nupper=0.2\n'
       + '[policy.cost.cache_write]\nlower=2\nupper=4\n'
+      + '[policy.cost.incremental]\ntool_calls=1\nmodel_round_trips=1\ninput_tokens=10\noutput_tokens=20\n'
+      + 'input_price_per_million=2\noutput_price_per_million=8\ntool_fees_usd=0\n'
       + '[policy.script]\ncommand=["/usr/bin/node","--secret=hidden-token"]\n');
-    await f.file(join(f.project, '.context-folding.toml'), '[policy.cost.input]\nupper=5\n');
-    const options = await loadOptions({ policy: { minChars: 30, cost: { overheadUsd: 0.01 } } }, f.project);
+    await f.file(join(f.project, '.context-folding.toml'), '[policy.cost.input]\nupper=5\n[policy.cost.incremental]\ninput_tokens=100\n');
+    const options = await loadOptions({ policy: { minChars: 30, cost: { overheadUsd: 0.01,
+      incremental: { toolFeesUsd: 0.002 } } } }, f.project);
+    assert.deepEqual(options.policy.cost?.incremental, { toolCalls: 1, modelRoundTrips: 1,
+      inputTokens: 100, outputTokens: 20, inputPricePerMillion: 2, outputPricePerMillion: 8,
+      toolFeesUsd: 0.002 });
+    for (const incremental of [{ toolCalls: -1 }, { unknown: 0 }]) {
+      await assert.rejects(loadOptions({ policy: { cost: { incremental } } }, f.project), ConfigError);
+    }
     assert.equal(options.policy.minChars, 30);
     assert.deepEqual(options.policy.autoRoles, ['assistant', 'tool']);
     assert.deepEqual(options.policy.cost?.input, { lower: 2, upper: 5 });
@@ -182,6 +191,12 @@ test('global and project TOML settings', async () => {
     assert.deepEqual(diagnostic.config.policy.cost?.input, { lower: 2, upper: 5 });
     await f.file(join(f.project, '.context-folding.toml'), '[policy.cost.input]\nupper=0\n');
     await assert.rejects(loadConfig(f.project), ConfigError);
+  }));
+
+  await sequential('partial incremental bounds must be complete after merging', () => fixture(async f => {
+    await f.file(f.global, '[policy.cost.incremental]\ntool_calls=1\n');
+    await assert.rejects(loadOptions({}, f.project), ConfigError);
+    await assert.rejects(loadOptions({ policy: { cost: { incremental: { modelRoundTrips: 1 } } } }, f.project), ConfigError);
   }));
 
   await sequential('policy minimum follows folding unless policy explicitly overrides it', () => fixture(async f => {

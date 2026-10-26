@@ -8,7 +8,10 @@ const request = {
   model: 'configured/model', protocol: 'chat' as const,
   before: 'x'.repeat(39_998), after: 'x'.repeat(798),
 };
+const incremental = { toolCalls: 0, modelRoundTrips: 0, inputTokens: 0, outputTokens: 0,
+  inputPricePerMillion: 0, outputPricePerMillion: 0, toolFeesUsd: 0 };
 const cost = {
+  incremental,
   bytesPerTokenLower: 4, bytesPerTokenUpper: 4,
   input: { lower: 1, upper: 1 }, cacheRead: { lower: 0.1, upper: 0.1 },
   cacheWrite: { lower: 1.25, upper: 1.25 },
@@ -24,7 +27,7 @@ const planner = (policy: PolicyInput, spans = [span('a')], signal?: AbortSignal)
 const certificate = (overrides = {}) => ({
   requestHash: policyRequestHash(request), model: request.model, protocol: request.protocol,
   expiresAt: '2026-10-27T00:01:00Z', beforeLowerTokens: 10_000, afterUpperTokens: 200,
-  oldMinPricePerMillion: 0.1, newMaxPricePerMillion: 1.25, extraCostUpperUsd: 0,
+  oldMinPricePerMillion: 0.1, newMaxPricePerMillion: 1.25, extraCostUpperUsd: 0, incremental,
   assumptions: ['Trusted local token counter and applicable complete-request price bounds.'], ...overrides,
 });
 
@@ -66,12 +69,24 @@ test('fewer tokens do not imply savings when the baseline may already be cached'
   assert.ok(proof.savingLowerUsd! < 0);
 });
 
+test('requires incremental bounds and includes an extra model round trip', async () => {
+  const { incremental: omitted, ...legacy } = cost;
+  assert.equal((await evaluatePolicy({ ...request, policy: { cost: legacy }, now })).reason,
+    'policy-incremental-cost-bounds-missing');
+  const proof = await evaluatePolicy({ ...request, policy: { cost: { ...cost,
+    incremental: { ...omitted, toolCalls: 1, modelRoundTrips: 1, inputTokens: 10_000,
+      outputTokens: 100, inputPricePerMillion: 1.25, outputPricePerMillion: 5 },
+  } }, now });
+  assert.equal(proof.approved, false);
+  assert.ok(proof.savingLowerUsd! < 0);
+});
+
 test('charges output, restore and fixed overhead for this round, with strict minimum savings', async () => {
   const withOverhead = { ...cost, overheadUsd: 0.0001, outputTokens: 100,
     outputPricePerMillion: 2, restoreTokens: 50 };
   const proof = await evaluatePolicy({ ...request, policy: { cost: withOverhead }, now });
   assert.equal(proof.approved, true);
-  assert.ok(Math.abs(proof.savingLowerUsd! - 0.0004) < 1e-12);
+  assert.ok(Math.abs(proof.savingLowerUsd! - 0.0003875) < 1e-12);
   assert.equal((await evaluatePolicy({ ...request, policy: { cost, minimumSavingUsd: 0.00075 }, now })).approved, false);
   assert.equal((await evaluatePolicy({ ...request, policy: { cost: { ...cost, overheadUsd: 0.00075 } }, now })).approved, false);
 });

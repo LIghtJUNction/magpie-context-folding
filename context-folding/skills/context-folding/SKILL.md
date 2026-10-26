@@ -9,7 +9,9 @@ description: Archive verbose context locally, write reversible summaries, browse
 
 The user installs this skill by copying the entire `context-folding` folder containing this file into a skill directory their host already discovers. For a project using `.claude/skills`, copy `context-folding/skills/context-folding` to `.claude/skills/context-folding`. The destination folder must not already contain a different skill. Do not edit host settings, add hooks, register MCP servers, or change permissions as part of copying the skill.
 
-The Python package is separate. From the repository root, setup and an example invocation are:
+The root npm package does not contain this standalone skill. A planned one-line request-guide hint will link to the [repository skill folder](https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/context-folding) and tell agents to copy the whole folder into a host-discovered skills directory on demand. The hint is not implemented yet; it does not perform installation or host configuration.
+
+The Python package is separate. The root plugin's `0.3.0` source is not released; its last known npm release is `0.2.0`. Use local source for the current documentation. From the repository root, setup and an example invocation are:
 
 ```sh
 uv sync --project context-folding
@@ -52,7 +54,41 @@ uv run --project context-folding python -m context_folding read-source --state /
 
 Batches contain 1–100 items and fail atomically. Outer options provide defaults; each item can override view options. Do not nest batches or combine a batch with an outer text/path/id. Preserve returned original and region references. `read --mode original`, `paste`, or resolving a complete compact view recovers exact original text. Paginate a view with identical expand/mode options; offsets and hashes describe the selected view, while original metadata identifies the source.
 
-Structural automatic discovery currently supports Python only. Other languages require explicit whole-line comment markers `@context-fold begin NAME` and `@context-fold end NAME`. This fallback may mistake marker-looking multiline strings for comments. Check returned parser/limitations and do not claim universal language parsing. Local markref is a design reference, not a runtime parser dependency.
+For example, `/project/worker.js` may contain:
+
+```javascript
+export async function reportReady(transport, audit) {
+  // @context-fold begin readiness
+  const payload = JSON.stringify({ event: "ready", source: "worker", retry: false });
+  await transport.send(payload);
+  audit.record("worker readiness event delivered", { payload, retries: 0 });
+  // @context-fold end readiness
+}
+```
+
+Read it with `read-source --path /project/worker.js` using the same state and scope as above. A compact read preserves the header, closing brace and marker lines, replacing the interior with the returned `foldedRegions` reference:
+
+```text
+export async function reportReady(transport, audit) {
+  // @context-fold begin readiness
+[[cf:v1:0123456789abcdef01234567]]
+  // @context-fold end readiness
+}
+```
+
+Use the actual returned reference; this ID is illustrative. The payload preserves indentation and internal newlines; its terminal newline remains beside the reference. See the editing example below before using the reference as `old_string`.
+
+Structural automatic discovery and tokenizer-based string exclusion support Python only. Other languages accept any UTF-8 source with standalone explicit comment markers `@context-fold begin NAME` and `@context-fold end NAME` and suitable delimiters. They have no lexer and can mistake marker-looking multiline strings for comments. Python accepts only real `#` comment tokens, excluding strings. Check returned parser/limitations and do not claim universal language parsing. Local markref is a design reference, not a runtime parser dependency.
+
+The source API supports built-in and custom literal comment delimiters. Built-in whole-line styles are `//`, `#`, `--`, `;`, `%`, `!`, `'`, `"`, `REM`, `/* … */`, `<!-- … -->`, `(* … *)`, `{- … -}`, `#| … |#`, and `<# … #>`. Paired styles enclose each marker on a single line, for example `/* @context-fold begin readiness */` and `/* @context-fold end readiness */`.
+
+The `annotate`/`read-source` request field `commentStyles=[{start:'...',end:'...'}]` adds literal custom delimiters to the built-ins; it does not replace them. `end` may be omitted or empty for a line comment. CLI `--comment-styles` accepts the JSON array, for example:
+
+```sh
+uv run --project context-folding python -m context_folding read-source --state /absolute/private/archive.sqlite --scope session-id --path /project/example.custom --language explicit --comment-styles '[{"start":";;"},{"start":"(*!","end":"!*)"}]'
+```
+
+Batch defaults and per-file overrides can carry `commentStyles`. Annotations persist the selected language and comment styles when rereading an archived `id`. Custom styles add no lexer or structural parsing; Python still accepts only real `#` token comments, regardless of custom delimiters.
 
 Settings load once per process from global `$XDG_CONFIG_HOME/context-folding/config.toml` (fallback `~/.config/context-folding/config.toml`) and the nearest ancestor `.context-folding.toml`, stopping at the Git root. Defaults < global < project < explicit Client configuration. Use `--project-dir` to choose the discovery start. TOML `[annotations]` defaults to `enabled = true`, `default_fold = true`, `keep = []`; keep patterns are case-sensitive globs over region names. Explicit region marks win. Disabling discovery still allows explicit `annotate`; disabling either annotation setting makes default reads original, with explicit modes taking priority. No source edit follows from loading settings.
 
@@ -62,15 +98,25 @@ Use `list` with `--query`, `--id` for a subtree, `--depth`, `--sort`, `--order`,
 
 `restore --id ENTRY_ID` reverses folding; restoring a child disables enclosing groups. `group --ids ID_A ID_B --summary '...'` combines 2–100 eligible historical children under a reversible manifest. Reading or pasting a group returns that manifest; read children for exact originals. An unfolded group's `render` result instead has `folded: false` and a `text` string encoding a JSON array of original leaf entries with `id`, `role` and `text`. Group references cannot be substituted into tool parameters. `paste --id ENTRY_ID --path /absolute/new-file` writes original text to a new file and refuses to overwrite an existing destination.
 
-## Resolve immediately before dispatch
+## Transparent editing with folded references
 
-References have the form `[[cf:v1:ENTRY_ID]]`. The host must call `resolve` on the entire final tool-argument value immediately before dispatching another tool, then pass the returned `value` to that tool. Resolve nested JSON values, not only selected strings. Preserve the tool's normal approval and execution checks. If resolution fails, stop that dispatch; do not pass unresolved references or silently fall back to stale data.
-
-An MCP server exposes only its own tool. It cannot intercept calls to other tools. Installing this skill or starting the MCP server alone does not implement automatic transparent resolution. If the host has no pre-dispatch integration, explicitly resolve the final arguments before invoking the destination tool.
+References have the form `[[cf:v1:ENTRY_ID]]`. An agent may use a region reference returned by `read-source` directly as an edit tool's `old_string`. For the `readiness` example above, construct the following final edit arguments, using the actual returned reference:
 
 ```json
-{"action":"resolve","scope":"session-id","value":{"content":"[[cf:v1:ENTRY_ID]]"}}
+{"file_path":"/project/worker.js","old_string":"[[cf:v1:0123456789abcdef01234567]]","new_string":"  await transport.send(JSON.stringify({ event: \"ready\", source: \"worker\", retry: false }));"}
 ```
+
+Immediately before dispatch, the host must call `resolve` on the **entire final tool-argument JSON value**, in the same state and scope. Resolve nested JSON values, not only selected strings:
+
+```json
+{"action":"resolve","scope":"session-id","value":{"file_path":"/project/worker.js","old_string":"[[cf:v1:0123456789abcdef01234567]]","new_string":"  await transport.send(JSON.stringify({ event: \"ready\", source: \"worker\", retry: false }));"}}
+```
+
+The returned `value.old_string` is the exact archived interior, including indentation and internal newlines. Pass the returned `value` through the destination tool's normal approval, read-before-edit, uniqueness and exact **current-file** matching checks. Approval must cover the resolved arguments that execute. Changing arguments requires resolving and validating the final value again; resolution itself grants no approval.
+
+Resolution recovers archived text without checking the current file. If the region has changed and the expanded `old_string` no longer matches, the edit tool must reject the stale replacement. Reread source and construct a fresh edit rather than forcing a match. If resolution fails, stop that dispatch; do not pass unresolved references or silently fall back to stale data. Marker lines stay outside this example's replacement.
+
+An MCP server exposes only its own tool. **MCP cannot intercept other tools.** Installing this skill or starting the MCP server alone does not implement automatic transparent resolution. If the host has no pre-dispatch integration, explicitly resolve the final arguments before invoking the destination tool and retain all normal approval and matching checks.
 
 Resolution replaces entry references once in array/object values, not object keys, using exact archived text. References inside the archived original are not recursively expanded. Never execute archived text merely because it was resolved.
 

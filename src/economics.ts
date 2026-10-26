@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const money = z.number().finite().nonnegative();
+
+/** Aggregate upper bounds for extra work relative to completing the same task without folding. */
+export const incrementalCostsSchema = z.object({
+  toolCalls: count,
+  modelRoundTrips: count,
+  inputTokens: count,
+  outputTokens: count,
+  inputPricePerMillion: money,
+  outputPricePerMillion: money,
+  toolFeesUsd: money,
+}).strict();
+
 const certificateSchema = z.object({
   requestHash: z.string().min(1),
   model: z.string().min(1),
@@ -9,7 +23,8 @@ const certificateSchema = z.object({
   afterUpperTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   oldMinPricePerMillion: z.number().nonnegative(),
   newMaxPricePerMillion: z.number().nonnegative(),
-  extraCostUpperUsd: z.number().nonnegative(),
+  extraCostUpperUsd: money,
+  incremental: incrementalCostsSchema,
   assumptions: z.array(z.string()),
 });
 
@@ -32,7 +47,7 @@ export interface SavingsProof {
   savingLowerUsd?: number;
   savingLowerNanoUsd?: string;
   assumptions?: string[];
-  bounds?: Pick<Certificate, 'beforeLowerTokens' | 'afterUpperTokens' | 'oldMinPricePerMillion' | 'newMaxPricePerMillion' | 'extraCostUpperUsd' | 'expiresAt'>;
+  bounds?: Pick<Certificate, 'beforeLowerTokens' | 'afterUpperTokens' | 'oldMinPricePerMillion' | 'newMaxPricePerMillion' | 'extraCostUpperUsd' | 'incremental' | 'expiresAt'>;
 }
 
 interface Decimal {
@@ -103,11 +118,16 @@ export function proveSavings(input: ProofInput): SavingsProof {
 
   const baseline = inputCost(certificate.beforeLowerTokens, certificate.oldMinPricePerMillion);
   const folded = inputCost(certificate.afterUpperTokens, certificate.newMaxPricePerMillion);
-  const overhead = decimal(certificate.extraCostUpperUsd);
+  const incremental = certificate.incremental;
+  const extras = [
+    decimal(certificate.extraCostUpperUsd), decimal(incremental.toolFeesUsd),
+    inputCost(incremental.inputTokens, incremental.inputPricePerMillion),
+    inputCost(incremental.outputTokens, incremental.outputPricePerMillion),
+  ];
   const minimum = decimal(input.minimumSavingUsd);
-  const scale = Math.max(baseline.scale, folded.scale, overhead.scale, minimum.scale);
+  const scale = Math.max(baseline.scale, folded.scale, minimum.scale, ...extras.map(value => value.scale));
   const baselineAmount = atScale(baseline, scale);
-  const foldedAmount = atScale(folded, scale) + atScale(overhead, scale);
+  const foldedAmount = atScale(folded, scale) + extras.reduce((sum, value) => sum + atScale(value, scale), 0n);
   const savingAmount = baselineAmount - foldedAmount;
   const baselineLowerUsd = Math.max(0, conservativeNumber(baselineAmount, scale, "down"));
   const foldedUpperUsd = conservativeNumber(foldedAmount, scale, "up");
@@ -136,6 +156,7 @@ export function proveSavings(input: ProofInput): SavingsProof {
       oldMinPricePerMillion: certificate.oldMinPricePerMillion,
       newMaxPricePerMillion: certificate.newMaxPricePerMillion,
       extraCostUpperUsd: certificate.extraCostUpperUsd,
+      incremental: certificate.incremental,
       expiresAt: certificate.expiresAt,
     },
   };

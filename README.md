@@ -25,23 +25,16 @@ AI 在 agentic 模式下调用 `{"action":"mode","scope":"<当前scope>","mode":
 
 某些客户端将 MCP 工具统一封装在代码执行工具内，外层请求不列出恢复工具。确认连接可用后，可在插件 options 设置 `recoveryToolName` 为真实工具名，或在 TOML 的 `[magpie]` 设置 `recovery_tool_name`。这是已验证恢复入口的声明；未声明也未直接提供恢复工具时，插件只加长度提示，不折叠。Codex code-mode 可使用 `mcp__magpie__magpie_context_folding_context_folding`。
 
-不依赖 Magpie 的通用实现见 [context-folding 子项目](context-folding/README.md)：提供 Python SDK、CLI、JSON Lines RPC、MCP stdio，以及 Rust、TypeScript、C# 的持久 Python 桥接客户端。它与本页的 Magpie 插件是两套集成；通用实现由宿主显式应用渲染结果、解析工具参数引用，不使用本插件的 accounting 门槛。
+项目还提供两项源码能力，由不依赖 Magpie 的 [context-folding 子项目](context-folding/README.md)实现：
+
+- **注释标记控制代码细节自动折叠**：用整行注释 `@context-fold begin NAME` / `@context-fold end NAME` 指定区域，读取时归档内部原文并显示恢复引用，保留标记行与周边代码，源文件本身不变。Python 还支持自动发现函数、类和复合块；[标记与读取示例](context-folding/README.md#source-annotations-and-compact-reads)。
+- **透明折叠也支持编辑**：agent 可以直接用读到的 `[[cf:v1:…]]` 引用指代完整代码块，例如放进替换工具的 `old_string`。宿主在执行前解析整个最终参数 JSON，还原精确原文，再交给目标工具进行正常审批、当前文件匹配与替换；[透明替换示例](context-folding/README.md#transparent-editing-with-folded-references)。
+
+通用实现提供 Python SDK、CLI、JSON Lines RPC、MCP stdio，以及 Rust、TypeScript、C# 的持久 Python 桥接客户端。它与本页的 Magpie 插件是两套集成；通用实现由宿主显式应用渲染结果、解析工具参数引用，不使用本插件的 accounting 门槛。根插件目前没有自动接入这些源码注解和工具参数解析能力；单独启动 MCP 服务也不会拦截其他工具调用。
 
 ## 安装和连接工具
 
-直接安装已发布的版本：
-
-`0.3.0` 包含分组树、检索浏览、文件版本与相似历史导航、分层配置、请求预算及 CLI。根 npm 包只安装 Magpie 插件，不包含通用 Python/SDK 子项目；通用实现按自己的 README 单独安装。
-
-```sh
-magpie plugin add 'npm:magpie-context-folding@0.3.0'
-# 也可以安装 GitHub 的固定版本
-magpie plugin add 'github:LIghtJUNction/magpie-context-folding#v0.3.0'
-```
-
-GitHub Release 同时托管 npm 格式安装包及 SHA-256 校验文件。Magpie 使用 Bun 直接加载包内 TypeScript 源码，不依赖安装时构建脚本，也不需要在源码仓库保存重复的编译产物。
-
-从本地源码开发和安装时：
+当前源码版本为 `0.3.0`，尚未发布；npm 最后已知发布版本为 `0.2.0`。本页描述当前源码的分组树、检索浏览、文件版本与相似历史导航、分层配置、请求预算及 CLI，不代表这些能力都已包含在 `0.2.0` 中。需要本页所述能力时，从仓库根目录安装本地源码：
 
 ```sh
 npm ci
@@ -49,7 +42,9 @@ npm run check
 magpie plugin add /绝对路径/magpie-context-folding
 ```
 
-开发检查需要 Bun >= 1.4.0、Node.js >= 22 和 npm。
+开发检查需要 Bun >= 1.4.0、Node.js >= 22 和 npm。Magpie 使用 Bun 直接加载包内 TypeScript 源码，不依赖安装时构建脚本，也不需要在源码仓库保存重复的编译产物。根 npm 包只包含 Magpie 插件，不包含通用 Python/SDK 子项目或独立 skill；通用实现按自己的 README 单独安装。
+
+请求 guide 已附带一行按需安装提示：[context-folding skill 目录](https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/context-folding)——需要完整操作指导时，把整个目录复制到宿主已发现的 skills 目录。该提示按需引导 agent 获取完整说明，不自动安装 skill，也不修改宿主配置；这一行的输入开销包含在费用候选中。
 
 包内同时提供 `magpie.hooks` 请求钩子和自定义工具。需要让使用 Magpie 的 agent 连接其 HTTP MCP 服务：
 
@@ -90,7 +85,7 @@ Agent 可根据任务进度和上下文压力，主动、及早标记不再帮�
 }
 ```
 
-- `foldable`：允许自动折叠，必须提供非空摘要，最多 2,000 字符。摘要优先写该条目有依据的状态：目标、约束、已完成、阻碍、下一步、证据路径，按适用性选取，不必凑齐字段。区分用户原话、助手判断和工具证据，不把助手判断当成授权。省略重复经过、过期的一次性要求和未知信息，历史细节留在归档中。
+- `foldable`：允许自动折叠，必须提供非空摘要，最多 2,000 字符。摘要优先写该条目有依据的状态：目标、约束、已完成、阻碍、下一步、证据路径，按适用性选取，不必凑齐字段。保留有助于后续检索的准确编号、路径、错误与决策理由；区分尝试和已验证结果，只概括所选条目的证据。区分用户原话、助手判断和工具证据，不把助手判断当成授权。省略重复经过、过期的一次性要求和未知信息，历史细节留在归档中。
 - `keep`：禁止自动折叠；已经折叠的条目会在下次请求原位恢复原文。
 - `unmarked`：明确取消标记，也会恢复原文，并阻止自动策略重新选择该条目。尚未手动标记的历史可由显式配置的 `policy.auto_roles` 策略选择。
 
@@ -103,6 +98,10 @@ Agent 可根据任务进度和上下文压力，主动、及早标记不再帮�
 ### 分组、树形浏览与版本
 
 `list` 支持 `query` 检索、`id` 选择子树、`depth`（0–8）、`sort`（`chronological`、`size`、`id`、`version`）、`order`（`asc`、`desc`），以及 `offset`/`limit` 分页。结果以树的前序行返回，包含 `parentId`、深度、子项数和版本信息；查询保留匹配项的祖先，便于定位上下文。
+
+`query` 是忽略大小写的 Unicode 字面匹配，检索条目的原文、摘要、路径和编号，以及组摘要和组编号。直接命中的行附带 `match`：`source` 为 `original`、`summary`、`path` 或 `id`，`offset`/`endOffset` 是该字段内首次命中的左闭右开 UTF-16 范围，`excerptOffset` 是 `excerpt` 在该字段中的起点。片段最多 240 个 UTF-16 单元，边界不拆开 emoji，保留原始换行；只为导航保留的祖先没有 `match`。同一条目多字段命中时优先返回原文，其次摘要、路径、编号；组优先摘要，其次编号。仅摘要命中不证明原文含有该词。
+
+对 `source: "original"`，可把 `match.offset` 直接传给 `read` 继续查看证据；其他来源的偏移不能用于原文定位。`list` 搜索不会改变折叠状态或持久标记 `keep`；`read` 默认仍会保护原文，仅观察时使用 `peek:true`。用 `nextOffset` 翻页；深度不足时可用祖先编号作为 `id` 继续向下浏览。
 
 ```json
 {"scope":"<当前scope>","action":"list","query":"配置","depth":2,"sort":"size","order":"desc","limit":20}
@@ -161,25 +160,24 @@ Agent 可根据任务进度和上下文压力，主动、及早标记不再帮�
 也可以从终端查看，使用与 Magpie 相同的状态目录和环境：
 
 ```sh
-bunx --bun magpie-context-folding@0.3.0 stats
-bunx --bun magpie-context-folding@0.3.0 stats --json
-# 本地源码
+# 从当前仓库根目录运行本地源码
 npm run stats
+npm run stats -- --json
 ```
 
 统计首先展示三项累计值：**折叠次数、查看详情次数、累计折叠 token（估算）**。每批新批准的折叠计一次，递归折叠也计入；查看详情按成功读取原文或历史层的调用次数计数，失败读取不计入。累计折叠 token 按每批新折叠前后完整请求的 UTF-8 字节数除以四估算并累加，复用已有折叠不重复计入；旧版本未记录该项的历史不反推。显示自动使用十进制单位：`1K = 1,000`、`1M = 1,000,000`、`1B = 1,000,000,000`，最多两位小数；JSON 的 `summary` 同时保留精确累计整数和显示值。
 
-统计还包括折叠条目数、递归折叠数、成功及失败请求、复用请求、恢复条目数、成功请求的累计净减少 token 和证书支持的输入费节省下界。token 的字节估算与计费证书下界分开显示，不冒充供应商实际 token；金额用精确整数累计到十亿美元分之一，显示九位小数，不用浮点金额相加。
+统计还包括折叠条目数、递归折叠数、成功及失败请求、复用请求、恢复条目数、成功请求的累计净减少 token 和证书假设下的节省下界累计。token 的字节估算与计费证书下界分开显示，不冒充供应商实际 token；金额用精确整数累计到十亿美元分之一，显示九位小数，不用浮点金额相加。
 
 金额只在 Magpie 确认响应成功、接受的请求与候选正文一致后累计；失败、取消、正文被后续异步钩子修改、重复完成回调都不会重复记收益。后续同步 middleware、路由和协议转换仍需由 accounting 的边界覆盖。完成回调可能因进程退出或超时漏到，因此统计允许保守漏记，不凭猜测补成功。
 
-已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。金额覆盖的是已验证的增量比较，**不是全任务实际少扣的账单**；未包含在证书费用预留中的标记、展开、额外回复等费用不会自动扣除。选择 cost 模式且没有可信费用证据时拒绝新增折叠；证据也可由证书脚本或配置的保守费用边界提供。显式 bytes 模式只记录缩减估算，不认证金额。
+已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。当前证书必须覆盖相对不折叠完成同一任务的全部新增工作，包括工具调用、模型往返、历史和工具结果的再次输入、摘要与工具参数输出、恢复原文及工具直接费用。金额依赖这些边界假设，**不是全任务实际少扣的账单**；历史累计保留原证据限制，不升级为完整任务收益证明。选择 cost 模式且没有可信费用证据时拒绝新增折叠；证据也可由证书脚本或配置的保守费用边界提供。显式 bytes 模式只记录缩减估算，不认证金额。
 
 所有统计仍在同一个 SQLite 数据库中，只维护会话汇总和一个全局累计记录，不生成逐次日志或事件文件。`forget` 回收原文后全局累计保留；查询统计本身不创建数据库、不增加历史记录。升级前的旧请求不反推收益，统计从安装此功能后开始。
 
 ## CLI 与分层配置
 
-根包提供 `read`、`paste`、`mark`、`list`、`status`、`config` 和 `stats`。在与 Magpie 相同的状态目录和环境中运行，scope 使用请求提示中的值。`read` 默认向标准输出写正文；归档查询和修改默认返回 JSON，`stats` 默认便于终端阅读，加 `--json` 可供程序处理。
+根包提供 `read`、`paste`、`mark`、`list`、`status`、`mode`、`config`、`stats` 和 `report`。在与 Magpie 相同的状态目录和环境中运行，scope 使用请求提示中的值。`read` 默认向标准输出写正文；归档查询和修改默认返回 JSON，`stats` 默认便于终端阅读，加 `--json` 可供程序处理。
 
 ```sh
 # 本地源码示例；安装后可使用 magpie-context-folding 命令
@@ -188,7 +186,10 @@ bun src/cli.ts read --scope "$SCOPE" --id "$ID" --peek | sha256sum
 bun src/cli.ts paste --scope "$SCOPE" --id "$ID" --path /绝对路径/result.txt
 printf '%s\n' '[{"id":"条目编号","disposition":"keep"}]' | bun src/cli.ts mark --scope "$SCOPE" --marks -
 bun src/cli.ts config --project-dir "$PWD" --json
+bun src/cli.ts report --output /绝对路径/folding-effects.html
 ```
+
+`report` 导出单文件离线页面，可看当前归档、最后候选前后字节、累计统计、费用证据及“下一步查什么”。用浏览器打开即可，支持浅深色、纹理、悬停或键盘查看数值及数据表。缺少记录时明确显示证据不足，不补画效果。输出必须是尚不存在的绝对路径，文件权限为 0600；报告只读且隐藏原文、路径和会话标识。具体调试步骤见 [可视化与调试](docs/visualization.md)。
 
 配置按内置默认值、全局 TOML、项目 TOML、显式插件 options 的顺序合并；对象逐字段合并，数组整体替换。全局文件为 `$XDG_CONFIG_HOME/context-folding/config.toml`，未设置时使用 `~/.config/context-folding/config.toml`。项目文件为最近祖先目录的 `.context-folding.toml`，查找到 `.git` 边界即停止。CLI `config` 显示生效配置和来源路径，并隐藏 accounting URL 与脚本命令；恢复操作仍可在 `enabled=false` 时使用。
 
@@ -259,7 +260,16 @@ Magpie 默认给请求钩子 1 秒，插件默认给 accounting 500 ms。需要�
   "oldMinPricePerMillion":0.1,
   "newMaxPricePerMillion":1.25,
   "extraCostUpperUsd":0,
-  "assumptions":["此处必须写明真实计数、价格和路由边界"]
+  "incremental":{
+    "toolCalls":1,
+    "modelRoundTrips":1,
+    "inputTokens":1000,
+    "outputTokens":100,
+    "inputPricePerMillion":1.25,
+    "outputPricePerMillion":5,
+    "toolFeesUsd":0.001
+  },
+  "assumptions":["此处必须写明真实计数、价格、路由及同一任务全部新增工作边界"]
 }
 ```
 
@@ -272,7 +282,9 @@ Magpie 默认给请求钩子 1 秒，插件默认给 accounting 500 ms。需要�
 仅当 G > minimumSavingUsd 才折叠
 ```
 
-这已经涵盖原请求全部走缓存最低价、候选全部走最高缓存写入价的情况。完整推导、示例和边界见 [docs/economics.md](docs/economics.md)。这证明的是有可信证书时**本次新增折叠的输入费用**下降；首次发现工具、标记、以后展开、输出长度和回答质量不能据此宣称全程净收益为正。
+H 包含 `extraCostUpperUsd`、`incremental.toolFeesUsd`，以及 incremental 合计输入、输出 token 按各自价格上界计算的费用。次数描述同一任务新增的工具调用和模型往返，合计金额不再乘次数，也不假设工具统一按次收费。配置中的旧 overhead/output/restore 预留与 incremental 必须互不重叠；未知边界不能填零，已发生的输出属于沉没成本。
+
+这涵盖原请求全部走缓存最低价、候选全部走最高适用价格的情况。完整推导、示例和边界见 [docs/economics.md](docs/economics.md)。只有可信证书同时覆盖下一次完整输入及同一任务全部新增工作时，才得到这些假设下的费用节省下界；多一次工具调用或模型往返可能抵消输入节省。它不证明实际账单下降或回答质量提升。
 
 ## 存储和清理
 
@@ -308,7 +320,7 @@ npm run bench:economics -- --input /tmp/context-folding-large.json
 npm run bench:inference -- --input /tmp/context-folding-small.json --output /tmp/context-folding-inference.json --context 4096 --runs 5
 ```
 
-经济分析另外需要 Python `tiktoken`，推理基准要求本机已经存在 Ollama 的 `smollm2:135m`，不自动下载模型。折叠基准实际执行三次折叠、逐层恢复、重复请求和清理；其放行计费模型是明确标注的人工模型，不能用来声称真实渠道已省钱。经济分析则用真实 BPE 文本计数与公开参考价格分别计算缓存损失、标记预算和展开预算。性能基准交替测原文和各层摘要，记录失败、样本分布、输入处理及总耗时，单独展示缓存复用场景。
+经济分析另外需要 Python `tiktoken`，推理基准要求本机已经存在 Ollama 的 `smollm2:135m`，不自动下载模型。折叠基准实际执行三次折叠、逐层恢复、重复请求和清理；其放行计费模型是明确标注的人工模型，不能用来声称真实渠道已省钱。经济分析的 schema 2 用 BPE 文本计数与参考价格展示局部比较和 `full_work_cost`：完整成本还须显式提供标记、旧预留及 incremental 七项边界，缺任一项显示 `unknown`，不默认零。额外调用次数不再乘合计 token 或工具费。这仍不等于供应商完整渲染、实际账单或全任务实验证据。性能基准交替测原文和各层摘要，记录失败、样本分布、输入处理及总耗时，单独展示缓存复用场景。
 
 本机三层递归、费用和真实小模型结果见 [测试结果](docs/benchmark.md)，包含不盈利和未能证明性能改善的场景。
 
@@ -330,7 +342,7 @@ Weiwei Sun, Miao Lu, Zhan Ling, Kang Liu, Xuesong Yao, Yiming Yang, and Jiecao C
 
 ## 开源项目参考与致谢
 
-本项目在设计讨论和本轮改进中参考了以下项目的公开文档。表中区分已有实现的对照、交互设计参考和后续方向；列入参考不代表已经集成或复用了其代码。上游功能描述来自文档核对，未在本机逐一运行验证。
+本项目在设计讨论和改进中参考了以下项目的公开文档与部分源码。表中区分已有实现的对照、交互设计参考和后续方向；列入参考不代表已经集成或复用了其代码。上游功能描述来自文档与所列源码核对，未在本机逐一运行验证。
 
 | 项目 | 借鉴点与本项目的关系 |
 | --- | --- |
@@ -342,5 +354,8 @@ Weiwei Sun, Miao Lu, Zhan Ling, Kang Liu, Xuesong Yao, Yiming Yang, and Jiecao C
 | [cardinal4/opencode-fold-diffs](https://github.com/cardinal4/opencode-fold-diffs) | 用户提供的参考地址在 2026-10-26 核对时返回 404，暂无法确认其实现。另查到 [tannerbruhn/opencode-fold-diffs](https://github.com/tannerbruhn/opencode-fold-diffs)，其文档描述折叠 TUI 中的文件、diff 和长命令；两者关系未证实。后者仅作为紧凑展示和按需展开的交互参考，界面折叠本身不能证明模型输入 token 减少。 |
 | [Middlewatch/context-fold](https://github.com/Middlewatch/context-fold) | 确定性可逆折叠、稳定复用表示、限制展开范围，以及验证实际发往模型的请求。用于对照本插件的稳定层复用、分页读取和真实宿主测试；本插件使用去重 SQLite 原文存储，不依赖 Pi 的会话日志恢复。 |
 | [fdietze/pi-infinite-context](https://github.com/fdietze/pi-infinite-context) | Agent 主动选择折叠内容、递归折叠、保留可搜索原文且不改聊天历史。用于对照本插件的主动标记与可逆层设计；当前 main 增加分组树、`list` 查询/子树浏览及版本导航，原文由 `read` 与直接写文件的 `paste` 恢复，尚未实现上游完整的归档地图界面。 |
+| [jonaslsaa/pi-optchat](https://github.com/jonaslsaa/pi-optchat/tree/2714a3f4167ba41ea1868b51d715e680ac5f095d) | 核对提交 `2714a3f` 的[原文检索](https://github.com/jonaslsaa/pi-optchat/blob/2714a3f4167ba41ea1868b51d715e680ac5f095d/src/memory.ts#L404-L413)与[命中片段、展开导航](https://github.com/jonaslsaa/pi-optchat/blob/2714a3f4167ba41ea1868b51d715e680ac5f095d/src/tools.ts#L7-L65)。借鉴“先检索片段，再按编号读取”的路径，本项目独立实现 `list.match`，增加来源标签、精确 UTF-16 偏移及组编号检索；继续保留 SQLite 原文、稳定折叠层重放、尾部提示与完整请求费用门槛。没有接入其后台摘要、缓存标记重写或 Git checkpoint，也未运行上游。 |
+
+pi-optchat 的[许可证](https://github.com/jonaslsaa/pi-optchat/blob/2714a3f4167ba41ea1868b51d715e680ac5f095d/LICENSE#L1-L25)为 MIT，但明确排除 `src/prompts.ts` 中归属上游的提示词及独立授权依赖；[第三方声明](https://github.com/jonaslsaa/pi-optchat/blob/2714a3f4167ba41ea1868b51d715e680ac5f095d/THIRD_PARTY_NOTICES.md#L5-L12)说明这些提示词未被重新授权。本轮仅参考设计思路，搜索实现和摘要指导均独立编写，没有复制其提示词。
 
 这些项目和论文提供了设计参照；各自的性能、缓存收益与质量结论仍属于各自的实验条件。本项目的验证范围以本文的本地测试、[基准结果](docs/benchmark.md)及 accounting 假设为准。

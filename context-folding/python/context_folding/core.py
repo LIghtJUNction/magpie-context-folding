@@ -203,7 +203,7 @@ class Client:
         return self.call({**options, "action": "read-source", "scope": scope})
 
     def _source(self, snapshot: dict, request: dict, now: float) -> dict:
-        from .annotations import discover_source, select_regions
+        from .annotations import comment_styles, discover_source, select_regions
         if "files" in request:
             files = request["files"]
             if not isinstance(files, list) or not 1 <= len(files) <= 100 or any(not isinstance(f, dict) for f in files):
@@ -251,10 +251,22 @@ class Client:
         if language is not None:
             language = "python" if language.lower() == "py" else language.lower()
         annotation = node.get("annotation")
-        if annotation is None or (language is not None and annotation["language"] != language):
-            annotation = discover_source(text, language, path)
+        # Decisions belong to this immutable original, even when a parser/style
+        # change temporarily stops discovering their regions. Import legacy marks.
+        manual = {(r["name"], r["start"], r["end"]): r["disposition"]
+                  for r in node.get("annotationMarks", [])}
+        if annotation:
+            manual.update({(r["name"], r["start"], r["end"]): r["disposition"]
+                           for r in annotation["regions"] if r.get("manual")})
+        styles = comment_styles(request["commentStyles"]) if "commentStyles" in request else (
+            annotation.get("commentStyles", []) if annotation else [])
+        if annotation is None or (language is not None and annotation["language"] != language) or styles != annotation.get("commentStyles", []):
+            annotation = discover_source(text, language or (annotation["language"] if annotation else None), path, styles)
             # Payloads and the exact original commit together in Client.call.
             for region in annotation["regions"]:
+                disposition = manual.get((region["name"], region["start"], region["end"]))
+                if disposition is not None:
+                    region.update(disposition=disposition, manual=True)
                 result = self._put(snapshot, {"scope": request["scope"], "text": text[region["start"]:region["end"]]}, now)
                 region.update(archiveId=result["id"], reference=result["reference"])
             node["annotation"] = annotation
@@ -274,6 +286,12 @@ class Client:
                 if region["id"] in selected:
                     region["disposition"] = mark["disposition"]
                     region["manual"] = True
+        manual.update({(r["name"], r["start"], r["end"]): r["disposition"]
+                       for r in annotation["regions"] if r.get("manual")})
+        if manual:
+            node["annotationMarks"] = [{"name": name, "start": start, "end": end,
+                                        "disposition": disposition}
+                                       for (name, start, end), disposition in manual.items()]
         if request["action"] == "read-source":
             return self._read(snapshot, {**request, "action": "read", "id": node["id"]}, now)
         return {"id": node["id"], "reference": _ref(node["id"]),

@@ -203,6 +203,56 @@ test('literal search keeps matching ancestors and searches paths, summaries and 
   assert.deepEqual(browse(state, { query: 'NEEDLE', id: 'd', depth: 8 }).entries, []);
 });
 
+test('search returns exact original offsets and bounded evidence without changing folded state', async () => {
+  await fixture(async (store, scope) => {
+    const text = `İ${'x'.repeat(270)}🙂needle ${'tail '.repeat(100)}`;
+    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+      state.entries[0]!.text = text;
+      state.entries[0]!.mark = { disposition: 'foldable', summary: 'Completed work; details archived.' };
+      state.entries[0]!.folded = 'short';
+      state.entries[0]!.layers = [{ id: 'saved', previousId: 'original', text: 'short' }];
+      state.groups = [group('g-hidden-id', ['a', 'b'], 'No matching identifier in summary')];
+    });
+    const before = await load(store, scope);
+    const result = await call({ action: 'list', scope, query: 'NEEDLE', depth: 8 });
+    assert.deepEqual(result.entries.map((node: { id: string }) => node.id), ['g-hidden-id', 'a']);
+    assert.equal(result.entries[0].match, undefined);
+    const hit = result.entries[1].match;
+    assert.equal(hit.source, 'original');
+    assert.equal(hit.offset, text.indexOf('needle'));
+    assert.equal(text.slice(hit.offset, hit.endOffset), 'needle');
+    assert.equal(hit.excerpt, text.slice(hit.excerptOffset, hit.excerptOffset + hit.excerpt.length));
+    assert.ok(hit.excerpt.includes('needle'));
+    assert.ok(hit.excerpt.length <= 240);
+    const read = await call({ action: 'read', scope, id: 'a', offset: hit.offset, limit: 6, peek: true });
+    assert.equal(read.text, 'needle');
+    const after = await load(store, scope);
+    assert.deepEqual(after.entries, before.entries);
+    assert.deepEqual(after.groups, before.groups);
+    const groupHit = await call({ action: 'list', scope, query: 'hidden-id', depth: 8 });
+    assert.equal(groupHit.entries[0].match.source, 'id');
+    assert.equal(groupHit.entries[0].id, 'g-hidden-id');
+  });
+});
+
+test('search treats patterns literally, labels metadata sources and preserves Unicode excerpt boundaries', () => {
+  const state = snapshot();
+  state.entries[0]!.text = `İ${'x'.repeat(50)}🙂${'b'.repeat(31)}[Needle].*${'y'.repeat(197)}🙂tail`;
+  const text = state.entries[0]!.text;
+  const hit = browse(state, { query: '[needle].*', depth: 8 }).entries.find(node => node.id === 'a')!.match!;
+  assert.equal(hit.offset, text.indexOf('[Needle].*'));
+  assert.equal(hit.excerptOffset, hit.offset - 33);
+  assert.ok(hit.excerpt.startsWith('🙂'));
+  assert.ok(!/[\uD800-\uDBFF]$/.test(hit.excerpt));
+  assert.ok(hit.excerpt.length <= 240);
+  state.entries[1]!.version = { series: 'file', kind: 'file', number: 1, path: '/Repo/Unique.ts' };
+  state.entries[2]!.mark = { disposition: 'foldable', summary: 'Summary-only evidence' };
+  assert.equal(browse(state, { query: 'unique.TS', depth: 8 }).entries.at(-1)!.match!.source, 'path');
+  assert.equal(browse(state, { query: 'summary-only', depth: 8 }).entries.at(-1)!.match!.source, 'summary');
+  assert.ok(browse(state).entries.every(node => node.match === undefined));
+  assert.ok(browse(state, { query: '', depth: 8 }).entries.every(node => node.match === undefined));
+});
+
 test('siblings sort deterministically and compact nodes expose version status without layer content', () => {
   const state = snapshot();
   state.entries[0]!.version = { series: 'x', number: 2, kind: 'file', path: '/file' };

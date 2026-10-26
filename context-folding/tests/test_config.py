@@ -273,6 +273,47 @@ class ConfigTests(unittest.TestCase):
         self.write(self.project_path, '[policy]\nminimum_saving_usd=0.3\n')
         self.assertEqual(self.load({"folding": {"minimum_saving_usd": 0.9}})["policy"]["minimum_saving_usd"], 0.3)
 
+    def test_incremental_bounds_merge_across_sources_without_zero_defaults(self):
+        self.write(self.global_path, '[policy.cost.input]\nlower=1\nupper=2\n'
+                   '[policy.cost.cache_read]\nlower=0.1\nupper=0.2\n'
+                   '[policy.cost.cache_write]\nlower=1\nupper=2\n'
+                   '[policy.cost.incremental]\ntool_calls=0\nmodel_round_trips=0\ninput_tokens=0\n')
+        self.write(self.project_path, '[policy.cost.incremental]\noutput_tokens=0\n'
+                   'input_price_per_million=0\noutput_price_per_million=0\n')
+        with self.assertRaisesRegex(ConfigError, "incremental"):
+            self.load()
+        settings = self.load({"policy": {"cost": {"incremental": {"tool_fees_usd": 0}}}})
+        self.assertEqual(settings["policy"]["cost"]["incremental"], {
+            "tool_calls": 0, "model_round_trips": 0, "input_tokens": 0,
+            "output_tokens": 0, "input_price_per_million": 0,
+            "output_price_per_million": 0, "tool_fees_usd": 0,
+        })
+        self.assertEqual(settings["policy"]["mode"], "cost")
+
+    def test_incremental_bounds_reject_missing_unknown_and_invalid_values(self):
+        cost = {key: {"lower": 0, "upper": 1} for key in ("input", "cache_read", "cache_write")}
+        incremental = {key: 0 for key in (
+            "tool_calls", "model_round_trips", "input_tokens", "output_tokens",
+            "input_price_per_million", "output_price_per_million", "tool_fees_usd",
+        )}
+        self.assertNotIn("incremental", self.load({"policy": {"cost": cost}})["policy"]["cost"])
+        for key in incremental:
+            incomplete = {name: value for name, value in incremental.items() if name != key}
+            with self.subTest(missing=key), self.assertRaises(ConfigError):
+                self.load({"policy": {"cost": {**cost, "incremental": incomplete}}})
+        for key, values in {
+            "tool_calls": [True, -1, 0.5, 9007199254740992],
+            "model_round_trips": [False, -1, 1.0],
+            "input_tokens": [None, float("inf")],
+            "output_tokens": [float("nan"), "0"],
+            "input_price_per_million": [True, -1, float("inf")],
+            "output_price_per_million": [False, float("nan")],
+            "tool_fees_usd": [-0.01, None], "unknown": [0],
+        }.items():
+            for value in values:
+                with self.subTest(key=key, value=value), self.assertRaises(ConfigError):
+                    self.load({"policy": {"cost": {**cost, "incremental": {**incremental, key: value}}}})
+
     def test_policy_validation_never_executes_commands_or_echoes_values(self):
         invalid = [
             {"mode": "hidden-token"}, {"auto_roles": ["tool", "tool"]},
