@@ -372,8 +372,9 @@ def main() -> None:
     for name in ("magpie", "bun", "bwrap"):
         if not getattr(arguments, name):
             parser.error(f"{name} is required; no live configuration will be used as a fallback")
-    if not (PROJECT / "dist" / "context.hooks.js").exists() or not (PROJECT / "dist" / "index.js").exists():
-        parser.error("run npm run build before the host smoke test")
+    package = json.loads((PROJECT / "package.json").read_text())
+    if not (PROJECT / package["main"]).exists() or not (PROJECT / package["magpie"]["hooks"]).exists():
+        parser.error("package main or Magpie hook entry is missing")
     with tempfile.TemporaryDirectory(prefix="magpie-context-folding-smoke-") as temporary:
         run(Path(arguments.magpie).resolve(), Path(arguments.bun).resolve(), Path(arguments.bwrap).resolve(), Path(temporary))
 

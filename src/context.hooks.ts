@@ -11,6 +11,7 @@ const contextSchema = z.object({
   model: z.string(), session: z.string().min(1),
   origin: z.string().optional(), agent: z.string().optional(), cwd: z.string().optional(),
   options: z.unknown().optional(),
+  signal: z.instanceof(AbortSignal).optional(),
 });
 
 function messageCount(body: Record<string, unknown>, protocol: Protocol): number {
@@ -35,6 +36,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
   const body = bodyResult.data;
   const ctx = ctxResult.data;
   try {
+    ctx.signal?.throwIfAborted();
     const options = parseOptions(ctx.options);
     // Hooks cannot register tools. Folding requires the client to advertise the MCP tool.
     if (!JSON.stringify(body.tools ?? body.config ?? {}).includes('context_folding')) return input;
@@ -102,7 +104,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         const response = await fetch(options.accounting.url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ requestHash, ...accountingRequest }),
-          signal: AbortSignal.timeout(options.accounting.timeoutMs),
+          signal: AbortSignal.any([AbortSignal.timeout(options.accounting.timeoutMs), ...(ctx.signal ? [ctx.signal] : [])]),
         });
         if (!response.ok) throw new Error('Accounting endpoint failed');
         const length = Number(response.headers.get('content-length') ?? 0);
@@ -125,7 +127,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         entry.folded = text;
       }
       return candidate;
-    });
+    }, ctx.signal);
   } catch {
     // Never return a changed request if durable originals could not be committed.
     return input;

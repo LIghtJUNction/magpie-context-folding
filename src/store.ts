@@ -164,7 +164,9 @@ export class Store {
     create: boolean,
     maxBytes: number,
     run: (snapshot: Snapshot) => Promise<T> | T,
+    signal?: AbortSignal,
   ): Promise<T> {
+    signal?.throwIfAborted();
     hashSchema.parse(scope);
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid session archive size limit');
     const original = await this.database((database) => {
@@ -189,7 +191,9 @@ export class Store {
 
     // The callback may await a cost-counting endpoint. Keep SQLite closed while it runs.
     const before = JSON.stringify(original.snapshot);
+    signal?.throwIfAborted();
     const result = await run(original.snapshot);
+    signal?.throwIfAborted();
     const snapshot = snapshotSchema.parse(original.snapshot);
     validateLayers(snapshot);
     const after = JSON.stringify(snapshot);
@@ -199,6 +203,7 @@ export class Store {
     const serialized = JSON.stringify(stored);
 
     await this.database((database) => {
+      signal?.throwIfAborted();
       database.exec('BEGIN IMMEDIATE');
       try {
         const current: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
@@ -222,6 +227,7 @@ export class Store {
           + COALESCE((SELECT SUM(length(CAST(snapshot AS BLOB))) FROM sessions), 0)
           + COALESCE((SELECT SUM(length(CAST(value AS BLOB))) FROM meta), 0) AS value`).get()).value;
         if (total > this.maxTotalBytes) throw new Error('Global archive full; original request retained');
+        signal?.throwIfAborted();
         database.exec('COMMIT');
       } catch (error) {
         if (database.inTransaction) database.exec('ROLLBACK');

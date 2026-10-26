@@ -24,6 +24,24 @@ async function read(store: Store, scope: string): Promise<Snapshot> {
   return store.transaction(scope, false, sessionLimit, (snapshot) => structuredClone(snapshot));
 }
 
+test('cancelled asynchronous work cannot commit a new folding layer', async () => {
+  await fixture(async store => {
+    const scope = await store.scopeFor('cancelled fold');
+    await store.transaction(scope, true, sessionLimit, snapshot => { snapshot.entries.push(entry('one', 'original')); });
+    const controller = new AbortController();
+    await assert.rejects(store.transaction(scope, false, sessionLimit, async snapshot => {
+      const first = snapshot.entries[0];
+      assert.ok(first);
+      first.folded = 'new fold';
+      first.layers.push({ id: 'layer', text: 'new fold', previousId: 'original' });
+      controller.abort();
+      await Promise.resolve();
+    }, controller.signal), /abort/i);
+    assert.equal((await read(store, scope)).entries[0]?.folded, undefined);
+    assert.deepEqual((await read(store, scope)).entries[0]?.layers, []);
+  });
+});
+
 test('SQLite round trips arbitrary JSON strings without losing lone UTF-16 surrogates', async () => {
   await fixture(async store => {
     const scope = await store.scopeFor('surrogate round trip');

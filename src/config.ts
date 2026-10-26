@@ -6,9 +6,10 @@ export const optionsSchema = z.object({
   headChars: z.number().int().min(0).max(1000).default(160),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
   minimumSavingUsd: z.number().finite().nonnegative().default(0.000001),
+  gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
   accounting: z.object({
     url: z.url(),
-    timeoutMs: z.number().int().min(50).max(10_000).default(2000),
+    timeoutMs: z.number().int().min(50).max(10_000).default(500),
   }).optional(),
 }).strict();
 

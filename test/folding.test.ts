@@ -63,6 +63,17 @@ test('no MCP tool leaves request untouched and creates no archive', async () => 
   });
 });
 
+test('Magpie timeout options are accepted and a cancelled hook leaves no archive', async () => {
+  await fixture(async directory => {
+    const controller = new AbortController();
+    controller.abort();
+    assert.equal(await onRequest(body, { ...context, signal: controller.signal }), body);
+    assert.deepEqual(await readdir(directory), []);
+    const result = await onRequest(body, { ...context, options: { gatewayTimeoutMs: 3000 } });
+    assert.ok(JSON.stringify(result).includes('<context-folding scope='));
+  });
+});
+
 test('marking, threshold, nested folding, exact paginated restoration, keep and dedup', async () => {
   await fixture(async (directory, url) => {
     const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, accounting: { url } } };

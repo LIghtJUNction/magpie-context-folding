@@ -8,13 +8,25 @@ Agent 通过 `context_folding` 工具主动标注哪些内容可以折叠、哪�
 
 ## 安装和连接工具
 
-Magpie 的请求钩子使用 Bun；开发检查也需要 Bun、Node.js 和 npm。
+直接安装已发布的版本：
+
+```sh
+magpie plugin add 'npm:magpie-context-folding@0.1.0'
+# 也可以安装 GitHub 的固定版本
+magpie plugin add 'github:LIghtJUNction/magpie-context-folding#v0.1.0'
+```
+
+GitHub Release 同时托管 npm 格式安装包及 SHA-256 校验文件。Magpie 使用 Bun 直接加载包内 TypeScript 源码，不依赖安装时构建脚本，也不需要在源码仓库保存重复的编译产物。
+
+从本地源码开发和安装时：
 
 ```sh
 npm ci
 npm run check
 magpie plugin add /绝对路径/magpie-context-folding
 ```
+
+开发检查需要 Bun、Node.js 和 npm。
 
 包内同时提供 `magpie.hooks` 请求钩子和自定义工具。需要让使用 Magpie 的 agent 连接其 HTTP MCP 服务：
 
@@ -86,11 +98,14 @@ magpie plugin add /绝对路径/magpie-context-folding
   "headChars":160,
   "maxSessionBytes":67108864,
   "minimumSavingUsd":0.000001,
+  "gatewayTimeoutMs":3000,
   "accounting":{"url":"http://127.0.0.1:8791/certificate","timeoutMs":2000}
 }
 ```
 
 `thresholdTokens` 使用请求 JSON 的 UTF-8 字节数除以四作为**触发估算**，不用于费用证明。默认保护最近 4 条协议消息，以及最新用户请求；一个长工具循环中更早的已完成结果仍可以折叠。系统和开发者指令、工具参数、工具关联 ID、附件和带签名的推理数据保持原样。
+
+Magpie 默认给请求钩子 1 秒，插件默认给 accounting 500 ms。需要较慢的计费服务时，将宿主 `gatewayTimeoutMs` 设为大于 accounting 超时并留出处理余量；上例分别为 3 秒和 2 秒。宿主取消或超时会中止计费请求，并阻止未完成折叠写入存档。
 
 实现支持 OpenAI Chat、Responses、Anthropic Messages 和 Gemini 的明文内容。Responses 服务端托管历史、未完成的工具调用配对、Anthropic assistant 预填充请求整次跳过，避免破坏协议。多模态内容目前不折叠，无法仅靠读出 JSON 恢复模型的图片感知。
 
