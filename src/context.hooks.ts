@@ -10,6 +10,7 @@ import type { Entry, Group, Snapshot } from './store.js';
 import { parentIndex } from './tree.js';
 import { trackVersions } from './versions.js';
 import { canReplayDuplicate, duplicatePlans, isDuplicateFold } from './duplicates.js';
+import { pollingRepresentation } from './polling.js';
 import type { Protocol, Span } from './protocol.js';
 
 const stateSchema = z.custom<Record<string, unknown>>(value => typeof value === 'object' && value !== null && !Array.isArray(value));
@@ -245,7 +246,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       for (const entry of snapshot.entries) {
         if (!currentIds.has(entry.id) || !eligibleIds.has(entry.id) || replayedGroups.occupied.has(entry.id)
           || entry.mark.disposition !== 'foldable') continue;
-        const normal = representation(entry, entry.mark.summary, options.headChars);
+        const normal = pollingRepresentation(entry) ?? representation(entry, entry.mark.summary, options.headChars);
         const duplicate = duplicateRepresentations.get(entry.id);
         const previousText = existing.get(entry.id) ?? entry.text;
         const bytes = (text: string) => Buffer.byteLength(JSON.stringify(text));
