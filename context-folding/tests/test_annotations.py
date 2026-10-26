@@ -232,15 +232,203 @@ class AnnotationTests(unittest.TestCase):
                             return result
                         mocked = patch.object(cli, "annotate_python_functions", side_effect=intercept)
                     else:
-                        real = cli.os.chmod
+                        real = cli.os.fchmod
                         def intercept(*args, **kwargs):
                             real(*args, **kwargs)
                             mutate()
-                        mocked = patch.object(cli.os, "chmod", side_effect=intercept)
+                        mocked = patch.object(cli.os, "fchmod", side_effect=intercept)
                     with mocked, self.assertRaisesRegex(ValueError, "changed during annotation"):
                         cli._annotate_functions(str(path), "python", True)
                     self.assertEqual(path.read_bytes(), b"def changed():\n    return 4\n" if change == "content" else original)
                     self.assertEqual(list(Path(directory).glob(".source.py.*")), [])
+
+    def test_project_function_markers_real_cli(self):
+        environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "python"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = {
+                "a.py": b"@decorate\r\nasync def work():\r\n    return 3",
+                "pkg/types.pyi": b"def stub(): ...\n",
+                "pkg/b.py": b"class A:\n    def work(self):\n        return 1\n",
+                "single.py": b"@decorate\ndef one(): return 1\n",
+                "ignored.py": b"def invalid(:\n",
+                ".venv/bad.py": b"invalid python!",
+                ".git/bad.py": b"invalid python!",
+                "node_modules/bad.py": b"invalid python!",
+                "build/bad.py": b"invalid python!",
+                "skip/bad.py": b"invalid python!",
+                "notes.txt": b"def invalid(:\n",
+            }
+            for name, content in sources.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+                path.chmod(0o640)
+            (root / "alias.py").symlink_to(root / "a.py")
+            (root / "linked").symlink_to(root / "pkg", target_is_directory=True)
+            command = [sys.executable, "-m", "context_folding", "annotate-functions", str(root),
+                       "--exclude", "ignored.py", "--exclude", "skip"]
+            preview = subprocess.run(command, env=environment, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            result = json.loads(preview.stdout)["result"]
+            self.assertEqual(result["changedFiles"], 2)
+            self.assertFalse(result["applied"])
+            self.assertEqual([Path(item["path"]).relative_to(root).as_posix() for item in result["files"]],
+                             ["a.py", "single.py", "pkg/b.py", "pkg/types.pyi"])
+            for name, content in sources.items():
+                self.assertEqual((root / name).read_bytes(), content)
+            applied = subprocess.run(command + ["--apply"], env=environment, capture_output=True, text=True)
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            self.assertTrue(json.loads(applied.stdout)["result"]["applied"])
+            for item in result["files"]:
+                path = Path(item["path"])
+                self.assertEqual(path.read_bytes(), item["text"].encode())
+                self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+                self.assertEqual(ast.dump(ast.parse(path.read_bytes())),
+                                 ast.dump(ast.parse(sources[path.relative_to(root).as_posix()])))
+            self.assertTrue((root / "alias.py").is_symlink())
+            for name in set(sources) - {"a.py", "pkg/b.py"}:
+                self.assertEqual((root / name).read_bytes(), sources[name])
+            repeated = subprocess.run(command + ["--apply"], env=environment, capture_output=True, text=True)
+            self.assertEqual(repeated.returncode, 0, repeated.stderr)
+            self.assertEqual(json.loads(repeated.stdout)["result"]["changedFiles"], 0)
+
+    def test_project_annotation_preflight_rejects_without_writes(self):
+        from context_folding import cli
+        from unittest.mock import patch
+        original = b"def good():\n    return 1\n"
+        for bad in (b"def invalid(:\n", b"# @context-fold begin missing\n", b"\xff"):
+            with self.subTest(bad=bad), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "a.py").write_bytes(original)
+                (root / "z.py").write_bytes(bad)
+                with self.assertRaises((ValueError, UnicodeError)):
+                    cli._annotate_project(directory, "python", True, [])
+                self.assertEqual((root / "a.py").read_bytes(), original)
+                self.assertEqual((root / "z.py").read_bytes(), bad)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "a.py"
+            path.write_bytes(original)
+            (root / "z.py").write_bytes(original)
+            real = cli.annotate_python_functions
+            calls = 0
+            def intercept(text):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    path.write_bytes(b"# concurrent edit\n")
+                return real(text)
+            with patch.object(cli, "annotate_python_functions", side_effect=intercept):
+                with self.assertRaisesRegex(ValueError, "changed during annotation"):
+                    cli._annotate_project(directory, "python", True, [])
+            self.assertEqual(path.read_bytes(), b"# concurrent edit\n")
+            self.assertEqual((root / "z.py").read_bytes(), original)
+
+    def test_project_annotation_rejects_links_limits_and_invalid_options(self):
+        from context_folding import cli
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "a.py"
+            original = b"def good():\n    return 1\n"
+            path.write_bytes(original)
+            os.link(path, root / "hard.py")
+            with self.assertRaisesRegex(ValueError, "hard links"):
+                cli._annotate_project(directory, "python", True, [])
+            (root / "hard.py").unlink()
+            alias = root / "alias"
+            alias.symlink_to(root, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "non-symlink directory"):
+                cli._annotate_project(str(alias), "python", True, [])
+            for exclusions in ([""], ["/absolute"], ["../outside"]):
+                with self.assertRaises(ValueError):
+                    cli._annotate_project(directory, "python", True, exclusions)
+            with self.assertRaisesRegex(ValueError, "only for Python"):
+                cli._annotate_project(directory, "javascript", True, [])
+            with patch.object(cli, "MAX_INPUT_BYTES", 2):
+                with self.assertRaisesRegex(ValueError, "8 MiB"):
+                    cli._annotate_project(directory, "python", True, [])
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_project_annotation_rejects_swapped_parent_and_cleans_temporary(self):
+        from context_folding import cli
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent = root / "pkg"
+            parent.mkdir()
+            path = parent / "a.py"
+            original = b"def good():\n    return 1\n"
+            path.write_bytes(original)
+            real = cli.os.fchmod
+            def intercept(*args, **kwargs):
+                real(*args, **kwargs)
+                parent.rename(root / "moved")
+                parent.symlink_to(root / "moved", target_is_directory=True)
+            with patch.object(cli.os, "fchmod", side_effect=intercept):
+                with self.assertRaisesRegex(ValueError, "changed during annotation"):
+                    cli._annotate_project(directory, "python", True, [])
+            self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(list((root / "moved").glob(".a.py.*")), [])
+
+    def test_project_annotation_final_replace_cannot_follow_swapped_parent(self):
+        from context_folding import cli
+        from unittest.mock import patch
+        for fail in (False, True):
+            with self.subTest(fail=fail), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                parent, outside = root / "pkg", root / "outside"
+                parent.mkdir()
+                outside.mkdir()
+                original = b"def good():\n    return 1\n"
+                (parent / "a.py").write_bytes(original)
+                sentinel = b"# outside must survive\n"
+                (outside / "a.py").write_bytes(sentinel)
+                real = cli.os.replace
+                def intercept(source, destination, **kwargs):
+                    self.assertIsInstance(kwargs["src_dir_fd"], int)
+                    self.assertEqual(kwargs["src_dir_fd"], kwargs["dst_dir_fd"])
+                    parent.rename(root / "moved")
+                    parent.symlink_to(outside, target_is_directory=True)
+                    # Plant the same temporary basename outside: path-based
+                    # replacement would overwrite the sentinel with this file.
+                    (outside / source).write_bytes(b"# attacker\n")
+                    if fail:
+                        raise OSError("injected replacement failure")
+                    real(source, destination, **kwargs)
+                with patch.object(cli.os, "replace", side_effect=intercept):
+                    if fail:
+                        with self.assertRaises(OSError):
+                            cli._annotate_project(str(parent), "python", True, [])
+                    else:
+                        cli._annotate_project(str(parent), "python", True, [])
+                self.assertEqual((outside / "a.py").read_bytes(), sentinel)
+                self.assertEqual(list((root / "moved").glob(".a.py.*")), [])
+                content = (root / "moved" / "a.py").read_bytes()
+                self.assertEqual(content == original, fail)
+                if not fail:
+                    self.assertIn(b"@context-fold begin good", content)
+
+    def test_annotation_output_limit_and_bounded_verification(self):
+        from context_folding import cli
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "a.py"
+            original = b"def good():\n    return 1\n"
+            path.write_bytes(original)
+            with patch.object(cli, "MAX_INPUT_BYTES", len(original)):
+                with self.assertRaisesRegex(ValueError, "Annotated source exceeds"):
+                    cli._annotate_functions(str(path), "python", True)
+            self.assertEqual(path.read_bytes(), original)
+            plan = cli._annotation_plan(str(path), "python")
+            # A replaced Path.read_bytes implementation must never be used by
+            # verification; it reads at most MAX_INPUT_BYTES + 1 through an fd.
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("unbounded read")):
+                cli._verify_annotation(plan)
+            path.write_bytes(original + b"# concurrent growth\n")
+            with self.assertRaisesRegex(ValueError, "changed during annotation"):
+                cli._verify_annotation(plan)
 
     def test_nested_regions_are_supported_and_crossing_regions_rejected(self):
         source = ('# @context-fold begin outer\ndef outer():\n'

@@ -76,6 +76,35 @@ def _python_comment_lines(text: str) -> set[int]:
     return result
 
 
+def _python_function_header_lines(text: str) -> dict[int, int]:
+    """Map function definition lines to their suite colon's physical line."""
+    tokens = tokenize.generate_tokens(io.StringIO(text.replace("\r\n", "\n").replace("\r", "\n")).readline)
+    headers: dict[int, int] = {}
+    start = None
+    depth = 0
+    lambdas = 0
+    for token in tokens:
+        if start is None:
+            if token.type == tokenize.NAME and token.string == "def":
+                start = token.start[0]
+                depth = 0
+                lambdas = 0
+        elif token.type == tokenize.NAME and token.string == "lambda" and depth == 0:
+            lambdas += 1
+        elif token.type == tokenize.OP:
+            if token.string in "([{":
+                depth += 1
+            elif token.string in ")]}":
+                depth -= 1
+            elif token.string == ":" and depth == 0:
+                if lambdas:
+                    lambdas -= 1
+                else:
+                    headers[start] = token.start[0]
+                    start = None
+    return headers
+
+
 def discover_source(text: str, language: str | None = None, path: str | None = None,
                     styles: Any = None) -> dict[str, Any]:
     """Return validated ranges; unsupported languages use explicit markers only.
@@ -101,6 +130,7 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         try:
             tree = ast.parse(text)
             comments = _python_comment_lines(text)
+            function_headers = _python_function_header_lines(text)
         except (SyntaxError, ValueError, tokenize.TokenError, IndentationError):
             raise ValueError("Invalid Python source; annotations unchanged") from None
     regions: list[dict[str, Any]] = []
@@ -133,7 +163,8 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
                 first = body[0].lineno if body and body[0].lineno > node.lineno else node.lineno
                 if body and first > node.lineno:
                     first = min([first] + [d.lineno for d in getattr(body[0], "decorator_list", [])])
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.end_lineno > node.lineno:
+                if (not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        or body[0].lineno > function_headers[node.lineno]):
                     add(name, type(node).__name__, first, node.end_lineno, lines[node.lineno - 1].strip())
             for child in ast.iter_child_nodes(node):
                 walk(child, name)
@@ -198,6 +229,7 @@ def annotate_python_functions(text: str) -> dict[str, Any]:
         offsets.append(offsets[-1] + len(line))
     candidates = []
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    function_headers = _python_function_header_lines(text)
     decorator_lines = [token.start[0] for token in tokenize.generate_tokens(io.StringIO(normalized).readline)
                        if token.type == tokenize.OP and token.string == "@"
                        and not lines[token.start[0] - 1][:token.start[1]].strip()]
@@ -206,7 +238,8 @@ def annotate_python_functions(text: str) -> dict[str, Any]:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 name = f"{prefix}.{child.name}" if prefix else child.name
-                if not isinstance(child, ast.ClassDef) and child.end_lineno > child.lineno:
+                if (not isinstance(child, ast.ClassDef)
+                        and child.body[0].lineno > function_headers[child.lineno]):
                     start = child.lineno
                     if child.decorator_list:
                         first_decorator = child.decorator_list[0].lineno

@@ -67,9 +67,8 @@ test('failure, image, unsupported, error and malformed range leave results untou
   assert.equal(called, 1);
 });
 
-test('installed Pi read uses exact offset/limit output, no file reread by adapter', async t => {
+test('installed Pi read uses exact offset/limit output, no file reread by adapter', { skip: !process.env.PI_PACKAGE_ROOT }, async () => {
   const root = process.env.PI_PACKAGE_ROOT;
-  if (!root) return t.skip('Set PI_PACKAGE_ROOT to verify the installed Pi runtime');
   const { createReadToolDefinition } = await import(pathToFileURL(join(root, 'dist/core/tools/read.js')));
   const directory = await mkdtemp(join(tmpdir(), 'pi-read-'));
   try {
