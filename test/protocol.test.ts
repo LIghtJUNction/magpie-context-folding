@@ -2,6 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { appendGuide, extractSpans, replaceSpans, type Protocol } from "../src/protocol.js";
 
+test("Responses custom tool results are foldable and custom code input remains exact", () => {
+  const call = { type: "custom_tool_call", call_id: "code-1", name: "exec", input: "const x = await tools.run(); text(x);" };
+  const body = { input: [call, { type: "custom_tool_call_output", call_id: "code-1", output: "original custom tool evidence" },
+    { role: "user", content: [{ type: "input_text", text: "Continue" }] }] };
+  const tool = extractSpans(body, "responses").find(span => span.role === "tool");
+  assert.ok(tool);
+  assert.equal(tool.text, "original custom tool evidence");
+  assert.equal(tool.protectedReason, undefined);
+  const result = replaceSpans(body, new Map([[tool.id, "folded evidence"]]), "responses");
+  assert.ok(Array.isArray(result.input));
+  assert.deepEqual(result.input[0], call);
+  const output: unknown = result.input[1];
+  assert.ok(typeof output === "object" && output !== null && "output" in output);
+  assert.equal(output.output, "folded evidence");
+  const pending = { input: [call] };
+  assert.deepEqual(appendGuide(pending, "guide", "responses"), pending);
+});
+
 test("Chat folds historical user, assistant and tool text without changing tool calls, images or instructions", () => {
   const body = {
     model: "test", stream: true, tools: [{ type: "function", function: { name: "read" } }],

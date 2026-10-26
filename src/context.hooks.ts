@@ -143,7 +143,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           const record = node as Record<string | number, unknown>;
           if (span.role === 'tool') {
             if (record.tool_call_id !== undefined) identity = record.tool_call_id;
-            if (record.type === 'function_call_output') identity = record.call_id;
+            if (record.type === 'function_call_output' || record.type === 'custom_tool_call_output') identity = record.call_id;
             if (record.type === 'tool_result') identity = record.tool_use_id;
             if (typeof record.functionResponse === 'object' && record.functionResponse !== null) {
               identity = (record.functionResponse as Record<string, unknown>).id;
