@@ -199,8 +199,8 @@ class AnnotationTests(unittest.TestCase):
             self.assertTrue(applied["applied"])
             self.assertEqual(path.read_text(), annotate_python_functions(original.decode())["text"])
             self.assertFalse(_annotate_functions(str(path), "python", True)["applied"])
-            with self.assertRaisesRegex(ValueError, "only for Python"):
-                _annotate_functions(str(path), "typescript", True)
+            with self.assertRaisesRegex(ValueError, "supports Python"):
+                _annotate_functions(str(path), "ruby", True)
 
     def test_function_marker_rejects_concurrent_changes(self):
         from unittest.mock import patch
@@ -344,8 +344,8 @@ class AnnotationTests(unittest.TestCase):
             for exclusions in ([""], ["/absolute"], ["../outside"]):
                 with self.assertRaises(ValueError):
                     cli._annotate_project(directory, "python", True, exclusions)
-            with self.assertRaisesRegex(ValueError, "only for Python"):
-                cli._annotate_project(directory, "javascript", True, [])
+            with self.assertRaisesRegex(ValueError, "supports Python"):
+                cli._annotate_project(directory, "ruby", True, [])
             with patch.object(cli, "MAX_INPUT_BYTES", 2):
                 with self.assertRaisesRegex(ValueError, "8 MiB"):
                     cli._annotate_project(directory, "python", True, [])
@@ -681,7 +681,7 @@ class SourceIntegrationTests(unittest.TestCase):
         import json
         path = Path(self.directory.name) / "source.py"
         path.write_bytes(self.SOURCE.encode())
-        batch = self.client.read_source("s", files=[{"path": str(path)}, {"text": "const x = 1;", "language": "javascript"}])
+        batch = self.client.read_source("s", files=[{"path": str(path)}, {"text": "const x = 1;", "language": "explicit"}])
         self.assertEqual(batch["files"][0]["parser"], "python-ast")
         self.assertEqual(batch["files"][1]["parser"], "explicit-regions")
         self.assertTrue(batch["files"][1]["limitations"])
@@ -705,11 +705,11 @@ class SourceIntegrationTests(unittest.TestCase):
     def test_explicit_fallback_invalid_markers_and_python_string_safety(self):
         from context_folding import FoldingError
         source = 'const banner = "header";\n' + document(8, style="//") + 'tail();'
-        view = self.client.read_source("s", text=source, language="typescript")
+        view = self.client.read_source("s", text=source, language="explicit")
         self.assertEqual(self.client.resolve("s", view["text"])["value"], source)
         self.assertNotIn("原文", view["text"])
         with self.assertRaises(FoldingError):
-            self.client.annotate("s", text=source + "\n// @context-fold end missing", language="typescript")
+            self.client.annotate("s", text=source + "\n// @context-fold end missing", language="explicit")
         py = 'value = """\n' + document(8) + '"""\n'
         result = self.client.annotate("s", text=py, language="python")
         self.assertEqual(result["regions"], [])
@@ -763,8 +763,8 @@ class SourceIntegrationTests(unittest.TestCase):
         source = document(12, name="kept") + document(12, name="unmarked") + document(12, name="folded")
         stored = self.client.annotate("s", text=source, language="explicit", keep=["kept"], marks=[
             {"name": "unmarked", "disposition": "unmarked"}])
-        for options in ({"commentStyles": CUSTOM_STYLES}, {"language": "typescript"},
-                        {"commentStyles": [], "language": "javascript"}):
+        for options in ({"commentStyles": CUSTOM_STYLES}, {"language": "text"},
+                        {"commentStyles": [], "language": "unknown"}):
             with self.subTest(options=options):
                 result = self.client.annotate("s", id=stored["id"], **options)
                 self.assertEqual([r["disposition"] for r in result["regions"]], ["keep", "unmarked", "foldable"])
@@ -775,7 +775,7 @@ class SourceIntegrationTests(unittest.TestCase):
                 self.assertNotIn(document(12, name="folded"), view["text"])
         # Equal-length edits retain names and spans, but create a new original.
         changed = source.replace("原文", "改文")
-        result = self.client.annotate("s", text=changed, language="typescript", commentStyles=CUSTOM_STYLES)
+        result = self.client.annotate("s", text=changed, language="text", commentStyles=CUSTOM_STYLES)
         self.assertNotEqual(result["id"], stored["id"])
         self.assertEqual([r["disposition"] for r in result["regions"]], ["foldable"] * 3)
         self.assertTrue(all(not r.get("manual") for r in result["regions"]))
