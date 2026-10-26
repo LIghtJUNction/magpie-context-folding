@@ -7,6 +7,7 @@ import { addMetrics } from './metrics.js';
 import { statistics } from './statistics.js';
 import { browse, latestVersions, parentIndex, restoreAncestors } from './tree.js';
 import { loadOptions } from './config.js';
+import { strategySchema } from './modes.js';
 
 const peek = z.boolean().default(false);
 
@@ -19,6 +20,7 @@ const markSchema = z.union([
 const scope = z.string().regex(/^[a-f0-9]{64}$/);
 const argsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('stats'), scope: scope.optional() }).strict(),
+  z.object({ action: z.literal('mode'), scope, mode: strategySchema.optional() }).strict(),
   z.object({ action: z.literal('list'), scope, id: z.string().optional(), depth: z.number().int().min(0).max(8).default(1),
     query: z.string().max(200).optional(), sort: z.enum(['chronological', 'size', 'id', 'version']).default('chronological'),
     order: z.enum(['asc', 'desc']).default('asc'), offset: z.number().int().nonnegative().default(0),
@@ -184,6 +186,18 @@ export async function execute(input: unknown): Promise<string> {
       ? (await loadOptions()).maxSessionBytes : 64 * 1024 * 1024;
     const operation = () => store.transaction(args.scope, false, maxBytes, (snapshot) => {
       switch (args.action) {
+        case 'mode': {
+          if (args.mode !== undefined) {
+            if (snapshot.configuredMode !== 'agentic') throw new ToolError('Mode switching requires configured mode=agentic');
+            snapshot.agenticMode = args.mode;
+          }
+          return {
+            configuredMode: snapshot.configuredMode ?? 'unknown',
+            activeMode: snapshot.configuredMode === 'agentic' ? snapshot.agenticMode ?? 'intelligence' : snapshot.configuredMode ?? 'unknown',
+            availableModes: ['intelligence', 'balanced', 'economy'],
+            effectiveOnNextRequest: args.mode !== undefined,
+          };
+        }
         case 'list': return browse(snapshot, args);
         case 'mark': return applyMarks(snapshot, args.marks);
         case 'status': return { entries: snapshot.entries.length, groups: snapshot.groups?.length ?? 0,

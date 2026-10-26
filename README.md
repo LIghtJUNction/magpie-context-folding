@@ -8,7 +8,22 @@
 
 Agent 通过 `context_folding` 工具主动标注哪些内容可以折叠、哪些必须保留。达到阈值且费用门槛通过后，插件在发往模型的请求中将已标记内容替换成「简短摘要 + 来源角色及原文范围 + 开头片段 + 恢复入口」。客户端自己的完整历史不被改写。
 
-**默认 cost 模式缺少费用证据时拒绝新增折叠。** 可配置 accounting 服务、本地证书脚本或保守费用边界；也可显式选择只比较完整请求字节的 bytes 模式，后者不认证金额节省。字符估算与假定未来轮数都不是省钱证明。策略接口和可信本地脚本组合见 [docs/policy.md](docs/policy.md)。
+默认以能力优先，使用最大智力模式，自动折叠较旧的大段工具输出；不依赖费用证明即可运行。原文始终可恢复。只有显式选择 `policy.mode="cost"` 或配置 accounting、费用边界、证书脚本时，才启用严格费用门槛。普通模式只承诺完整请求缩短，不把缩短估算当成实际账单节省。策略接口见 [docs/policy.md](docs/policy.md)。
+
+## 四种模式
+
+插件 options 使用 `{"mode":"intelligence"}`，TOML 使用 `[folding]` 下的 `mode`。默认值可用单项配置覆盖。
+
+| mode | 名称 | 触发门槛估算 | 保留最近消息 | 自动选择 | 自动摘要上限 |
+| --- | --- | ---: | ---: | --- | ---: |
+| `intelligence` | 最大智力，默认 | 64K | 12 | 大段旧工具输出 | 1,600 字符 |
+| `balanced` | 平衡 | 32K | 6 | 旧工具输出 | 800 字符 |
+| `economy` | 最大经济 | 8K | 2 | 旧工具输出、旧助手回复 | 320 字符 |
+| `agentic` | AI 自主切换 | 跟随当前策略 | 跟随当前策略 | 初始最大智力 | 跟随当前策略 |
+
+AI 在 agentic 模式下调用 `{"action":"mode","scope":"<当前scope>","mode":"balanced"}` 等切换当前会话；不传 `mode` 则查询。下一次请求生效，其他会话不变。切回最大智力时，会重新评估自动折叠的内容，恢复最大经济模式自动收起的助手推理；显式 keep、unmarked 和手工摘要保留。模式不更换模型，也不配置模型窗口大小。最大经济侧重减少输入，不能保证未知供应商的最终账单最少。
+
+某些客户端将 MCP 工具统一封装在代码执行工具内，外层请求不列出恢复工具。确认连接可用后，可在插件 options 设置 `recoveryToolName` 为真实工具名，或在 TOML 的 `[magpie]` 设置 `recovery_tool_name`。这是已验证恢复入口的声明；未声明也未直接提供恢复工具时，插件只加长度提示，不折叠。Codex code-mode 可使用 `mcp__magpie__magpie_context_folding_context_folding`。
 
 不依赖 Magpie 的通用实现见 [context-folding 子项目](context-folding/README.md)：提供 Python SDK、CLI、JSON Lines RPC、MCP stdio，以及 Rust、TypeScript、C# 的持久 Python 桥接客户端。它与本页的 Magpie 插件是两套集成；通用实现由宿主显式应用渲染结果、解析工具参数引用，不使用本插件的 accounting 门槛。
 
@@ -48,7 +63,7 @@ magpie plugin add /绝对路径/magpie-context-folding
 }
 ```
 
-具体配置文件及 HTTP transport 字段依客户端而异，使用客户端的 MCP 配置入口填写这个 URL。确认工具列表出现 `context_folding`。请求钩子不能替客户端注册工具；请求没有声明这个工具时，不创建存档或执行折叠，仍为可安全处理的请求附加预算提示。
+具体配置文件及 HTTP transport 字段依客户端而异，使用客户端的 MCP 配置入口填写这个 URL。确认工具列表出现 `context_folding`。请求钩子不能替客户端注册工具；请求既未声明这个工具也未配置已核实的 recoveryToolName 时，不创建存档或执行折叠，仍为可安全处理的请求附加预算提示。
 
 客户端还需要通过 Magpie 提供稳定的会话标识，例如 `X-Magpie-Session`。没有稳定会话标识时不折叠。Magpie 的 MCP 工具调用不提供真实客户端会话 ID，因此工具显式接收当前请求提示中的 `scope`，而不是相信空的 `sessionID`。scope 是使用本地随机密钥计算的会话访问标识，不应转发给其他会话。
 
@@ -158,7 +173,7 @@ npm run stats
 
 金额只在 Magpie 确认响应成功、接受的请求与候选正文一致后累计；失败、取消、正文被后续异步钩子修改、重复完成回调都不会重复记收益。后续同步 middleware、路由和协议转换仍需由 accounting 的边界覆盖。完成回调可能因进程退出或超时漏到，因此统计允许保守漏记，不凭猜测补成功。
 
-已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。金额覆盖的是已验证的增量比较，**不是全任务实际少扣的账单**；未包含在证书费用预留中的标记、展开、额外回复等费用不会自动扣除。默认 cost 模式没有可信费用证据时拒绝新增折叠；证据也可由证书脚本或配置的保守费用边界提供。显式 bytes 模式只记录缩减估算，不认证金额。
+已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。金额覆盖的是已验证的增量比较，**不是全任务实际少扣的账单**；未包含在证书费用预留中的标记、展开、额外回复等费用不会自动扣除。选择 cost 模式且没有可信费用证据时拒绝新增折叠；证据也可由证书脚本或配置的保守费用边界提供。显式 bytes 模式只记录缩减估算，不认证金额。
 
 所有统计仍在同一个 SQLite 数据库中，只维护会话汇总和一个全局累计记录，不生成逐次日志或事件文件。`forget` 回收原文后全局累计保留；查询统计本身不创建数据库、不增加历史记录。升级前的旧请求不反推收益，统计从安装此功能后开始。
 
@@ -180,14 +195,11 @@ bun src/cli.ts config --project-dir "$PWD" --json
 ```toml
 version = 1
 [folding]
+mode = "intelligence" # intelligence / balanced / economy / agentic
 enabled = true
-threshold_tokens = 32000
-keep_recent_messages = 4
 
 [policy]
-mode = "cost" # 默认缺费用证据拒绝；显式 "bytes" 仅检查完整请求缩短
-auto_roles = [] # 例如 ["assistant", "tool"]；角色保护仍然有效
-min_chars = 4096
+mode = "bytes" # 默认仅检查完整请求缩短；可显式 cost 启用费用证明门槛
 ```
 
 可信本地脚本可产生候选摘要或费用证书，配置和输入/输出约束见 [策略文档](docs/policy.md)。脚本是用户信任的本地程序，使用绝对 executable 和 argv，运行时不经过 shell；它并非沙箱。

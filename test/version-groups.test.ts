@@ -62,7 +62,7 @@ async function fixture(run: (f: {
   try {
     const store = new Store(directory);
     const scope = await store.scopeFor(JSON.stringify([context.session, '', '', context.cwd]));
-    const ctx = { ...context, state: {}, options: { thresholdTokens: 1, keepRecentMessages: 1, headChars: 0,
+    const ctx = { ...context, state: {}, options: { policy: { autoRoles: [] }, thresholdTokens: 1, keepRecentMessages: 1, headChars: 0,
       accounting: { url: `http://127.0.0.1:${address.port}` } } };
     await run({ store, scope, ctx, comparisons, reject: () => { rejected = true; } });
   } finally {
@@ -421,7 +421,7 @@ test('groups require aggregate shrink and cost approval; rejected candidates nev
     assert.deepEqual(content(await onRequest(body, ctx)), content(body));
     assert.equal(comparisons.length, 1);
     assert.equal((await load(store, scope)).groups?.find(group => group.id === id)?.folded, undefined);
-    const withoutAccounting = await onRequest(body, { ...ctx, options: { thresholdTokens: 1, keepRecentMessages: 1 } });
+    const withoutAccounting = await onRequest(body, { ...ctx, options: { thresholdTokens: 1, keepRecentMessages: 1, policy: { mode: 'cost', autoRoles: [] } } });
     assert.deepEqual(content(withoutAccounting), content(body));
     assert.equal((await load(store, scope)).decision.reason, 'policy-cost-bounds-missing');
     const byteApproved = await onRequest(body, { ...ctx, options: { thresholdTokens: 1, keepRecentMessages: 1, policy: { mode: 'bytes' } } });

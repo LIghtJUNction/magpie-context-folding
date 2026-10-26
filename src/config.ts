@@ -3,6 +3,8 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { policySchema, scriptSchema } from './policy.js';
+import { modeOptions, modeSchema, modes } from './modes.js';
+import type { Strategy } from './modes.js';
 
 const policyCost = policySchema.shape.cost.unwrap();
 const scriptTomlSchema = z.object({
@@ -27,6 +29,7 @@ const policyTomlSchema = z.object({
   mode: policySchema.shape.mode,
   auto_roles: policySchema.shape.autoRoles,
   min_chars: policySchema.shape.minChars,
+  summary_chars: policySchema.shape.summaryChars,
   minimum_saving_usd: policySchema.shape.minimumSavingUsd,
   cost: costTomlSchema.optional(),
   script: scriptTomlSchema.optional(),
@@ -74,21 +77,34 @@ const accountingSchema = z.object({
 }).strict();
 
 export const optionsSchema = z.object({
+  mode: modeSchema.default('intelligence'),
   enabled: z.boolean().default(true),
-  thresholdTokens: z.number().int().positive().default(32_000),
-  keepRecentMessages: z.number().int().min(0).default(4),
-  headChars: z.number().int().min(0).max(1000).default(160),
+  thresholdTokens: z.number().int().positive().default(modes.intelligence.thresholdTokens),
+  keepRecentMessages: z.number().int().min(0).default(modes.intelligence.keepRecentMessages),
+  headChars: z.number().int().min(0).max(1000).default(modes.intelligence.headChars),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
   minimumSavingUsd: z.number().finite().nonnegative().default(0.000001),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
   accounting: accountingSchema.optional(),
-  policy: policySchema.default(() => policySchema.parse({})),
+  recoveryToolName: z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/).optional(),
+  policy: policySchema.default(() => policySchema.parse(modeOptions('intelligence').policy)),
 }).strict();
 
 export type Options = z.infer<typeof optionsSchema>;
-export const parseOptions = (value: unknown): Options => optionsSchema.parse(value ?? {});
+export function parseOptions(value: unknown): Options {
+  const input = value ?? {};
+  const layer = explicitFields(optionsSchema.partial().extend({
+    accounting: accountingSchema.partial().optional(), policy: policyOptionsLayerSchema.optional(),
+  }).parse(input), input);
+  const preset = modeOptions(layer.mode ?? 'intelligence');
+  const result = { ...preset, ...layer, policy: { ...preset.policy, ...layer.policy,
+    mode: layer.policy?.mode ?? (layer.accounting || layer.policy?.cost || layer.policy?.certificateScript ? 'cost' : 'bytes'),
+  } };
+  return optionsSchema.parse(result);
+}
 
 const foldingSchema = z.object({
+  mode: optionsSchema.shape.mode,
   enabled: optionsSchema.shape.enabled,
   threshold_tokens: optionsSchema.shape.thresholdTokens,
   keep_recent_messages: optionsSchema.shape.keepRecentMessages,
@@ -114,6 +130,7 @@ const tomlAccountingSchema = z.object({
   timeout_ms: accountingSchema.shape.timeoutMs,
 }).strict();
 const magpieSchema = z.object({
+  recovery_tool_name: optionsSchema.shape.recoveryToolName,
   gateway_timeout_ms: optionsSchema.shape.gatewayTimeoutMs,
   accounting: tomlAccountingSchema.optional(),
 }).strict();
@@ -131,6 +148,7 @@ const layerSchema = z.object({
   gc: gcSchema.partial().optional(),
   policy: policyLayerSchema.optional(),
   magpie: z.object({
+    recovery_tool_name: optionsSchema.shape.recoveryToolName,
     gateway_timeout_ms: optionsSchema.shape.gatewayTimeoutMs,
     accounting: tomlAccountingSchema.partial().optional(),
   }).strict().optional(),
@@ -240,19 +258,19 @@ function fromOptions(input: unknown): Table {
   const parsed = explicitFields(validated(optionsSchema.partial().extend({
     accounting: accountingSchema.partial().optional(), policy: policyOptionsLayerSchema.optional(),
   }), input ?? {}, '<overrides>'), input ?? {});
-  const { enabled, thresholdTokens, keepRecentMessages, headChars, maxSessionBytes, minimumSavingUsd,
-    gatewayTimeoutMs, accounting, policy } = parsed;
+  const { mode, enabled, thresholdTokens, keepRecentMessages, headChars, maxSessionBytes, minimumSavingUsd,
+    gatewayTimeoutMs, accounting, recoveryToolName, policy } = parsed;
   return {
     ...(policy ? { policy: renameKeys(policy, false) } : {}),
-    folding: { enabled, threshold_tokens: thresholdTokens, keep_recent_messages: keepRecentMessages,
+    folding: { mode, enabled, threshold_tokens: thresholdTokens, keep_recent_messages: keepRecentMessages,
       head_chars: headChars, max_session_bytes: maxSessionBytes, minimum_saving_usd: minimumSavingUsd },
-    magpie: { gateway_timeout_ms: gatewayTimeoutMs,
+    magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs,
       ...(accounting ? { accounting: { url: accounting.url, timeout_ms: accounting.timeoutMs } } : {}) },
   };
 }
 
-async function effectiveConfig(cwd: string | undefined, overrides: unknown) {
-  const config: Table = configSchema.parse({});
+async function effectiveConfig(cwd: string | undefined, overrides: unknown, agenticMode?: Strategy) {
+  let config: Table = {};
   let explicitPolicyMinimum = false;
   const recordPolicyMinimum = (data: unknown) => {
     if (table(data) && table(data.policy) && data.policy.minimum_saving_usd !== undefined) explicitPolicyMinimum = true;
@@ -284,6 +302,16 @@ async function effectiveConfig(cwd: string | undefined, overrides: unknown) {
     if (table(overrides) && overrides.policy !== undefined) policySource = '<overrides>';
     if (table(overrides) && table(overrides.magpie) && overrides.magpie.accounting !== undefined) accountingSource = '<overrides>';
   }
+  const explicit = config;
+  const selectedMode = modeSchema.parse(table(explicit.folding) ? explicit.folding.mode ?? 'intelligence' : 'intelligence');
+  const { policy: presetPolicy, ...presetFolding } = modeOptions(selectedMode, agenticMode);
+  config = configSchema.parse({ folding: renameKeys(presetFolding, false), policy: renameKeys(presetPolicy, false) });
+  merge(config, explicit);
+  const explicitPolicy = table(explicit.policy) ? explicit.policy : {};
+  if (explicitPolicy.mode === undefined && table(config.policy)
+    && ((table(explicit.magpie) && explicit.magpie.accounting) || explicitPolicy.cost || explicitPolicy.certificate_script)) {
+    config.policy.mode = 'cost';
+  }
   if (!explicitPolicyMinimum && table(config.policy) && table(config.folding)) {
     config.policy.minimum_saving_usd = config.folding.minimum_saving_usd;
   }
@@ -304,15 +332,15 @@ export async function loadConfig(cwd?: string, overrides?: unknown) {
 }
 
 /** Load file defaults and then merge the existing camelCase plugin options. */
-export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Options> {
-  const { config } = await effectiveConfig(cwd, fromOptions(explicit));
+export async function loadOptions(explicit?: unknown, cwd?: string, agenticMode?: Strategy): Promise<Options> {
+  const { config } = await effectiveConfig(cwd, fromOptions(explicit), agenticMode);
   const f = config.folding;
   const m = config.magpie;
   return validated(optionsSchema, {
-    enabled: f.enabled, thresholdTokens: f.threshold_tokens,
+    mode: f.mode, enabled: f.enabled, thresholdTokens: f.threshold_tokens,
     keepRecentMessages: f.keep_recent_messages,
     headChars: f.head_chars, maxSessionBytes: f.max_session_bytes, minimumSavingUsd: f.minimum_saving_usd,
-    gatewayTimeoutMs: m.gateway_timeout_ms, policy: renameKeys(config.policy, true),
+    recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms, policy: renameKeys(config.policy, true),
     ...(m.accounting ? { accounting: { url: m.accounting.url, timeoutMs: m.accounting.timeout_ms } } : {}),
   }, '<effective settings>');
 }

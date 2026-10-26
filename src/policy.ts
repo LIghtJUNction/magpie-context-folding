@@ -23,6 +23,7 @@ export const policySchema = z.object({
   autoRoles: z.array(z.enum(['user', 'assistant', 'tool'])).max(3)
     .refine(value => new Set(value).size === value.length, 'Duplicate roles').default([]),
   minChars: count.default(4096),
+  summaryChars: z.number().int().min(256).max(2000).default(1000),
   minimumSavingUsd: money.default(0),
   cost: z.object({
     bytesPerTokenLower: z.number().finite().positive().default(1),
@@ -116,6 +117,17 @@ export interface CandidateMark {
   summary?: string | undefined;
 }
 
+function automaticSummary(span: Span, limit: number): string {
+  const render = (length: number) => `Archived ${span.role} text (${span.text.length} UTF-16 characters). Verbatim excerpts (incomplete): opening=${JSON.stringify(span.text.slice(0, length))}; ending=${JSON.stringify(span.text.slice(-length || span.text.length))}; read the original for details.`;
+  let length = Math.floor(limit / 4);
+  let result = render(length);
+  while (result.length > limit && length > 0) {
+    length = Math.floor(length / 2);
+    result = render(length);
+  }
+  return result;
+}
+
 /** Scripts select only eligible spans supplied by the hook; this function never mutates a request. */
 export async function planCandidates(input: {
   policy: PolicyInput;
@@ -133,7 +145,7 @@ export async function planCandidates(input: {
     && policy.autoRoles.includes(span.role) && span.text.length >= policy.minChars);
   if (!policy.script) return { marks: eligible.map(span => ({
     id: span.id, disposition: 'foldable',
-    summary: `Archived ${span.role} text (${span.text.length} UTF-16 characters); read the original for details.`,
+    summary: automaticSummary(span, policy.summaryChars),
   })) };
   if (eligible.length === 0) return { marks: [] };
   const response = await runScript(policy.script, {
