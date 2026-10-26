@@ -3,9 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { duplicatePlans } from '../src/duplicates.js';
+import { canReplayDuplicate, duplicatePlans } from '../src/duplicates.js';
 import { onRequest } from '../src/context.hooks.js';
-import { extractSpans } from '../src/protocol.js';
+import { extractSpans, replaceSpans } from '../src/protocol.js';
 import { Store } from '../src/store.js';
 import { execute } from '../src/tool.js';
 import type { Entry } from '../src/store.js';
@@ -34,6 +34,23 @@ test('duplicate aliases require exact text, matching provenance and a protected 
   assert.equal(duplicatePlans([first, last], entries, eligible, 400).size, 0);
   entries.get('old')!.mark = { disposition: 'foldable', summary: 'Manual evidence: preserve  exact spelling.\n原文🙂' };
   assert.ok(duplicatePlans([first, last], entries, eligible, 400).get('old')!.includes('Manual evidence: preserve  exact spelling.\n原文🙂'));
+});
+
+test('accepted aliases validate their stored path and provenance independently of new rendering', () => {
+  const first = span('old', 0), last = span('latest', 4);
+  const entries = new Map([first, last].map(s => [s.id, entry(s)]));
+  const eligible = new Set(['old']);
+  const old = entries.get('old')!;
+  old.mark = { disposition: 'foldable', summary: 'Manual text\nExact repeat of JSON path ["messages",99,"content"] (zero-based); full text stays inline. Same text, separate observation.' };
+  old.folded = duplicatePlans([first, last], entries, eligible, 400).get('old')!;
+  old.mark = { disposition: 'foldable', summary: 'Updated manual summary' };
+  old.manual = true;
+  assert.equal(canReplayDuplicate(old, [first, last], entries, eligible), true);
+  assert.notEqual(duplicatePlans([first, last], entries, eligible, 0).get('old'), old.folded);
+  assert.equal(canReplayDuplicate(old, [first, { ...last, path: ['messages', 5, 'content'] }], entries, eligible), false);
+  assert.equal(canReplayDuplicate(old, [first, { ...last, source: { path: '/different', range: 'full' } }], entries, eligible), false);
+  assert.equal(canReplayDuplicate(old, [first, last], entries, new Set(['old', 'latest'])), false);
+  assert.equal(canReplayDuplicate(old, [first, { ...last, protectedReason: 'opaque' }], entries, eligible), false);
 });
 
 async function fixture(run: (store: Store, scope: string) => Promise<void>) {
@@ -83,6 +100,55 @@ test('exact duplicates fold without a summary round trip and restore when the in
     changed.messages[4]!.content = original + 'New independent evidence.';
     const restored = await onRequest(changed, { ...ctx, options: { ...ctx.options, thresholdTokens: Number.MAX_SAFE_INTEGER } }) as typeof body;
     assert.equal(restored.messages[1]!.content, original, 'No dangling alias when an anchor changes');
+  });
+});
+
+test('summary updates replay accepted aliases on refusal and compare costs against that replay', async () => {
+  await fixture(async (store, scope) => {
+    const initial = await onRequest(body, ctx) as typeof body;
+    const id = extractSpans(body, 'chat').find(s => s.messageIndex === 1)!.id;
+    const alias = initial.messages[1]!.content!;
+    const summary = 'Updated manual evidence: preserve exact spelling. 原文🙂';
+    await execute({ action: 'mark', scope, marks: [{ id, disposition: 'foldable', summary }] });
+    const refused = await onRequest(body, { ...ctx, options: { ...ctx.options, headChars: 0,
+      thresholdTokens: Number.MAX_SAFE_INTEGER } }) as typeof body;
+    assert.equal(refused.messages[1]!.content, alias);
+    const strict = await onRequest(body, { ...ctx, options: { ...ctx.options, headChars: 0,
+      policy: { mode: 'cost' } } }) as typeof body;
+    assert.equal(strict.messages[1]!.content, alias);
+    const state = await store.transaction(scope, false, 64 * 1024 * 1024, s => structuredClone(s));
+    assert.equal(state.decision!.beforeBytes, Buffer.byteLength(JSON.stringify(replaceSpans(body, new Map([[id, alias]]), 'chat'))));
+    assert.equal(state.decision!.reason, 'batch-not-smaller');
+    assert.equal(state.entries.find(e => e.id === id)!.mark.disposition, 'foldable');
+    const changed = structuredClone(body);
+    changed.messages[4]!.content += 'changed';
+    const invalidated = await onRequest(changed, { ...ctx, options: { ...ctx.options,
+      thresholdTokens: Number.MAX_SAFE_INTEGER } }) as typeof body;
+    assert.equal(invalidated.messages[1]!.content, original);
+  });
+});
+
+test('an oversized new duplicate falls back to a smaller normal manual summary', async () => {
+  await fixture(async (store, scope) => {
+    const manualBody = structuredClone(body);
+    manualBody.messages[2]!.content = original.repeat(3);
+    await onRequest(manualBody, { ...ctx, options: { ...ctx.options, thresholdTokens: Number.MAX_SAFE_INTEGER } });
+    const spans = extractSpans(manualBody, 'chat');
+    const id = spans.find(s => s.messageIndex === 1)!.id;
+    await execute({ action: 'mark', scope, marks: [{ id, disposition: 'foldable', summary: 'Initial' }] });
+    const initial = await onRequest(manualBody, ctx) as typeof body;
+    const alias = initial.messages[1]!.content!;
+    const summary = 'Manual summary retained byte for byte. 原文🙂';
+    await execute({ action: 'mark', scope, marks: [{ id, disposition: 'foldable', summary },
+      { id: spans.find(s => s.messageIndex === 2)!.id, disposition: 'foldable', summary: 'Earlier completed observation.' }] });
+    const state = await store.transaction(scope, false, 64 * 1024 * 1024, s => structuredClone(s));
+    const duplicate = duplicatePlans(spans, new Map(state.entries.map(e => [e.id, e])), new Set([id]), 400).get(id)!;
+    assert.ok(Buffer.byteLength(JSON.stringify(duplicate)) >= Buffer.byteLength(JSON.stringify(alias)));
+    const output = await onRequest(manualBody, ctx) as typeof body;
+    assert.ok(output.messages[1]!.content!.startsWith('[context-folding id='));
+    assert.ok(output.messages[1]!.content!.includes(`Summary (agent-written): ${summary}`));
+    assert.ok(output.messages[1]!.content!.length < alias.length);
+    assert.equal(output.messages[4]!.content, original);
   });
 });
 

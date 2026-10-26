@@ -9,7 +9,7 @@ import { Store, digest } from './store.js';
 import type { Entry, Group, Snapshot } from './store.js';
 import { parentIndex } from './tree.js';
 import { trackVersions } from './versions.js';
-import { duplicatePlans, isDuplicateFold } from './duplicates.js';
+import { canReplayDuplicate, duplicatePlans, isDuplicateFold } from './duplicates.js';
 import type { Protocol, Span } from './protocol.js';
 
 const stateSchema = z.custom<Record<string, unknown>>(value => typeof value === 'object' && value !== null && !Array.isArray(value));
@@ -213,7 +213,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const existing = new Map<string, string>();
       for (const entry of snapshot.entries) {
         if (entry.folded && entry.mark.disposition === 'foldable' && eligibleIds.has(entry.id)
-          && (!isDuplicateFold(entry) || duplicateRepresentations.get(entry.id) === entry.folded)) existing.set(entry.id, entry.folded);
+          && (!isDuplicateFold(entry) || canReplayDuplicate(entry, spans, byId, eligibleIds))) existing.set(entry.id, entry.folded);
       }
       const replayedGroups = groupPlans(snapshot, spans, eligibleIds, existing, true);
       const withoutGuide = replaceSpans(body, existing, ctx.protocol);
@@ -247,9 +247,10 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           || entry.mark.disposition !== 'foldable') continue;
         const normal = representation(entry, entry.mark.summary, options.headChars);
         const duplicate = duplicateRepresentations.get(entry.id);
-        const text = duplicate ?? normal;
         const previousText = existing.get(entry.id) ?? entry.text;
-        if (text === previousText || text.length >= previousText.length) continue;
+        const bytes = (text: string) => Buffer.byteLength(JSON.stringify(text));
+        const text = duplicate !== undefined && bytes(duplicate) < bytes(previousText) ? duplicate : normal;
+        if (text === previousText || bytes(text) >= bytes(previousText)) continue;
         // Content-addressed layer IDs make identical repeated folds no-ops.
         if (entry.layers.length >= 16 && !entry.layers.some(layer => layer.text === text)) continue;
         planned.set(entry.id, text);
