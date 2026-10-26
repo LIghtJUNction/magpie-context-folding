@@ -1,9 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { chmod, mkdir, open } from 'node:fs/promises';
+import { chmod, mkdir, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
+import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
+import type { Metrics } from './metrics.js';
 
 const markSchema = z.discriminatedUnion('disposition', [
   z.object({ disposition: z.literal('unmarked') }),
@@ -20,21 +22,31 @@ const entrySchema = z.object({
 const snapshotSchema = z.object({
   version: z.literal(1), entries: z.array(entrySchema),
   decision: z.record(z.string(), z.unknown()).default({}),
+  metrics: metricsSchema.default(emptyMetrics),
 });
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const storedLayerSchema = layerSchema.omit({ text: true }).extend({ textHash: hashSchema });
 const storedEntrySchema = entrySchema.omit({ text: true, folded: true, layers: true }).extend({
   textHash: hashSchema, foldedHash: hashSchema.optional(), layers: z.array(storedLayerSchema),
 });
-const storedSnapshotSchema = snapshotSchema.omit({ entries: true }).extend({ entries: z.array(storedEntrySchema) });
+const storedSnapshotSchema = snapshotSchema.omit({ entries: true }).extend({
+  entries: z.array(storedEntrySchema),
+  payloadBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  sessionLimitBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+});
 const sessionRowSchema = z.object({ revision: z.number().int().positive(), snapshot: z.string() });
 const textRowSchema = z.object({ text: z.string() });
 const numberRowSchema = z.object({ value: z.number().int().nonnegative() });
+const metadataRowSchema = z.object({ value: z.string() });
 
 export type Entry = z.infer<typeof entrySchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type Mark = z.infer<typeof markSchema>;
 export type Layer = z.infer<typeof layerSchema>;
+export interface StatsReport {
+  metrics: Metrics;
+  storage: { activeSessions: number; blobs: number; databaseBytes: number };
+}
 type StoredSnapshot = z.infer<typeof storedSnapshotSchema>;
 
 export const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -42,6 +54,33 @@ export const digest = (text: string): string => createHash('sha256').update(text
 export function stateDirectory(): string {
   return process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR
     ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'magpie-context-folding');
+}
+
+function metricsDifference(before: Metrics, after: Metrics): Metrics {
+  return metricsSchema.parse(Object.fromEntries(metricsSchema.keyof().options.map(key => {
+    const previous = before[key];
+    const current = after[key];
+    if (typeof previous === 'number' && typeof current === 'number') return [key, current - previous];
+    return [key, (BigInt(current) - BigInt(previous)).toString()];
+  })));
+}
+
+function readLifetimeMetrics(database: Database): Metrics {
+  const row: unknown = database.query("SELECT value FROM meta WHERE key = 'lifetime-metrics'").get();
+  return row === null ? emptyMetrics() : metricsSchema.parse(JSON.parse(metadataRowSchema.parse(row).value));
+}
+
+function legacyPayloadBytes(database: Database, metadata: string): number {
+  const sizes = z.object({ adjustment: z.number().int(), missing: z.number().int().nonnegative() }).parse(database.query(`
+    SELECT COALESCE(SUM(length(CAST(blobs.text AS BLOB)) - 70), 0) AS adjustment,
+      COALESCE(SUM(CASE WHEN blobs.hash IS NULL THEN 1 ELSE 0 END), 0) AS missing
+    FROM json_tree(?) AS value
+    LEFT JOIN blobs ON blobs.hash = value.value
+    WHERE value.key IN ('textHash', 'foldedHash') AND value.path LIKE '$.entries[%'
+  `).get(metadata));
+  if (sizes.missing > 0) throw new Error('Archive content is missing');
+  // Each stored hash replaces a JSON string (66 bytes) and adds four bytes to its key.
+  return Buffer.byteLength(metadata) + sizes.adjustment;
 }
 
 function validateLayers(snapshot: Snapshot): void {
@@ -159,6 +198,81 @@ export class Store {
     });
   }
 
+  async readStats(scope?: string): Promise<StatsReport> {
+    if (scope !== undefined) hashSchema.parse(scope);
+    const path = join(this.directory, 'state.sqlite');
+    let file;
+    try { file = await stat(path); }
+    catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      if (scope !== undefined) throw new Error('Unknown context scope');
+      return { metrics: emptyMetrics(), storage: { activeSessions: 0, blobs: 0, databaseBytes: 0 } };
+    }
+    const database = new Database(path, { readonly: true, strict: true });
+    try {
+      database.exec('PRAGMA busy_timeout = 2000');
+      database.exec('BEGIN');
+      let metrics: Metrics;
+      if (scope === undefined) metrics = readLifetimeMetrics(database);
+      else {
+        const row: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
+        if (row === null) throw new Error('Unknown context scope');
+        // Metrics do not require decoding any archived text or fold layers.
+        const session = sessionRowSchema.parse(row);
+        metrics = storedSnapshotSchema.parse(JSON.parse(session.snapshot)).metrics;
+      }
+      const activeSessions = numberRowSchema.parse(database.query('SELECT COUNT(*) AS value FROM sessions').get()).value;
+      const blobs = numberRowSchema.parse(database.query('SELECT COUNT(*) AS value FROM blobs').get()).value;
+      database.exec('COMMIT');
+      return { metrics, storage: { activeSessions, blobs, databaseBytes: file.size } };
+    } catch (error) {
+      if (database.inTransaction) database.exec('ROLLBACK');
+      throw error;
+    } finally { database.close(); }
+  }
+
+  async recordMetrics(scope: string, delta: Partial<Metrics>, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    hashSchema.parse(scope);
+    const increment = addMetrics(emptyMetrics(), delta);
+    try { await stat(join(this.directory, 'state.sqlite')); }
+    catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') throw new Error('Unknown context scope');
+      throw error;
+    }
+    await this.database(database => {
+      signal?.throwIfAborted();
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        const row: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
+        if (row === null) throw new Error('Unknown context scope');
+        const session = sessionRowSchema.parse(row);
+        const stored = storedSnapshotSchema.parse(JSON.parse(session.snapshot));
+        const metrics = addMetrics(stored.metrics, increment);
+        if (JSON.stringify(metrics) === JSON.stringify(stored.metrics)) {
+          database.exec('COMMIT');
+          return;
+        }
+        const { payloadBytes, sessionLimitBytes, ...base } = stored;
+        const previousBytes = payloadBytes ?? legacyPayloadBytes(database, JSON.stringify(base));
+        const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics));
+        const limit = sessionLimitBytes ?? 64 * 1024 * 1024;
+        if (nextBytes > limit) throw new Error('Session archive full; statistics not committed');
+        database.query('UPDATE sessions SET revision = ?, snapshot = ? WHERE scope = ?')
+          .run(session.revision + 1, JSON.stringify({ ...base, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
+        const lifetime = addMetrics(readLifetimeMetrics(database), increment);
+        database.query("INSERT INTO meta (key, value) VALUES ('lifetime-metrics', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+          .run(JSON.stringify(lifetime));
+        // SQLite's per-connection max_page_count also bounds metadata-only writes.
+        signal?.throwIfAborted();
+        database.exec('COMMIT');
+      } catch (error) {
+        if (database.inTransaction) database.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
   async transaction<T>(
     scope: string,
     create: boolean,
@@ -180,7 +294,6 @@ export class Store {
         }
         const session = sessionRowSchema.parse(row);
         const snapshot = decode(database, storedSnapshotSchema.parse(JSON.parse(session.snapshot)));
-        if (Buffer.byteLength(JSON.stringify(snapshot)) > maxBytes) throw new Error('Session archive exceeds configured size limit');
         database.exec('COMMIT');
         return { revision: session.revision, snapshot };
       } catch (error) {
@@ -191,16 +304,23 @@ export class Store {
 
     // The callback may await a cost-counting endpoint. Keep SQLite closed while it runs.
     const before = JSON.stringify(original.snapshot);
+    const previousMetrics = structuredClone(original.snapshot.metrics);
     signal?.throwIfAborted();
     const result = await run(original.snapshot);
     signal?.throwIfAborted();
     const snapshot = snapshotSchema.parse(original.snapshot);
     validateLayers(snapshot);
     const after = JSON.stringify(snapshot);
-    if (Buffer.byteLength(after) > maxBytes) throw new Error('Session archive full; original request retained');
+    const payloadBytes = Buffer.byteLength(after);
+    // Schema defaults and lowered limits must not block recovery. Existing snapshots
+    // may stay the same size or shrink while over quota; only growth is rejected.
+    const allowedBytes = original.revision > 0 ? Math.max(maxBytes, Buffer.byteLength(before)) : maxBytes;
+    if (payloadBytes > allowedBytes) throw new Error('Session archive full; original request retained');
     if (original.revision > 0 && before === after) return result;
     const { stored, blobs } = encode(snapshot);
-    const serialized = JSON.stringify(stored);
+    const serialized = JSON.stringify({ ...stored, payloadBytes, sessionLimitBytes: maxBytes });
+    const metricsDelta = metricsDifference(previousMetrics, snapshot.metrics);
+    const metricsChanged = JSON.stringify(previousMetrics) !== JSON.stringify(snapshot.metrics);
 
     await this.database((database) => {
       signal?.throwIfAborted();
@@ -222,6 +342,11 @@ export class Store {
           for (const hash of blobs.keys()) insertRef.run(scope, hash);
         }
         database.exec('DELETE FROM blobs WHERE NOT EXISTS (SELECT 1 FROM refs WHERE refs.hash = blobs.hash)');
+        if (metricsChanged) {
+          const lifetime = addMetrics(readLifetimeMetrics(database), metricsDelta);
+          database.query("INSERT INTO meta (key, value) VALUES ('lifetime-metrics', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+            .run(JSON.stringify(lifetime));
+        }
         const total = numberRowSchema.parse(database.query(`SELECT
           COALESCE((SELECT SUM(length(CAST(text AS BLOB))) FROM blobs), 0)
           + COALESCE((SELECT SUM(length(CAST(snapshot AS BLOB))) FROM sessions), 0)

@@ -30,6 +30,7 @@ export interface SavingsProof {
   baselineLowerUsd?: number;
   foldedUpperUsd?: number;
   savingLowerUsd?: number;
+  savingLowerNanoUsd?: string;
   assumptions?: string[];
   bounds?: Pick<Certificate, 'beforeLowerTokens' | 'afterUpperTokens' | 'oldMinPricePerMillion' | 'newMaxPricePerMillion' | 'extraCostUpperUsd' | 'expiresAt'>;
 }
@@ -117,12 +118,17 @@ export function proveSavings(input: ProofInput): SavingsProof {
 
   const approved =
     savingAmount > atScale(minimum, scale) && savingLowerUsd > input.minimumSavingUsd;
+  const nanoDivisor = 10n ** BigInt(Math.max(0, scale - 9));
+  const nanoAmount = scale <= 9 ? savingAmount * 10n ** BigInt(9 - scale)
+    : savingAmount >= 0n ? savingAmount / nanoDivisor
+    : -((-savingAmount + nanoDivisor - 1n) / nanoDivisor);
   return {
     approved,
     reason: approved ? "proven" : "saving-not-proven",
     baselineLowerUsd,
     foldedUpperUsd,
     savingLowerUsd,
+    savingLowerNanoUsd: nanoAmount.toString(),
     assumptions: certificate.assumptions,
     bounds: {
       beforeLowerTokens: certificate.beforeLowerTokens,

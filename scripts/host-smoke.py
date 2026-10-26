@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real Magpie/Bun host with synthetic HTTP and accounting only.
 
-Requires a built dist/, Magpie, Bun, and Linux bubblewrap. The accounting
+Requires the package's source entries, Magpie, Bun, and Linux bubblewrap. The accounting
 fixture defines one serialized Unicode character as one token. Its prices and
 certificates test the integration and never represent a provider's real bill.
 The real home is hidden by a temporary mount; HOME itself is left unchanged.
@@ -148,7 +148,7 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(serialized(value))
 
 
-def run(magpie: Path, bun: Path, bwrap: Path, directory: Path) -> None:
+def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) -> None:
     fixture = Fixture()
     server = ThreadingHTTPServer(("127.0.0.1", 0), fixture.handler())
     server.daemon_threads = True
@@ -167,7 +167,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path) -> None:
         "models": ["m1"], "chat": upstream + "/v1",
     }]})
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
-        "spec": str(PROJECT), "options": {
+        "spec": str(project), "options": {
             "thresholdTokens": 32, "keepRecentMessages": 1, "headChars": 80,
             "minimumSavingUsd": 0.000001,
             "accounting": {"url": upstream + "/accounting", "timeoutMs": 2000},
@@ -194,7 +194,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path) -> None:
         "--proc", "/proc", "--dev", "/dev",
         "--bind", str(directory), str(directory),
         "--bind", str(home), str(Path.home()),
-        "--ro-bind", str(PROJECT), str(PROJECT),
+        "--ro-bind", str(project), str(project),
         "--ro-bind", str(bun), str(bun),
         "--chdir", str(directory), str(magpie), "serve",
     ]
@@ -286,6 +286,19 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path) -> None:
             assert folded["messages"][-1]["content"].startswith(messages[-1]["content"]), "current request changed"
             assert fixture.accounting, "fold bypassed the accounting certificate gate"
 
+            # Magpie finishes response hooks asynchronously; wait for the actual
+            # successful response rather than crediting the proposed fold.
+            deadline = time.monotonic() + 5
+            while True:
+                folding_stats = call({"action": "stats"})
+                if folding_stats["metrics"]["certifiedComparisons"] >= 1:
+                    break
+                assert time.monotonic() < deadline, f"successful response did not earn certified statistics: {folding_stats}"
+                time.sleep(0.05)
+            assert folding_stats["metrics"]["foldBatchesApproved"] == 1
+            assert folding_stats["metrics"]["successfulFoldedRequests"] >= 1
+            assert int(folding_stats["metrics"]["savingNanoUsdLower"]) > 0
+
             restored_parts: list[str] = []
             offset = 0
             expected_hash = hashlib.sha256(original.encode()).hexdigest()
@@ -301,6 +314,13 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path) -> None:
                 offset = following
             assert "".join(restored_parts) == original, "read did not restore historical text byte for byte"
             call({"scope": "0" * 64, "action": "read", "id": entry_id}, expect_error=True)
+            pasted_path = directory / "pasted-original.txt"
+            pasted = call({"scope": scope, "action": "paste", "id": entry_id, "path": str(pasted_path)})
+            assert pasted_path.read_text() == original, "paste did not write the full original"
+            assert pasted["sha256"] == expected_hash and "text" not in pasted, "paste metadata leaked or changed text"
+            assert pasted["bytes"] == len(original.encode()), "paste byte count changed"
+            call({"scope": scope, "action": "paste", "id": entry_id, "path": str(pasted_path)}, expect_error=True)
+            assert pasted_path.read_text() == original, "paste overwrote an existing file"
 
             # An equal-price synthetic tariff allows a second, smaller fold to
             # pass without pretending that mild compaction offsets deep cache
@@ -342,7 +362,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path) -> None:
             assert other["messages"][2]["content"] == original, "a mark leaked into another session"
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun", "billing": "SYNTHETIC_ACCOUNTING_ONLY",
-                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "opening and summary retained", "protected messages and tools retained", "paginated byte-for-byte read", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "keep restores outgoing original", "unprofitable fold refused", "session isolation"],
+                "checks": ["MCP discovery", "historical assistant mark and automatic fold", "opening and summary retained", "protected messages and tools retained", "successful-response lifetime statistics", "paginated byte-for-byte read", "paste full original to new file without echo or overwrite", "unknown scope refused", "two folds recursively unfold to original", "unchanged requests do not duplicate layers", "keep restores outgoing original", "unprofitable fold refused", "session isolation"],
                 "originalChars": len(original), "foldedChars": len(folded["messages"][2]["content"]),
                 "accountingRequests": len(fixture.accounting), "status": status,
             }))
@@ -368,15 +388,17 @@ def main() -> None:
     parser.add_argument("--magpie", default=shutil.which("magpie"))
     parser.add_argument("--bun", default=shutil.which("bun"))
     parser.add_argument("--bwrap", default=shutil.which("bwrap"))
+    parser.add_argument("--project", type=Path, default=PROJECT, help="installed package directory to exercise")
     arguments = parser.parse_args()
+    project = arguments.project.resolve()
     for name in ("magpie", "bun", "bwrap"):
         if not getattr(arguments, name):
             parser.error(f"{name} is required; no live configuration will be used as a fallback")
-    package = json.loads((PROJECT / "package.json").read_text())
-    if not (PROJECT / package["main"]).exists() or not (PROJECT / package["magpie"]["hooks"]).exists():
+    package = json.loads((project / "package.json").read_text())
+    if not (project / package["main"]).exists() or not (project / package["magpie"]["hooks"]).exists():
         parser.error("package main or Magpie hook entry is missing")
     with tempfile.TemporaryDirectory(prefix="magpie-context-folding-smoke-") as temporary:
-        run(Path(arguments.magpie).resolve(), Path(arguments.bun).resolve(), Path(arguments.bwrap).resolve(), Path(temporary))
+        run(Path(arguments.magpie).resolve(), Path(arguments.bun).resolve(), Path(arguments.bwrap).resolve(), Path(temporary), project)
 
 
 if __name__ == "__main__":

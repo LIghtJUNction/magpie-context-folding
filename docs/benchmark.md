@@ -1,6 +1,6 @@
 # 递归折叠、费用和性能测试
 
-2026-10-26 本机结果。原始测量及计价字段集中在 [benchmark-results.json](benchmark-results.json)，复现脚本在 `scripts/`，不逐次保留日志、存档或输入副本。
+2026-10-26 的 v0.1.0 本机结果，未包含后来 v0.2.0 增加的响应统计回调开销。原始测量及计价字段集中在 [benchmark-results.json](benchmark-results.json)，复现脚本在 `scripts/`，不逐次保留日志、存档或输入副本。
 
 ## 已验证的功能
 

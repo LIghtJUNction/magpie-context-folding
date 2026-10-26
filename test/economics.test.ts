@@ -52,6 +52,13 @@ test("does not mistake fewer tokens for a cache-adjusted cost saving", () => {
   approximately(result.savingLowerUsd, -0.065);
 });
 
+test('exports exact conservative nanodollars without rounding up fractional gains', () => {
+  assert.equal(prove(certificate()).savingLowerNanoUsd, '1250000');
+  assert.equal(prove(certificate({ beforeLowerTokens: 1, afterUpperTokens: 0, oldMinPricePerMillion: 0.0014 })).savingLowerNanoUsd, '1');
+  assert.equal(prove(certificate({ beforeLowerTokens: 1, afterUpperTokens: 0, oldMinPricePerMillion: 0.0004 })).savingLowerNanoUsd, '0');
+  assert.equal(prove(certificate({ beforeLowerTokens: 0, afterUpperTokens: 1, newMaxPricePerMillion: 0.0004 })).savingLowerNanoUsd, '-1');
+});
+
 test("rejects break-even and requires savings strictly above the configured minimum", () => {
   assert.equal(prove(certificate({ afterUpperTokens: 8_000 })).approved, false);
   assert.equal(prove(certificate(), 0.00125).approved, false);

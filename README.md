@@ -11,9 +11,9 @@ Agent 通过 `context_folding` 工具主动标注哪些内容可以折叠、哪�
 直接安装已发布的版本：
 
 ```sh
-magpie plugin add 'npm:magpie-context-folding@0.1.0'
+magpie plugin add 'npm:magpie-context-folding@0.2.0'
 # 也可以安装 GitHub 的固定版本
-magpie plugin add 'github:LIghtJUNction/magpie-context-folding#v0.1.0'
+magpie plugin add 'github:LIghtJUNction/magpie-context-folding#v0.2.0'
 ```
 
 GitHub Release 同时托管 npm 格式安装包及 SHA-256 校验文件。Magpie 使用 Bun 直接加载包内 TypeScript 源码，不依赖安装时构建脚本，也不需要在源码仓库保存重复的编译产物。
@@ -46,7 +46,7 @@ magpie plugin add /绝对路径/magpie-context-folding
 
 ## Agent 的操作
 
-请求末尾会附带当前 scope 和一小段历史编号清单。完整清单使用 `list` 分页查看。
+请求末尾只附带当前 scope、简短操作提示和最多 8 个可折叠历史编号；完整清单使用 `list` 分页查看。工具说明也保持精简，避免管理提示反复占用上下文。
 
 ```json
 {"scope":"<当前scope>","action":"list"}
@@ -85,7 +85,44 @@ magpie plugin add /绝对路径/magpie-context-folding
 {"scope":"<当前scope>","action":"read","id":"<历史编号>","layer":"<currentLayer或previousId>"}
 ```
 
+按编号直接粘贴到文件，无需 agent 重新输出大段文本：
+
+```json
+{"scope":"<当前scope>","action":"paste","id":"<历史编号>","path":"/绝对路径/result.txt"}
+```
+
+默认写入完整原文，可用 `layer` 选择某层，或用 `offset`、`limit` 选取片段（与 `read` 一样按 JavaScript UTF-16 字符位置计数，范围不能截断 emoji 等字符）。目标路径位于 **Magpie 所在主机**；要求绝对路径和已有父目录，以 UTF-8 创建权限 0600 的新文件。目标已存在（包括符号链接）时拒绝写入，不覆盖。返回路径、字符数、字节数和已写内容的 SHA-256，不回传正文；存档保持可用。只能粘贴已存档的纯文本，Markdown 代码围栏等原文格式会原样保留。
+
 `status` 显示最近一次费用判断及拒绝原因。完成会话后，可先将折叠条目标记为 `keep`，再调用 `forget` 删除此 scope 的恢复材料；还有折叠条目时拒绝删除。
+
+## 累计统计
+
+在 agent 中调用工具，无 scope 时查看全局累计；传 scope 查看当前会话：
+
+```json
+{"action":"stats"}
+```
+
+```json
+{"action":"stats","scope":"<当前scope>"}
+```
+
+也可以从终端查看，使用与 Magpie 相同的状态目录和环境：
+
+```sh
+bunx --bun magpie-context-folding@0.2.0 stats
+bunx --bun magpie-context-folding@0.2.0 stats --json
+# 本地源码
+npm run stats
+```
+
+统计包括批准的折叠批次、折叠条目数、递归折叠数、成功及失败请求、复用请求、展开读取次数、恢复条目数、净减少 token 和证书支持的输入费节省下界。token 的字节估算与计费证书下界分开显示，不冒充供应商实际 token；金额用精确整数累计到十亿美元分之一，显示九位小数，不用浮点金额相加。
+
+金额只在 Magpie 确认响应成功、接受的请求与候选正文一致后累计；失败、取消、正文被后续异步钩子修改、重复完成回调都不会重复记收益。后续同步 middleware、路由和协议转换仍需由 accounting 的边界覆盖。完成回调可能因进程退出或超时漏到，因此统计允许保守漏记，不凭猜测补成功。
+
+已经折叠的内容在后续请求中复用时，会累计净减少 token 的估算及复用次数；没有新计费证书就不重复记钱。金额覆盖的是已验证的增量比较，**不是全任务实际少扣的账单**；未包含在证书费用预留中的标记、展开、额外回复等费用不会自动扣除。未配置 accounting 时没有自动折叠，相关金额保持零。
+
+所有统计仍在同一个 SQLite 数据库中，只维护会话汇总和一个全局累计记录，不生成逐次日志或事件文件。`forget` 回收原文后全局累计保留；查询统计本身不创建数据库、不增加历史记录。升级前的旧请求不反推收益，统计从安装此功能后开始。
 
 ## 阈值和费用门槛
 
@@ -110,6 +147,8 @@ Magpie 默认给请求钩子 1 秒，插件默认给 accounting 500 ms。需要�
 实现支持 OpenAI Chat、Responses、Anthropic Messages 和 Gemini 的明文内容。Responses 服务端托管历史、未完成的工具调用配对、Anthropic assistant 预填充请求整次跳过，避免破坏协议。多模态内容目前不折叠，无法仅靠读出 JSON 恢复模型的图片感知。
 
 插件不另调模型生成摘要，使用 agent 标记时提供的摘要。只有新表示确实更短、达到阈值且费用证明通过时，才创建新折叠层。已保存的表示会稳定复用，阈值升高或 accounting 暂时不可用不会擅自删除这些层。
+
+一次检查以一批满足条件的条目为候选，整体比较折叠前后的费用，通过后在一个事务中保存这批折叠。再次递归折叠会重新比较，不拿第一次的收益抵掉后续亏损。
 
 ## Accounting 接口和数学证明
 
