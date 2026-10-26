@@ -254,7 +254,7 @@ def _parser() -> argparse.ArgumentParser:
     for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
         sub = commands.add_parser(command)
         if command == "annotate-functions":
-            sub.add_argument("path", help="Python source file or project directory")
+            sub.add_argument("path", help="Python/JavaScript/TypeScript source file or project directory")
             sub.add_argument("--language", default="python")
             sub.add_argument("--exclude", action="append", default=[], metavar="GLOB",
                              help="Exclude a relative path or basename (repeatable; directories are pruned)")
@@ -319,9 +319,19 @@ _ANNOTATION_SKIP_DIRS = frozenset({
 })
 
 
+def _annotation_language(language: str) -> tuple[str, set[str]]:
+    from .javascript import normalize_language
+    language = normalize_language(language)
+    options = {"python": {".py", ".pyi"}, "py": {".py", ".pyi"},
+               "javascript": {".js", ".mjs", ".cjs", ".jsx"}, "jsx": {".jsx"},
+               "typescript": {".ts", ".mts", ".cts", ".tsx"}, "tsx": {".tsx"}}
+    if language not in options:
+        raise ValueError("Function annotation supports Python, JavaScript, JSX, TypeScript and TSX")
+    return ("python" if language == "py" else language), options[language]
+
+
 def _annotation_plan(path: str, language: str) -> tuple:
-    if language.lower() not in {"python", "py"}:
-        raise ValueError("Function annotation is supported only for Python files with the AST parser")
+    language, _ = _annotation_language(language)
     target = Path(path)
     initial_stat = target.lstat()
     if not stat.S_ISREG(initial_stat.st_mode):
@@ -333,11 +343,18 @@ def _annotation_plan(path: str, language: str) -> tuple:
     if len(original) > MAX_INPUT_BYTES:
         raise ValueError("Source file exceeds the 8 MiB limit")
     text = original.decode("utf-8", errors="strict")
-    result = annotate_python_functions(text)
+    if language == "python":
+        result = annotate_python_functions(text)
+    else:
+        from .javascript import annotate_javascript_functions
+        # TSX/JSX grammar is selected per file when traversing a project.
+        if target.suffix.lower() in {".tsx", ".jsx"}:
+            language = target.suffix.lower()[1:]
+        result = annotate_javascript_functions(text, language)
     encoded = result["text"].encode("utf-8")
     if len(encoded) > MAX_INPUT_BYTES:
         raise ValueError("Annotated source exceeds the 8 MiB limit")
-    result.update({"path": str(target), "language": "python", "applied": False})
+    result.update({"path": str(target), "language": language, "applied": False})
     # Snapshot ancestor identities too: a directory swapped for a symlink must
     # not redirect an otherwise unchanged file outside the selected project.
     parents = [(parent, parent.lstat()) for parent in target.absolute().parents]
@@ -445,8 +462,7 @@ def _annotate_project(path: str, language: str, apply: bool,
     root = Path(path).absolute()
     if not stat.S_ISDIR(root.lstat().st_mode):
         raise ValueError("Project path must be a non-symlink directory")
-    if language.lower() not in {"python", "py"}:
-        raise ValueError("Function annotation is supported only for Python files with the AST parser")
+    language, suffixes = _annotation_language(language)
     if any(not pattern or Path(pattern).is_absolute() or ".." in Path(pattern).parts for pattern in exclude):
         raise ValueError("Exclusions must be nonempty relative glob patterns")
 
@@ -467,7 +483,7 @@ def _annotate_project(path: str, language: str, apply: bool,
                          and not (parent / name).is_symlink() and not excluded(parent / name))
         for name in sorted(files):
             target = parent / name
-            if target.suffix.lower() not in {".py", ".pyi"} or excluded(target) or target.is_symlink():
+            if target.suffix.lower() not in suffixes or excluded(target) or target.is_symlink():
                 continue
             plan = _annotation_plan(str(target), language)
             total_bytes += len(plan[2]) + len(plan[3])
@@ -482,7 +498,7 @@ def _annotate_project(path: str, language: str, apply: bool,
         for plan in plans:
             _apply_annotation(plan)
     results = [plan[4] for plan in plans]
-    return {"path": str(root), "language": "python", "files": results,
+    return {"path": str(root), "language": language, "files": results,
             "applied": any(result["applied"] for result in results),
             "changedFiles": sum(plan[2] != plan[3] for plan in plans)}
 

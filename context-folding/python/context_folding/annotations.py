@@ -111,21 +111,33 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
 
     markref v0.1 has a comment lexer, not a structural parser. We do not infer
     braces or function boundaries with regular expressions. Python uses its AST
-    and tokenizer; other languages require whole-line begin/end annotations.
+    and tokenizer; JS/TS validates explicit // and /* */ comments using optional Tree-sitter
+    grammars. Other languages require whole-line begin/end annotations.
     """
     extra = comment_styles([] if styles is None else styles)
     marker_styles = _marker_styles(extra)
-    language = (language or ("python" if path and Path(path).suffix.lower() in {".py", ".pyi"} else "explicit")).lower()
+    inferred = {".py": "python", ".pyi": "python", ".js": "javascript", ".mjs": "javascript",
+                ".cjs": "javascript", ".jsx": "jsx", ".ts": "typescript", ".mts": "typescript",
+                ".cts": "typescript", ".tsx": "tsx"}
+    language = (language or inferred.get(Path(path).suffix.lower(), "explicit") if path else language or "explicit").lower()
     if language == "py":
         language = "python"
+    from .javascript import LANGUAGES, normalize_language, parse_source, comment_lines
+    language = normalize_language(language)
+    javascript = language in LANGUAGES
     if language == "python":
         marker_styles = [("#", "")]
+    elif javascript:
+        marker_styles = [("//", ""), ("/*", "*/")]
     lines = _source_lines(text)
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
     comments = None
     tree = None
+    if javascript:
+        javascript_tree, javascript_data = parse_source(text, language)
+        comments = comment_lines(javascript_tree, javascript_data)
     if language in {"python", "py"}:
         try:
             tree = ast.parse(text)
@@ -176,7 +188,8 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         if match is None:
             continue
         style, body = match
-        if comments is not None and (style != ("#", "") or number not in comments):
+        expected_styles = {("//", ""), ("/*", "*/")} if javascript else {("#", "")}
+        if comments is not None and (style not in expected_styles or number not in comments):
             continue
         marker = _MARKER.fullmatch(body)
         if marker is None:
@@ -208,8 +221,8 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         stack.append(region)
     if len(regions) > 10000:
         raise ValueError("Too many source annotations")
-    return {"language": language, "commentStyles": extra, "parser": "python-ast" if tree is not None else "explicit-regions",
-            "limitations": [] if tree is not None else ["No structural parser for this language; only explicit whole-line regions are recognized. Marker-looking multiline strings may be misidentified."],
+    return {"language": language, "commentStyles": extra, "parser": "python-ast" if tree is not None else "tree-sitter-explicit" if javascript else "explicit-regions",
+            "limitations": ["Only explicit whole-line // or /* */ regions are recognized; structural discovery requires annotate-functions first."] if javascript else [] if tree is not None else ["No structural parser for this language; only explicit whole-line regions are recognized. Marker-looking multiline strings may be misidentified."],
             "regions": regions}
 
 
