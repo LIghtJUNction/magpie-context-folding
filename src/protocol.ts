@@ -77,7 +77,7 @@ function responseSpans(body: Record<string, unknown>): Candidate[] {
   } else if (Array.isArray(body.input)) {
     body.input.forEach((item: unknown, index) => {
       if (!isRecord(item)) return;
-      if (item.type === "function_call_output") {
+      if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
         addTextParts(candidates, item.output, "tool", ["input", index, "output"], index, responseTextTypes);
       } else if (item.type === "message" || item.type === undefined) {
         const role = textRole(item.role);
@@ -213,8 +213,8 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
         safe: !unsafeReadResult(item) && singleReadText(item.content, chatTextTypes),
       } });
     } else if (protocol === "responses") {
-      if (item.type === "function_call") events.push({ call: { id: item.call_id, name: item.name, args: item.arguments, safe: !unsafeReadResult(item) } });
-      else if (item.type === "function_call_output") events.push({ result: {
+      if (item.type === "function_call" || item.type === "custom_tool_call") events.push({ call: { id: item.call_id, name: item.name, args: item.arguments ?? item.input, safe: !unsafeReadResult(item) } });
+      else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") events.push({ result: {
         id: item.call_id, path: ["input", index, "output"], safe: !unsafeReadResult(item) && singleReadText(item.output, responseTextTypes),
       } });
     } else {
@@ -321,8 +321,8 @@ function hasPendingCalls(body: Record<string, unknown>, protocol: Protocol): boo
         for (const call of item.tool_calls) if (isRecord(call)) add(call.id);
       } else if (item.role === "tool") complete(item.tool_call_id);
     } else if (protocol === "responses") {
-      if (item.type === "function_call") add(item.call_id);
-      else if (item.type === "function_call_output") complete(item.call_id);
+      if (item.type === "function_call" || item.type === "custom_tool_call") add(item.call_id);
+      else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") complete(item.call_id);
     } else {
       const parts = protocol === "gemini" ? item.parts : item.content;
       if (!Array.isArray(parts)) continue;
