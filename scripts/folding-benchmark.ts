@@ -27,6 +27,8 @@ const server = createServer(async (request, response) => {
     beforeLowerTokens: JSON.stringify(body.before).length,
     afterUpperTokens: JSON.stringify(body.after).length,
     oldMinPricePerMillion: 1, newMaxPricePerMillion: 1, extraCostUpperUsd: 0,
+    incremental: { toolCalls: 0, modelRoundTrips: 0, inputTokens: 0, outputTokens: 0,
+      inputPricePerMillion: 0, outputPricePerMillion: 0, toolFeesUsd: 0 },
     assumptions: ['SYNTHETIC ONLY: serialized UTF-16 character = one charged token, all input rates = $1/M.'],
   }));
 });

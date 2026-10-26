@@ -15,6 +15,8 @@ function certificate(overrides: Partial<Certificate> = {}): Certificate {
     oldMinPricePerMillion: 0.1,
     newMaxPricePerMillion: 1.25,
     extraCostUpperUsd: 0,
+    incremental: { toolCalls: 0, modelRoundTrips: 0, inputTokens: 0, outputTokens: 0,
+      inputPricePerMillion: 0, outputPricePerMillion: 0, toolFeesUsd: 0 },
     assumptions: ["Whole rendered input is bounded; price bounds cover every billing tier."],
     ...overrides,
   };
@@ -70,6 +72,51 @@ test("charges extra overhead instead of hiding it in gross savings", () => {
   assert.equal(result.approved, false);
   approximately(result.foldedUpperUsd, 0.01075);
   approximately(result.savingLowerUsd, -0.00075);
+});
+
+test('one extra model round trip can erase all savings from a shorter request', () => {
+  const incremental = { ...certificate().incremental, toolCalls: 1, modelRoundTrips: 1,
+    inputTokens: 10_000, outputTokens: 100, inputPricePerMillion: 1.25, outputPricePerMillion: 5 };
+  const result = prove(certificate({ incremental }));
+  assert.equal(prove(certificate()).approved, true);
+  assert.equal(result.approved, false);
+  approximately(result.foldedUpperUsd, 0.02175);
+  approximately(result.savingLowerUsd, -0.01175);
+  assert.deepEqual(result.bounds?.incremental, incremental);
+});
+
+test('charges aggregate extra input, generated arguments and tool fees exactly once', () => {
+  for (const incremental of [
+    { ...certificate().incremental, inputTokens: 1000, inputPricePerMillion: 2 },
+    { ...certificate().incremental, outputTokens: 400, outputPricePerMillion: 5 },
+    { ...certificate().incremental, toolFeesUsd: 0.002 },
+  ]) {
+    const result = prove(certificate({ incremental }));
+    assert.equal(result.approved, false);
+    approximately(result.savingLowerUsd, -0.00075);
+    const manyCalls = prove(certificate({ incremental: { ...incremental, toolCalls: 7, modelRoundTrips: 3 } }));
+    assert.equal(manyCalls.savingLowerNanoUsd, result.savingLowerNanoUsd,
+      'token and fee totals must not be multiplied by work counts');
+  }
+  const exact = prove(certificate({ incremental: { ...certificate().incremental, toolFeesUsd: 0.00125 } }));
+  assert.equal(exact.approved, false);
+  assert.equal(exact.savingLowerNanoUsd, '0');
+});
+
+test('requires complete finite incremental bounds and safe integer work counts', () => {
+  const base = certificate();
+  const invalid: unknown[] = [undefined, {}, { ...base.incremental, toolCalls: -1 },
+    { ...base.incremental, modelRoundTrips: 0.5 },
+    { ...base.incremental, toolCalls: Number.MAX_SAFE_INTEGER + 1 },
+    { ...base.incremental, inputTokens: Infinity },
+    { ...base.incremental, outputTokens: -1 },
+    { ...base.incremental, inputPricePerMillion: NaN },
+    { ...base.incremental, outputPricePerMillion: Infinity },
+    { ...base.incremental, toolFeesUsd: -1 },
+    { ...base.incremental, unknownFee: 0 }];
+  for (const incremental of invalid) {
+    assert.deepEqual(prove({ ...base, incremental }), { approved: false, reason: 'invalid-certificate' });
+  }
 });
 
 test("fails closed for missing, malformed, negative, fractional, and non-finite bounds", () => {

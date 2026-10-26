@@ -92,6 +92,115 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(replies[0]["error"]["code"], "config")
 
+    def test_comment_styles_cli_json_stdin_reuse_and_exact_recovery(self):
+        styles = [{"start": ";;"}, {"start": "(*!", "end": "!*)"}]
+        source = ';; @context-fold begin 历史🙂\r\n' + '原文🙂 值\r\n' * 20 + ';; @context-fold end 历史🙂'
+        code, replies = self.run_cli("read-source", source.encode(), "--scope", "styles", "--text", "-",
+            "--language", "explicit", "--comment-styles", json.dumps(styles))
+        self.assertEqual(code, 0, replies)
+        view = replies[0]["result"]
+        self.assertEqual(len(view["foldedRegions"]), 1)
+        self.assertNotIn("原文", view["text"])
+        code, replies = self.run_cli("resolve", encoded(view["text"]), "--scope", "styles", "--value", "-")
+        self.assertEqual(code, 0, replies)
+        self.assertEqual(replies[0]["result"]["value"].encode(), source.encode())
+        code, replies = self.run_cli("annotate", encoded(styles), "--scope", "styles", "--id", view["id"],
+            "--comment-styles", "-")
+        self.assertEqual(code, 0, replies)
+        self.assertEqual(replies[0]["result"]["commentStyles"], [{"start": ";;", "end": ""}, styles[1]])
+        code, replies = self.run_cli("read-source", b"", "--scope", "styles", "--id", view["id"])
+        self.assertEqual(code, 0, replies)
+        self.assertEqual(replies[0]["result"]["text"], view["text"])
+        for flags, data in ((["--text", "-", "--comment-styles", "-"], encoded(styles)),
+                            (["--json", "-", "--comment-styles", "-"], encoded({"text": source}))):
+            code, replies = self.run_cli("annotate", data, "--scope", "styles", *flags)
+            self.assertEqual(code, 1, replies)
+            self.assertEqual(replies[0]["error"]["code"], "invalid_request")
+        for raw, expected in (("private-style-invalid-json", "invalid_json"),
+                              ('[{"start":"","private-style":true}]', "invalid_request")):
+            code, replies = self.run_cli("annotate", b"", "--scope", "styles", "--text", source,
+                                        "--comment-styles", raw)
+            self.assertEqual(code, 1, replies)
+            self.assertEqual(replies[0]["error"]["code"], expected)
+            self.assertNotIn("private-style", json.dumps(replies))
+
+    def test_comment_styles_public_rpc_and_mcp_forwarding(self):
+        source = '(*! @context-fold begin custom !*)\r\n' + '原文🙂\r\n' * 20 + '(*! @context-fold end custom !*)'
+        request = {"action": "annotate", "scope": "bridge", "text": source, "language": "custom",
+                   "commentStyles": [{"start": "(*!", "end": "!*)"}]}
+        code, replies = self.run_cli("rpc", encoded(request))
+        self.assertEqual(code, 0, replies)
+        annotated = replies[0]["result"]
+        self.assertEqual(len(annotated["regions"]), 1)
+        self.assertEqual(annotated["commentStyles"], request["commentStyles"])
+        requests = [initialize(), mcp_call(2, {"action": "read-source", "scope": "bridge", "id": annotated["id"]})]
+        code, replies = self.run_cli("mcp", b"".join(map(encoded, requests)))
+        self.assertEqual(code, 0, replies)
+        self.assertFalse(replies[1]["result"]["isError"])
+        view = json.loads(replies[1]["result"]["content"][0]["text"])
+        self.assertEqual(len(view["foldedRegions"]), 1)
+        code, replies = self.run_cli("rpc", encoded({"action": "resolve", "scope": "bridge", "value": view["text"]}))
+        self.assertEqual(code, 0, replies)
+        self.assertEqual(replies[0]["result"]["value"], source)
+
+    def test_folded_region_reference_edits_file_through_final_argument_resolution(self):
+        # A small host/target-tool fixture; the archive itself never edits source.
+        path = Path(self.tmp.name) / "module.ts"
+        payload = "\r\n".join(f'const value_{n} = "原文 🙂 {n}";' for n in range(8))
+        prefix = '// surrounding code\r\n// @context-fold begin implementation\r\n'
+        suffix = '\r\n// @context-fold end implementation\r\nexport {};'
+        original = prefix + payload + suffix
+        path.write_bytes(original.encode("utf-8"))
+        code, replies = self.run_cli("read-source", b"", "--scope", "test", "--path", str(path))
+        self.assertEqual(code, 0, replies)
+        view = replies[0]["result"]
+        self.assertIsNone(view["nextOffset"])
+        reference = view["foldedRegions"][0]["reference"]
+        self.assertEqual(view["text"], prefix + reference + suffix)
+        self.assertEqual(path.read_bytes(), original.encode("utf-8"))
+        calls = []
+
+        def replace_tool(arguments):
+            calls.append(arguments)
+            target = Path(arguments["file_path"])
+            current = target.read_bytes()
+            old = arguments["old_string"].encode("utf-8")
+            if not old or current.count(old) != 1:
+                raise ValueError("Expected one exact match in the current file")
+            target.write_bytes(current.replace(old, arguments["new_string"].encode("utf-8"), 1))
+
+        def dispatch(arguments, scope="test"):
+            before = path.read_bytes()
+            code, replies = self.run_cli("resolve", encoded(arguments), "--scope", scope, "--value", "-")
+            if code != 0:
+                raise ValueError("Reference resolution failed")
+            resolved = replies[0]["result"]
+            self.assertEqual(resolved["resolved"], 1)
+            # Resolution must not write the file before the destination tool runs.
+            self.assertEqual(path.read_bytes(), before)
+            replace_tool(resolved["value"])
+
+        replacement = 'const result = "新代码 🙂";\r\nexport { result };'
+        arguments = {"file_path": str(path), "old_string": reference, "new_string": replacement}
+        dispatch(arguments)
+        self.assertEqual(calls, [{**arguments, "old_string": payload}])
+        self.assertEqual(arguments["old_string"], reference)
+        expected = (prefix + replacement + suffix).encode("utf-8")
+        self.assertEqual(path.read_bytes(), expected)
+        # An old reference still resolves, but the tool must reject stale content.
+        with self.assertRaisesRegex(ValueError, "one exact match"):
+            dispatch(arguments)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(path.read_bytes(), expected)
+        for invalid, scope in ((reference, "other-scope"),
+                               ("[[cf:v1:" + "0" * 24 + "]]", "test"),
+                               (reference + "[[cf:v9:invalid]]", "test")):
+            with self.subTest(reference=invalid, scope=scope):
+                with self.assertRaisesRegex(ValueError, "resolution failed"):
+                    dispatch({**arguments, "old_string": invalid}, scope)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(path.read_bytes(), expected)
+
     def test_action_json_and_single_call_error_exit(self):
         code, replies = self.run_cli("put", b"", "--scope", "test", "--json", '{"text":"hello","role":"tool"}')
         self.assertEqual(code, 0)

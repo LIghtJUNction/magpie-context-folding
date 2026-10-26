@@ -54,6 +54,8 @@ async function fixture(run: (f: {
       expiresAt: new Date(Date.now() + 60_000).toISOString(), beforeLowerTokens: JSON.stringify(body.before).length,
       afterUpperTokens: rejected ? JSON.stringify(body.before).length + 1 : JSON.stringify(body.after).length,
       oldMinPricePerMillion: 1, newMaxPricePerMillion: 1, extraCostUpperUsd: 0,
+      incremental: { toolCalls: 0, modelRoundTrips: 0, inputTokens: 0, outputTokens: 0,
+        inputPricePerMillion: 0, outputPricePerMillion: 0, toolFeesUsd: 0 },
       assumptions: ['Synthetic serialized UTF-16 length; integration test only.'] }));
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

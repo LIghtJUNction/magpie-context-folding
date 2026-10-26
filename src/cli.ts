@@ -5,6 +5,7 @@ import { loadConfig } from './config.js';
 import { diagnostic, execute } from './tool.js';
 import { statistics } from './statistics.js';
 import { formatTokenCount } from './metrics.js';
+import { writeReport } from './report.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
@@ -16,6 +17,7 @@ list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size
        [--order asc|desc] [--offset N] [--limit N]
 status --scope S
 stats  [--scope S] [--json]
+report --output /absolute/new.html [--scope S]
 mode   --scope S [--mode intelligence|balanced|economy]
 config [--project-dir PATH]
 
@@ -35,6 +37,7 @@ const options: Record<string, ParseArgsConfig['options']> = {
   list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
   status: { ...common, scope: string },
   stats: { ...common, scope: string },
+  report: { help: boolean, output: string, scope: string },
   mode: { ...common, scope: string, mode: string },
   config: { ...common, 'project-dir': string },
 };
@@ -51,6 +54,22 @@ async function main(): Promise<void> {
   try { values = parseArgs({ args: argv, options: options[command], strict: true, allowPositionals: false }).values; }
   catch { throw new UsageError('Invalid command options; use --help'); }
   if (values.help) { console.log(usage); return; }
+  if (command === 'report') {
+    if (typeof values.output !== 'string') throw new UsageError('Provide --output /absolute/new.html');
+    if (values.scope !== undefined && !/^[a-f0-9]{64}$/.test(String(values.scope))) throw new UsageError('Invalid scope');
+    try { await writeReport(values.output, values.scope as string | undefined); }
+    catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+        throw new UsageError('Report destination already exists; choose a new file');
+      }
+      if (error instanceof Error && error.message === 'Report output must be an absolute path to a new file') {
+        throw new UsageError(error.message);
+      }
+      throw new UsageError('Cannot create report; check the archive and a new output path with an existing parent');
+    }
+    console.log('本地效果报告已生成。用浏览器打开指定的 HTML 文件。');
+    return;
+  }
   if (command === 'config') {
     console.log(JSON.stringify(await loadConfig(values['project-dir'] as string | undefined)));
     return;
@@ -71,11 +90,11 @@ async function main(): Promise<void> {
         `成功带折叠请求：${m.successfulFoldedRequests}；失败：${m.failedFoldedRequests}；未核实：${m.unverifiedFoldedRequests}`,
         `累计净减少 token（成功请求估算）：${formatTokenCount(m.estimatedTokenDelta)}`,
         `已验证比较的 token 减少下界：${formatTokenCount(m.certifiedTokenDeltaLower)}`,
-        `已验证输入费节省下界：USD ${data.money.certifiedInputSavingLowerUsd}（${m.certifiedComparisons} 次比较）`,
+        `证书假设下的节省下界累计：USD ${data.money.certifiedInputSavingLowerUsd}（${m.certifiedComparisons} 次比较）`,
         `复用请求：${m.replayRequests} 次，未重复计入金额`,
         `展开读取：原文 ${m.originalReadCalls} 次、历史层 ${m.layerReadCalls} 次；恢复条目：${m.itemsRestored}`,
         `存档：${data.storage.activeSessions} 个会话，${data.storage.blobs} 个去重内容，数据库 ${data.storage.databaseBytes} B`,
-        '金额以计费证书的假设为前提，不代表实际账单。未预留的标记、展开和输出费用不会自动扣除。',
+        '金额依赖证书假设，不代表实际账单。当前证书须覆盖同一任务全部新增工作；历史累计保留原证据限制，不升级为完整任务收益证明。',
       ].join('\n'));
     }
     return;

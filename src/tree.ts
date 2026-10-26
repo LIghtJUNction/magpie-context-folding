@@ -50,6 +50,33 @@ export function latestVersions(snapshot: Snapshot): Set<string> {
     ? observed.get(entry.version.series) === entry.id : latest.get(entry.version.series) === entry.version.number)).map(entry => entry.id));
 }
 
+interface SearchMatch {
+  source: 'id' | 'path' | 'summary' | 'original';
+  offset: number;
+  endOffset: number;
+  excerptOffset: number;
+  excerpt: string;
+}
+
+/** Literal matching keeps offsets in the original UTF-16 text, even with Unicode case folding. */
+function searchMatch(node: Node, pattern: RegExp): SearchMatch | undefined {
+  const fields: [SearchMatch['source'], string][] = 'children' in node
+    ? [['summary', node.summary], ['id', node.id]]
+    : [['original', node.text], ['summary', node.mark.disposition === 'foldable' ? node.mark.summary : ''],
+      ['path', node.version?.path ?? ''], ['id', node.id]];
+  for (const [source, text] of fields) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    let start = Math.max(0, match.index - 32);
+    if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start]!) && /[\uD800-\uDBFF]/.test(text[start - 1]!)) start--;
+    let end = Math.min(text.length, start + 240);
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!) && /[\uDC00-\uDFFF]/.test(text[end]!)) end--;
+    return { source, offset: match.index, endOffset: match.index + match[0].length,
+      excerptOffset: start, excerpt: text.slice(start, end) };
+  }
+  return undefined;
+}
+
 /** A bounded, flat preorder traversal; pagination counts groups and entries alike. */
 export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
   const nodes = new Map<string, Node>([...snapshot.entries, ...(snapshot.groups ?? [])].map(node => [node.id, node]));
@@ -66,13 +93,15 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
       size: children.reduce((sum, child) => sum + child.size, 0),
     });
   }
-  const query = options.query?.toLowerCase();
+  const query = options.query;
   const included = query ? new Set<string>() : undefined;
-  if (included) {
+  const matches = new Map<string, SearchMatch>();
+  if (included && query) {
+    const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'iu');
     for (const node of nodes.values()) {
-      const text = 'children' in node ? node.summary : [node.id, node.version?.path ?? '',
-        node.mark.disposition === 'foldable' ? node.mark.summary : '', node.text].join('\n');
-      if (!text.toLowerCase().includes(query!)) continue;
+      const match = searchMatch(node, pattern);
+      if (!match) continue;
+      matches.set(node.id, match);
       let id: string | undefined = node.id;
       while (id !== undefined && !included.has(id)) {
         included.add(id);
@@ -110,7 +139,8 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
     const node = nodes.get(id)!;
     if (total >= offset && entries.length < limit) {
       const base = { id, parentId: parents.get(id) ?? null, depth, childCount: 'children' in node ? node.children.length : 0,
-        chars: metadata.get(id)!.size, folded: node.folded !== undefined };
+        chars: metadata.get(id)!.size, folded: node.folded !== undefined,
+        ...(matches.has(id) ? { match: matches.get(id)! } : {}) };
       entries.push('children' in node
         ? { ...base, role: 'group' as const, disposition: node.enabled ? 'foldable' : 'unmarked', summary: node.summary.slice(0, 240) }
         : { ...base, role: node.role, disposition: node.mark.disposition, layers: node.layers.length,

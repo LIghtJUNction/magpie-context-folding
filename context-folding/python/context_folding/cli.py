@@ -20,6 +20,7 @@ TOOL_SCHEMA = {
         "scope": {"type": "string", "minLength": 1, "maxLength": 200},
         "text": {"type": "string"},
         "language": {"type": "string"},
+        "commentStyles": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["start"], "properties": {"start": {"type": "string", "minLength": 1, "maxLength": 64}, "end": {"type": "string", "maxLength": 64}}, "additionalProperties": False}},
         "keep": {"type": "array", "items": {"type": "string"}},
         "expand": {"type": "array", "items": {"type": "string"}},
         "files": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object"}},
@@ -256,7 +257,7 @@ def _parser() -> argparse.ArgumentParser:
             sub.add_argument("--" + name, default=argparse.SUPPRESS)
         for name in ("ids", "protected", "keep", "expand"):
             sub.add_argument("--" + name, nargs="*", default=argparse.SUPPRESS)
-        for name in ("source", "value", "config", "marks", "files"):
+        for name in ("source", "value", "config", "marks", "files", "comment-styles"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS, help="JSON value; '-' reads JSON stdin")
         for name in ("limit", "offset", "depth"):
             sub.add_argument("--" + name, type=int, default=argparse.SUPPRESS)
@@ -267,7 +268,7 @@ def _parser() -> argparse.ArgumentParser:
 def _request(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "call":
         return _object(_loads(_read_stdin()) if args.json in (None, "-") else _argument_json(args.json))
-    json_fields = ("source", "value", "config", "marks", "files")
+    json_fields = ("source", "value", "config", "marks", "files", "comment_styles")
     text_fields = ("text", "summary", "body")
     stdin_used = False
 
@@ -284,7 +285,7 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
     request.update({key: value for key, value in vars(args).items() if key not in excluded})
     for key in json_fields + text_fields:
         if hasattr(args, key):
-            request[key] = input_value(getattr(args, key), key in json_fields)
+            request["commentStyles" if key == "comment_styles" else key] = input_value(getattr(args, key), key in json_fields)
     request["action"] = args.command
     if args.command == "put" and "text" not in request:
         request["text"] = input_value("-", False)

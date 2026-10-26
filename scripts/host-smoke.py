@@ -82,6 +82,10 @@ class Fixture:
                         "oldMinPricePerMillion": old_price,
                         "newMaxPricePerMillion": new_price,
                         "extraCostUpperUsd": 0,
+                        "incremental": {"toolCalls": 0, "modelRoundTrips": 0,
+                                        "inputTokens": 0, "outputTokens": 0,
+                                        "inputPricePerMillion": 0, "outputPricePerMillion": 0,
+                                        "toolFeesUsd": 0},
                         "assumptions": [
                             "SYNTHETIC ONLY: one serialized Unicode character is one billable token",
                             f"SYNTHETIC ONLY: old input minimum {old_price} and new input maximum {new_price} USD per million tokens",
@@ -260,6 +264,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             }]}
 
             def send(session: str = "host-smoke") -> dict:
+                completed = call({"action": "stats"})["metrics"]["successfulHookRequests"]
                 count = len(fixture.upstream)
                 reply = request_json(gateway + "/v1/chat/completions", body, session)
                 assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
@@ -274,6 +279,15 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 assert "Capacity:" not in serialized(outgoing)
                 assert "used ratio" not in serialized(outgoing)
                 assert "remaining estimate" not in serialized(outgoing)
+                # HTTP completion precedes Magpie's asynchronous response hook.
+                # Wait for its durable metric before the next archive mutation.
+                deadline = time.monotonic() + 5
+                while True:
+                    stats = call({"action": "stats"})
+                    if stats["metrics"]["successfulHookRequests"] == completed + 1:
+                        break
+                    assert time.monotonic() < deadline, f"response hook did not finish: {stats}"
+                    time.sleep(0.05)
                 return outgoing
 
             first = send()

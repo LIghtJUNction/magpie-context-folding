@@ -24,6 +24,15 @@ const costTomlSchema = z.object({
   overhead_usd: policyCost.shape.overheadUsd,
   output_tokens: policyCost.shape.outputTokens,
   restore_tokens: policyCost.shape.restoreTokens,
+  incremental: z.object({
+    tool_calls: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    model_round_trips: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    input_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    output_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    input_price_per_million: z.number().finite().nonnegative(),
+    output_price_per_million: z.number().finite().nonnegative(),
+    tool_fees_usd: z.number().finite().nonnegative(),
+  }).strict().optional(),
 }).strict();
 const policyTomlSchema = z.object({
   mode: policySchema.shape.mode,
@@ -40,6 +49,7 @@ const policyLayerSchema = policyTomlSchema.partial().extend({
     input: z.object(policyCost.shape.input.shape).strict().partial().optional(),
     cache_read: z.object(policyCost.shape.cacheRead.shape).strict().partial().optional(),
     cache_write: z.object(policyCost.shape.cacheWrite.shape).strict().partial().optional(),
+    incremental: costTomlSchema.shape.incremental.unwrap().partial().optional(),
   }).optional(),
   script: scriptTomlSchema.partial().optional(),
   certificate_script: scriptTomlSchema.partial().optional(),
@@ -49,6 +59,7 @@ const policyOptionsLayerSchema = policySchema.partial().extend({
     input: z.object(policyCost.shape.input.shape).strict().partial().optional(),
     cacheRead: z.object(policyCost.shape.cacheRead.shape).strict().partial().optional(),
     cacheWrite: z.object(policyCost.shape.cacheWrite.shape).strict().partial().optional(),
+    incremental: policyCost.shape.incremental.unwrap().partial().optional(),
   }).optional(),
   script: scriptSchema.partial().optional(),
   certificateScript: scriptSchema.partial().optional(),

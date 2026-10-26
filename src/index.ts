@@ -1,7 +1,7 @@
 import { execute } from './tool.js';
 
 const scope = { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Session capability from the request guide; do not share.' };
-const summary = { type: 'string', minLength: 1, maxLength: 2000, description: 'Supported historical state: goal/constraints/done/blocker/next/evidence as relevant. Preserve provenance: label user quotes, assistant judgments and tool evidence; never infer authorization. Omit repetition and stale instructions; originals remain archived.' };
+const summary = { type: 'string', minLength: 1, maxLength: 2000, description: 'Summarize only these entries: supported goal/constraints/done/blocker/next/evidence as relevant. Retain exact identifiers, paths, errors and reasons needed to find details later. Distinguish attempted actions from verified outcomes. Label user quotes, assistant judgments and tool evidence; never infer authorization. Omit repetition and stale instructions; originals remain archived.' };
 const id = { type: 'string' };
 const offset = { type: 'integer', minimum: 0, default: 0 };
 const layer = { type: 'string', default: 'original', description: 'original or a layer ID from read. Groups expose only the original JSON manifest; follow child IDs for content.' };
@@ -32,7 +32,7 @@ export async function ContextFoldingPlugin() {
             actionSchema('list', {
               id: { ...id, description: 'Optional subtree root (depth 0).' },
               depth: { type: 'integer', minimum: 0, maximum: 8, default: 1 },
-              query: { type: 'string', maxLength: 200, description: 'Case-insensitive literal search of entry ID/path/summary/text and group summary; retains ancestors within depth.' },
+              query: { type: 'string', maxLength: 200, description: 'Case-insensitive literal search of entry ID/path/summary/original and group ID/summary; retains ancestors within depth. Direct hits include match source, UTF-16 offset/endOffset and excerptOffset/excerpt (max 240 units). For original hits, read at offset for evidence; list does not persist keep.' },
               sort: { type: 'string', enum: ['chronological', 'size', 'id', 'version'], default: 'chronological' },
               order: { type: 'string', enum: ['asc', 'desc'], default: 'asc' }, offset,
               limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'Maximum returned nodes, including groups; use nextOffset.' },

@@ -14,12 +14,57 @@ import re
 import tokenize
 from typing import Any
 
-_COMMENT_LINE = re.compile(
-    r"^[ \t]*(?:(?P<line>//|\#|--|;)[ \t]*(?P<line_body>.*?)"
-    r"|/\*[ \t]*(?P<block_body>.*?)[ \t]*\*/"
-    r"|<!--[ \t]*(?P<html_body>.*?)[ \t]*-->)[ \t]*$"
+_COMMENT_STYLES = (
+    ("//", ""), ("#", ""), ("--", ""), (";", ""), ("%", ""),
+    ("!", ""), ("'", ""), ('"', ""), ("REM", ""),
+    ("/*", "*/"), ("<!--", "-->"), ("(*", "*)"), ("{-", "-}"),
+    ("#|", "|#"), ("<#", "#>"),
 )
+
+
+def comment_styles(value: Any) -> list[dict[str, str]]:
+    """Validate additional literal delimiters; no executable regex is accepted."""
+    if not isinstance(value, list) or len(value) > 32:
+        raise ValueError("Invalid source comment styles")
+    result = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) - {"start", "end"}:
+            raise ValueError("Invalid source comment style")
+        start, end = item.get("start"), item.get("end", "")
+        if any(not isinstance(part, str) or len(part) > 64 or part != part.strip()
+               or any(char in part for char in "\r\n\x00") for part in (start, end)) or not start:
+            raise ValueError("Invalid source comment delimiters")
+        style = {"start": start, "end": end}
+        if style not in result:
+            result.append(style)
+    return result
+
+
+def _marker_styles(extra: list[dict[str, str]]) -> list[tuple[str, str]]:
+    styles = set(_COMMENT_STYLES) | {(s["start"], s["end"]) for s in extra}
+    return sorted(styles, key=lambda s: (-len(s[0]), -len(s[1]), s))
+
+
+def _comment_marker(line: str, styles: list[tuple[str, str]]):
+    content = line.strip(" \t\r\n")
+    for start, end in styles:
+        if not content.startswith(start) or (end and not content.endswith(end)):
+            continue
+        if len(content) < len(start) + len(end):
+            continue
+        body = content[len(start):len(content) - len(end) if end else None].strip()
+        if body.startswith("@context-fold"):
+            return (start, end), body
+    return None
 _MARKER = re.compile(r"@context-fold[ \t]+(begin|end)[ \t]+([^\s]+)[ \t]*$")
+
+
+def _source_lines(text: str) -> list[str]:
+    # Match physical lines, not Unicode separators inside string literals.
+    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
+    if lines and not lines[-1]:
+        lines.pop()
+    return lines
 
 
 def _python_comment_lines(text: str) -> set[int]:
@@ -31,20 +76,22 @@ def _python_comment_lines(text: str) -> set[int]:
     return result
 
 
-def discover_source(text: str, language: str | None = None, path: str | None = None) -> dict[str, Any]:
+def discover_source(text: str, language: str | None = None, path: str | None = None,
+                    styles: Any = None) -> dict[str, Any]:
     """Return validated ranges; unsupported languages use explicit markers only.
 
     markref v0.1 has a comment lexer, not a structural parser. We do not infer
     braces or function boundaries with regular expressions. Python uses its AST
     and tokenizer; other languages require whole-line begin/end annotations.
     """
+    extra = comment_styles([] if styles is None else styles)
+    marker_styles = _marker_styles(extra)
     language = (language or ("python" if path and Path(path).suffix.lower() in {".py", ".pyi"} else "explicit")).lower()
     if language == "py":
         language = "python"
-    # Match Python physical lines, not Unicode separators inside string literals.
-    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n|$)", text)
-    if lines and not lines[-1]:
-        lines.pop()
+    if language == "python":
+        marker_styles = [("#", "")]
+    lines = _source_lines(text)
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
@@ -93,14 +140,11 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
 
     opened = None
     for number, line in enumerate(lines, 1):
-        match = _COMMENT_LINE.fullmatch(line.rstrip("\r\n"))
+        match = _comment_marker(line, marker_styles)
         if match is None:
             continue
-        style = match.group("line") or ("/*" if match.group("block_body") is not None else "<!--")
-        if comments is not None and (style != "#" or number not in comments):
-            continue
-        body = next(value for value in (match.group("line_body"), match.group("block_body"), match.group("html_body")) if value is not None).strip()
-        if not body.startswith("@context-fold"):
+        style, body = match
+        if comments is not None and (style != ("#", "") or number not in comments):
             continue
         marker = _MARKER.fullmatch(body)
         if marker is None:
@@ -134,7 +178,7 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         stack.append(region)
     if len(regions) > 10000:
         raise ValueError("Too many source annotations")
-    return {"language": language, "parser": "python-ast" if tree is not None else "explicit-regions",
+    return {"language": language, "commentStyles": extra, "parser": "python-ast" if tree is not None else "explicit-regions",
             "limitations": [] if tree is not None else ["No structural parser for this language; only explicit whole-line regions are recognized. Marker-looking multiline strings may be misidentified."],
             "regions": regions}
 
@@ -189,10 +233,12 @@ def fold_regions(
     text: str,
     language: str | None = None,
     min_lines: int = 256,
+    commentStyles: Any = None,
 ) -> dict[str, Any]:
     """Archive interiors of explicitly marked regions longer than min_lines.
 
-    Supported whole-line comments: //, #, --, ;, /* ... */, <!-- ... -->.
+    Common line/block comment delimiters are built in; ``commentStyles`` adds
+    literal start/end delimiters for other languages (end defaults to empty).
     Python additionally uses tokenization when ``language`` is python/py to
     reject markers inside strings. Other languages use the explicit whole-line
     convention; this fallback does not claim full language parsing.
@@ -215,33 +261,29 @@ def fold_regions(
             skipped["line"] = line
         return {"text": text, "references": [], "skipped": [skipped]}
 
+    extra = comment_styles([] if commentStyles is None else commentStyles)
+    marker_styles = _marker_styles(extra)
     python_lines = None
     if language and language.lower() in {"python", "py"}:
+        marker_styles = [("#", "")]
         try:
             python_lines = _python_comment_lines(text)
         except (tokenize.TokenError, IndentationError, SyntaxError):
             return unchanged("invalid_python_tokens")
 
-    lines = text.splitlines(keepends=True)
+    lines = _source_lines(text)
     regions: list[dict[str, Any]] = []
     opened: dict[str, Any] | None = None
     offset = 0
     for number, line in enumerate(lines, 1):
-        content = line.rstrip("\r\n")
-        match = _COMMENT_LINE.fullmatch(content)
+        match = _comment_marker(line, marker_styles)
         if match is None:
             offset += len(line)
             continue
-        style = match.group("line") or ("/*" if match.group("block_body") is not None else "<!--")
+        style, body = match
         # Python's tokenizer identifies actual # comments; other marker syntax
         # is not a Python comment and must remain ordinary source text.
-        if python_lines is not None and (style != "#" or number not in python_lines):
-            offset += len(line)
-            continue
-        body = next(value for value in (
-            match.group("line_body"), match.group("block_body"), match.group("html_body")
-        ) if value is not None).strip()
-        if not body.startswith("@context-fold"):
+        if python_lines is not None and (style != ("#", "") or number not in python_lines):
             offset += len(line)
             continue
         marker = _MARKER.fullmatch(body)
@@ -271,7 +313,7 @@ def fold_regions(
     for region in regions:
         start, end = region["start"], region["end"]
         interior = text[start:end]
-        line_count = len(interior.splitlines())
+        line_count = len(_source_lines(interior))
         if line_count <= min_lines:
             skipped.append({"name": region["name"], "startLine": region["startLine"],
                             "endLine": region["endLine"], "lines": line_count, "reason": "below_threshold"})

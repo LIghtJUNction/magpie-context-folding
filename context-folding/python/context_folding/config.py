@@ -255,6 +255,25 @@ def _validate_script(data: Any, source: str | Path, name: str, *, complete: bool
         _fail(source, f"{name}.command", "required when script is configured")
 
 
+def _validate_incremental(data: Any, source: str | Path, *, complete: bool) -> None:
+    name = "policy.cost.incremental"
+    if not isinstance(data, dict):
+        _fail(source, name, "expected a table")
+    counts = {"tool_calls", "model_round_trips", "input_tokens", "output_tokens"}
+    prices = {"input_price_per_million", "output_price_per_million", "tool_fees_usd"}
+    for key, value in data.items():
+        if key in counts:
+            if not _number(value, 0, _SAFE_COUNT, integer=True):
+                _fail(source, f"{name}.{key}", "expected a nonnegative safe integer")
+        elif key in prices:
+            if not _number(value, 0):
+                _fail(source, f"{name}.{key}", "expected a finite nonnegative number")
+        else:
+            _fail(source, f"{name}.{key}", "unknown key")
+    if complete and not (counts | prices) <= data.keys():
+        _fail(source, name, "all seven incremental bounds are required")
+
+
 def _validate_cost(data: Any, source: str | Path, *, complete: bool) -> None:
     if not isinstance(data, dict):
         _fail(source, "policy.cost", "expected a table")
@@ -273,6 +292,8 @@ def _validate_cost(data: Any, source: str | Path, *, complete: bool) -> None:
                 _fail(source, name, "lower and upper are required")
             if complete and value["lower"] > value["upper"]:
                 _fail(source, name, "lower must not exceed upper")
+        elif key == "incremental":
+            _validate_incremental(value, source, complete=complete)
         elif key in {"bytes_per_token_lower", "bytes_per_token_upper"}:
             if not _number(value, 0) or value == 0:
                 _fail(source, name, "expected a positive finite number")

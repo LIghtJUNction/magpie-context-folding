@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
-import { proveSavings, type Certificate, type SavingsProof } from './economics.js';
+import { incrementalCostsSchema, proveSavings, type Certificate, type SavingsProof } from './economics.js';
 import type { Protocol, Span } from './protocol.js';
 
 const money = z.number().finite().nonnegative();
@@ -35,6 +35,7 @@ export const policySchema = z.object({
     overheadUsd: money.default(0),
     outputTokens: count.default(0),
     restoreTokens: count.default(0),
+    incremental: incrementalCostsSchema.optional(),
   }).strict().refine(value => value.bytesPerTokenLower <= value.bytesPerTokenUpper,
     'bytesPerTokenLower must not exceed bytesPerTokenUpper').optional(),
   script: scriptSchema.optional(),
@@ -236,8 +237,9 @@ export async function evaluatePolicy(input: PolicyRequest & {
   }
   const cost = policy.cost;
   if (!cost) return { approved: false, reason: 'policy-cost-bounds-missing' };
+  if (!cost.incremental) return { approved: false, reason: 'policy-incremental-cost-bounds-missing' };
   const outputCost = upperTokenCost(cost.outputTokens, cost.outputPricePerMillion);
-  const restoreCost = upperTokenCost(cost.restoreTokens, cost.input.upper);
+  const restoreCost = upperTokenCost(cost.restoreTokens, Math.max(cost.input.upper, cost.cacheRead.upper, cost.cacheWrite.upper));
   const extraCostUpperUsd = roundUp(roundUp(cost.overheadUsd + outputCost) + restoreCost);
   const certificate: Certificate = {
     requestHash, model: input.model, protocol: input.protocol,
@@ -247,11 +249,13 @@ export async function evaluatePolicy(input: PolicyRequest & {
     oldMinPricePerMillion: Math.min(cost.input.lower, cost.cacheRead.lower, cost.cacheWrite.lower),
     newMaxPricePerMillion: Math.max(cost.input.upper, cost.cacheRead.upper, cost.cacheWrite.upper),
     extraCostUpperUsd,
+    incremental: cost.incremental,
     assumptions: [
       `For both complete serialized requests: bytes/${cost.bytesPerTokenUpper} <= billed input tokens <= bytes/${cost.bytesPerTokenLower}. This is a configured assumption, not an actual tokenizer.`,
       'Configured price bounds cover all applicable billing tiers and cache behavior.',
       'The entire baseline may use the cheapest cache/input price; the entire folded request may use the most expensive input/cache-write price. No unchanged-prefix cancellation is assumed.',
-      'One round only; configured overhead, output-token and restoration bounds cover all incremental costs. No future savings are credited.',
+      'The comparison covers the next complete input and all extra work caused by folding relative to completing the same task without folding. Incremental bounds include extra tool calls, direct fees, model round trips, complete resent history/tool-result inputs and generated outputs. No future savings are credited; already billed output is a sunk cost.',
+      'Incremental token and tool-fee bounds are aggregate totals, not per-call rates. Counts describe additional work, not a universal tool price. Legacy overhead/output/restoration reserves are additional, disjoint costs.',
     ],
   };
   return proveSavings({ ...proofInput, certificate });

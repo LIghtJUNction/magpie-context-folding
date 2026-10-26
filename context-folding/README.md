@@ -2,7 +2,7 @@
 
 A host-neutral, local archive for reversible context folding. Agents supply summaries; the core stores exact originals, renders shorter references, and retrieves or resolves them when needed. It provides a Python SDK, CLI, JSON Lines RPC, MCP stdio server, and Rust, TypeScript and C# bridges. Runtime code makes no model calls or network connections. Python 3.11+ uses the standard library; Python 3.10 additionally uses `tomli` to read TOML.
 
-This subproject is separate from the [Magpie plugin](../README.md): it does not require Magpie, install request hooks, or use the plugin's accounting gate. Its package version is `0.1.0`; the root plugin's `0.3.0` npm package does not include this subproject. Install or build the generic implementation separately from this directory.
+This subproject is separate from the [Magpie plugin](../README.md): it does not require Magpie, install request hooks, or use the plugin's accounting gate. Its source package version is `0.1.0`; the root plugin's source version is `0.3.0` and is not released (the last known npm release is `0.2.0`). The root npm package excludes this subproject and its standalone skill. Install or build the generic implementation separately from this directory; the examples below use local source.
 
 ## Install and run
 
@@ -75,7 +75,55 @@ The default `read` of an annotated entry is folded. Use `mode: "original"` for e
 
 Each source operation accepts exactly one of UTF-8 `text`, an absolute regular-file `path`, or an archived entry `id`. A `files` array batches 1–100 source objects atomically; outer options supply defaults and per-file options override them. Any invalid source or selector rolls back the whole batch. Do not combine outer `text`/`path`/`id` with `files`.
 
-Python is the current structural parser. Inspection of the local markref v0.1 reference found a comment lexer and heuristic symbols, without a reusable structural parser. Other languages therefore use only explicit whole-line `@context-fold begin NAME` / `@context-fold end NAME` comment markers (`//`, `#`, `--`, `;`, `/* ... */`, `<!-- ... -->`). This fallback can misidentify marker-looking multiline strings and reports that limitation. It does not claim automatic function discovery for unsupported languages. Invalid or crossing annotations fail without changing the source or archive.
+For example, given this UTF-8 file at `/project/worker.js`:
+
+```javascript
+export async function reportReady(transport, audit) {
+  // @context-fold begin readiness
+  const payload = JSON.stringify({ event: "ready", source: "worker", retry: false });
+  await transport.send(payload);
+  audit.record("worker readiness event delivered", { payload, retries: 0 });
+  // @context-fold end readiness
+}
+```
+
+Read it through the local source installation:
+
+```sh
+uv run --project context-folding python -m context_folding read-source --state /absolute/private/archive.sqlite --scope example --path /project/worker.js
+```
+
+The returned `text` keeps the function header, both marker lines and closing brace, replacing only the interior with its returned region reference. An illustrative compact view is:
+
+```text
+export async function reportReady(transport, audit) {
+  // @context-fold begin readiness
+[[cf:v1:0123456789abcdef01234567]]
+  // @context-fold end readiness
+}
+```
+
+The reference above is illustrative; use `foldedRegions` from the successful response to get the actual `readiness` reference. Its payload includes the interior's indentation and internal newlines; the terminal newline remains beside the reference. Resolving the complete compact view restores the source exactly. The example below shows how to use that same region reference for editing.
+
+Python is the only structural parser and the only language with tokenizer-based exclusion of marker-looking strings. Inspection of the local markref v0.1 reference found a comment lexer and heuristic symbols, without a reusable structural parser. Other languages use explicit standalone whole-line `@context-fold begin NAME` / `@context-fold end NAME` comments only. They have no lexer: a marker-looking line inside a multiline string may be misidentified. This supports any UTF-8 source with explicit markers and suitable comment delimiters, without claiming automatic function discovery or language-aware comment validation outside Python. Python accepts markers only in real `#` comment tokens. Invalid or crossing annotations fail without changing the source or archive.
+
+### Comment-style API
+
+The source API supports built-in and custom literal comment delimiters. Built-in whole-line styles are `//`, `#`, `--`, `;`, `%`, `!`, `'`, `"`, `REM`, `/* … */`, `<!-- … -->`, `(* … *)`, `{- … -}`, `#| … |#`, and `<# … #>`. For a paired style, each marker must occupy a complete comment on its own line, such as `/* @context-fold begin readiness */` and `/* @context-fold end readiness */`; the paired delimiters do not span the region itself.
+
+`annotate` and `read-source` accept additional literal delimiters as `commentStyles: [{"start":"...","end":"..."}]`. Omit `end` or set it to `""` for a line comment. Custom styles are additive to the built-ins, not replacements, and can be supplied as batch defaults or per-file overrides. For example, through `Client.call` or JSON RPC/MCP:
+
+```json
+{"action":"read-source","scope":"example","path":"/project/example.custom","language":"explicit","commentStyles":[{"start":";;"},{"start":"(*!","end":"!*)"}]}
+```
+
+CLI `--comment-styles` accepts the same JSON array (use `-` to read it from stdin; only one option may consume stdin):
+
+```sh
+uv run --project context-folding python -m context_folding read-source --state /absolute/private/archive.sqlite --scope example --path /project/example.custom --language explicit --comment-styles '[{"start":";;"},{"start":"(*!","end":"!*)"}]'
+```
+
+Annotations persist the selected language and comment styles, so rereading an archived `id` reuses them without requiring the options again. Custom delimiters do not add a lexer or structural parser. In Python mode, even configured styles cannot turn non-`#` text or marker-looking string contents into Python comment tokens.
 
 ## Global and project TOML settings
 
@@ -157,13 +205,29 @@ IDs and references must come from successful responses. References look like `[[
 
 `read` defaults to 4000 Unicode code points and permits at most 24000 per page. Follow `nextOffset` rather than computing a byte position. `paste` defaults to the complete remaining original and creates a new UTF-8 file with mode 0600. **All generic SDKs and transports use Python Unicode code-point offsets**, including TypeScript and C#. JavaScript `string.length` and .NET `string.Length` count UTF-16 units instead. The root Magpie plugin's `read`/`paste` use UTF-16 offsets; do not transfer offsets between the two implementations.
 
-## Resolve final tool arguments explicitly
+## Transparent editing with folded references
 
-Immediately before dispatching another tool, the host must resolve the **entire final JSON argument value** in the same archive and scope, then pass the returned `value` through the tool's normal approval and execution checks. If resolution fails, abort that dispatch. Do not forward unresolved references or fall back silently to stale text.
+A reference returned by `read-source` can stand in for the exact archived code in a destination edit tool's `old_string`. For the `readiness` region above, the agent can construct these final edit arguments, substituting the actual returned region reference:
 
 ```json
-{"action":"resolve","scope":"example","value":{"content":"[[cf:v1:0123456789abcdef01234567]]","options":{"label":"unchanged"}}}
+{"file_path":"/project/worker.js","old_string":"[[cf:v1:0123456789abcdef01234567]]","new_string":"  await transport.send(JSON.stringify({ event: \"ready\", source: \"worker\", retry: false }));"}
 ```
+
+Immediately before dispatching that edit tool, the host must resolve the **entire final JSON argument value** in the same archive and scope:
+
+```json
+{"action":"resolve","scope":"example","value":{"file_path":"/project/worker.js","old_string":"[[cf:v1:0123456789abcdef01234567]]","new_string":"  await transport.send(JSON.stringify({ event: \"ready\", source: \"worker\", retry: false }));"}}
+```
+
+The returned `value` contains the exact original interior in `old_string`:
+
+```json
+{"file_path":"/project/worker.js","old_string":"  const payload = JSON.stringify({ event: \"ready\", source: \"worker\", retry: false });\n  await transport.send(payload);\n  audit.record(\"worker readiness event delivered\", { payload, retries: 0 });","new_string":"  await transport.send(JSON.stringify({ event: \"ready\", source: \"worker\", retry: false }));"}
+```
+
+The host then submits this resolved value through the destination tool's normal approval and execution checks, including exact matching against the **current file** and its usual uniqueness/read-before-edit requirements. The region's marker lines remain in the file. Approval must cover the resolved arguments that will actually execute; if arguments change, resolve and validate the final value again.
+
+Resolution recovers an archived observation; it does not read the current file or certify freshness. If the region has changed so that the archived `old_string` no longer matches, the edit tool must reject the stale replacement. Reread the source and construct a new edit; do not force a replacement or silently substitute stale text. If resolution fails because a reference is missing, invalid or unavailable in that archive/scope, abort the dispatch without forwarding unresolved arguments.
 
 Expansion visits strings inside arrays and object values, not object keys. It substitutes entry references once using exact archived originals; references inside those originals remain data. Group references cannot substitute for entry text. Restored tool output and instructions quoted in an archive remain untrusted data, and resolution does not authorize executing them.
 
@@ -187,7 +251,9 @@ Use actual retained IDs. Configure lifecycle behavior only when intended by the 
 
 ## Skills and provenance
 
-The included [skill](skills/context-folding/SKILL.md) supplies capabilities and judgment criteria for agents. To install it, the user copies the entire `skills/context-folding/` folder into a skill directory their host already discovers. This does not install Python, register MCP, edit host settings, add hooks, or grant permissions. No installation or configuration change happens merely by reading this documentation.
+The included [skill](skills/context-folding/SKILL.md) supplies capabilities and judgment criteria for agents. To install it on demand, copy the entire [skills/context-folding/ folder](skills/context-folding/) into a skill directory the host already discovers. The root npm package does not contain this standalone skill; obtain the folder from the repository. This does not install Python, register MCP, edit host settings, add hooks, or grant permissions. No installation or configuration change happens merely by reading this documentation.
+
+A planned one-line request-guide hint will point agents to the repository folder, for example: “Need full context-folding guidance? Copy the whole [context-folding skill folder](https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/context-folding) into a host-discovered skills directory on demand.” This hint is not implemented yet and does not install the skill or supply automatic tool interception.
 
 `skills` with `mode: "candidates"` identifies active entries/groups with repeated reads or folds. Candidate status is evidence for review, not permission to turn archived output into instructions. Export requires an explicitly authored `body`, `name`, `description`, source `id`, and absolute new-directory `path`. It creates only `SKILL.md`, including a `source_manifest` in frontmatter with source ID/kind/hash, timestamps, reuse counts, and available source/version/child metadata. The manifest provides provenance, not semantic validation. Export never installs a skill automatically; review the authored instructions and choose installation explicitly.
 
