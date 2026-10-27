@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { toolActivity, type ActivityReason } from "./activity.js";
 
 export type Protocol = "chat" | "responses" | "anthropic" | "gemini";
 export type Path = (string | number)[];
@@ -10,6 +11,8 @@ export interface Span {
   path: Path;
   messageIndex: number;
   protectedReason?: string;
+  toolName?: string;
+  activityReason?: ActivityReason;
   source?: { path: string; range: string };
 }
 
@@ -226,35 +229,43 @@ function unsafeReadResult(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (["signature", "thoughtSignature", "encrypted_content", "encryptedContent", "error", "inlineData", "inline_data", "fileData", "file_data", "image_url", "audio", "input_audio"].some((key) => key in value)
     || (typeof value.type === "string" && /^(?:image|image_url|input_image|input_audio|audio|file|input_file|thinking|redacted_thinking)$/.test(value.type))
-    || value.is_error === true || value.isError === true || value.success === false || value.thought === true
-    || (typeof value.status === "string" && /^(?:error|failed|failure|cancelled|canceled|incomplete)$/i.test(value.status))) return true;
+    || value.is_error === true || value.isError === true || value.success === false || value.ok === false || value.thought === true
+    || ["exit_code", "exitCode"].some(key => typeof value[key] === "number" && value[key] !== 0)
+    || (typeof value.status === "string" && /^(?:error|failed|failure|timeout|timed_out|cancelled|canceled|incomplete)$/i.test(value.status))) return true;
   return Object.values(value).some((entry) => (isRecord(entry) || Array.isArray(entry)) && unsafeReadResult(entry));
 }
 
-function singleReadText(value: unknown, types: ReadonlySet<string>, textSafety: Map<string, boolean>): boolean {
+function singleReadText(value: unknown, types: ReadonlySet<string>, textSafety: Map<string, boolean>, parseText: (text: string) => unknown): boolean {
   if (typeof value === "string") {
     const cached = textSafety.get(value);
     if (cached !== undefined) return cached;
     let safe = !!value.length && !/^\s*(?:error\b|failed\b|ENOENT\b|EACCES\b|EPERM\b|file not found\b|no such file or directory\b|permission denied\b|<tool_use_error>)/i.test(value);
     if (safe) {
-      try { safe = !unsafeReadResult(JSON.parse(value)); } catch { /* Ordinary file text. */ }
+      safe = !unsafeReadResult(parseText(value));
     }
     textSafety.set(value, safe);
     return safe;
   }
   return Array.isArray(value) && value.length === 1 && isRecord(value[0])
     && typeof value[0].type === "string" && types.has(value[0].type)
-    && !unsafeReadResult(value[0]) && singleReadText(value[0].text, types, textSafety)
+    && !unsafeReadResult(value[0]) && singleReadText(value[0].text, types, textSafety, parseText)
     && !Object.keys(value[0]).some((key) => !["type", "text", "annotations"].includes(key));
 }
 
-function attachReadSources(body: Record<string, unknown>, protocol: Protocol, candidates: Candidate[]): void {
+function attachToolMetadata(body: Record<string, unknown>, protocol: Protocol, candidates: Candidate[]): void {
   type Call = { id: unknown; name: unknown; args: unknown; safe: boolean };
-  type Result = { id: unknown; name?: unknown; path: Path; safe: boolean };
+  type Result = { id: unknown; name?: unknown; path: Path; safe: boolean; payload: unknown; envelope: unknown };
   const events: ({ call: Call } | { result: Result })[] = [];
   // Only immutable strings are reused, and only within this extraction. Envelope
   // safety and protocol-specific text-part checks still run for every result.
   const textSafety = new Map<string, boolean>();
+  const parsedText = new Map<string, unknown>();
+  const parseText = (text: string): unknown => {
+    if (!parsedText.has(text)) {
+      try { parsedText.set(text, JSON.parse(text)); } catch { parsedText.set(text, undefined); }
+    }
+    return parsedText.get(text);
+  };
   const items = protocol === "responses" ? body.input : protocol === "gemini" ? body.contents : body.messages;
   if (!Array.isArray(items)) return;
   for (const [index, item] of items.entries()) {
@@ -267,13 +278,14 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
           } });
         }
       } else if (item.role === "tool") events.push({ result: {
-        id: item.tool_call_id, path: ["messages", index, "content"],
-        safe: !unsafeReadResult(item) && singleReadText(item.content, chatTextTypes, textSafety),
+        id: item.tool_call_id, name: item.name, path: ["messages", index, "content"], payload: item.content, envelope: item,
+        safe: !unsafeReadResult(item) && singleReadText(item.content, chatTextTypes, textSafety, parseText),
       } });
     } else if (protocol === "responses") {
       if (item.type === "function_call" || item.type === "custom_tool_call") events.push({ call: { id: item.call_id, name: item.name, args: item.arguments ?? item.input, safe: !unsafeReadResult(item) } });
       else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") events.push({ result: {
-        id: item.call_id, path: ["input", index, "output"], safe: !unsafeReadResult(item) && singleReadText(item.output, responseTextTypes, textSafety),
+        id: item.call_id, name: item.name, path: ["input", index, "output"], payload: item.output, envelope: item,
+        safe: !unsafeReadResult(item) && singleReadText(item.output, responseTextTypes, textSafety, parseText),
       } });
     } else {
       const parts = protocol === "gemini" ? item.parts : item.content;
@@ -284,7 +296,8 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
         if (protocol === "anthropic") {
           if (item.role === "assistant" && part.type === "tool_use") events.push({ call: { id: part.id, name: part.name, args: part.input, safe } });
           else if (item.role === "user" && part.type === "tool_result") events.push({ result: {
-            id: part.tool_use_id, path: ["messages", index, "content", partIndex, "content"], safe: safe && singleReadText(part.content, chatTextTypes, textSafety),
+            id: part.tool_use_id, path: ["messages", index, "content", partIndex, "content"], payload: part.content, envelope: part,
+            safe: safe && singleReadText(part.content, chatTextTypes, textSafety, parseText),
           } });
         } else if (item.role === "model" || item.role === "user") {
           if (item.role === "model" && isRecord(part.functionCall)) {
@@ -297,7 +310,8 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
             const textKeys = isRecord(output) ? ["text", "output", "result", "content"].filter((key) => typeof output[key] === "string") : [];
             events.push({ result: {
               id: response.id, name: response.name, path: ["contents", index, "parts", partIndex, "functionResponse", "response"],
-              safe: safe && isRecord(output) && textKeys.length === 1 && singleReadText(output[textKeys[0]!], chatTextTypes, textSafety)
+              payload: output, envelope: part,
+              safe: safe && isRecord(output) && textKeys.length === 1 && singleReadText(output[textKeys[0]!], chatTextTypes, textSafety, parseText)
                 && !Object.values(output).some((entry) => isRecord(entry) || Array.isArray(entry))
                 && Object.keys(part).every((key) => key === "functionResponse")
                 && !Array.isArray(response.parts),
@@ -326,11 +340,17 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
     unnamedCounts.set(entry.name, count);
   }
   const pending = new Map<string, Call>();
+  const observedCalls = new Map<string, Call[]>();
   const unnamed = new Map<string, Call[]>();
   for (const event of events) {
     if ("call" in event) {
       const call = event.call;
-      if (typeof call.id === "string" && call.id) pending.set(call.id, call);
+      if (typeof call.id === "string" && call.id) {
+        pending.set(call.id, call);
+        const observed = observedCalls.get(call.id) ?? [];
+        observed.push(call);
+        observedCalls.set(call.id, observed);
+      }
       else if (protocol === "gemini" && call.id === undefined && typeof call.name === "string") {
         const queue = unnamed.get(call.name) ?? [];
         queue.push(call);
@@ -343,18 +363,28 @@ function attachReadSources(body: Record<string, unknown>, protocol: Protocol, ca
     if (typeof result.id === "string" && result.id) {
       call = pending.get(result.id);
       pending.delete(result.id);
-      if (callCounts.get(result.id) !== 1 || resultCounts.get(result.id) !== 1) continue;
+      if (callCounts.get(result.id) !== 1 || resultCounts.get(result.id) !== 1) call = undefined;
     } else if (protocol === "gemini" && result.id === undefined && typeof result.name === "string") {
       // Without IDs, consume same-name calls in wire order, including failed reads.
       // A mixture of ID-bearing and ID-less calls with this name is ambiguous.
       const count = unnamedCounts.get(result.name);
-      if (identifiedNames.has(result.name) || !count || count.calls !== count.results) continue;
-      call = unnamed.get(result.name)?.shift();
+      if (!identifiedNames.has(result.name) && count && count.calls === count.results) call = unnamed.get(result.name)?.shift();
+    }
+    const spans = candidates.filter((candidate) => candidate.role === "tool" && result.path.every((part, index) => candidate.path[index] === part));
+    const observed = typeof result.id === "string" ? observedCalls.get(result.id) ?? [] : call ? [call] : [];
+    const sameName = observed.length > 0 && observed.every(candidate => candidate.name === observed[0]!.name);
+    const name = sameName ? observed[0]!.name : result.name;
+    // A failed/signed/multipart output is ineligible for file version tracking,
+    // but still needs its control identity and actionable result preserved.
+    const activity = observed.some(candidate => toolActivity(candidate.name, candidate.args, undefined) === 'plugin-control')
+      ? 'plugin-control' : toolActivity(name, call?.args, result.payload, result.envelope, parseText);
+    for (const span of spans) {
+      if (typeof name === "string") span.toolName = name;
+      if (activity) span.activityReason = activity;
     }
     if (!call || !call.safe || !result.safe || (protocol === "gemini" && call.name !== result.name)) continue;
     const source = readSource(call.name, call.args);
     if (!source) continue;
-    const spans = candidates.filter((candidate) => candidate.role === "tool" && result.path.every((part, index) => candidate.path[index] === part));
     if (spans.length === 1) spans[0]!.source = source;
   }
 }
@@ -419,7 +449,7 @@ export function extractSpans(body: Record<string, unknown>, protocol: Protocol):
     case "anthropic": candidates = anthropicSpans(body); break;
     case "gemini": candidates = geminiSpans(body); break;
   }
-  attachReadSources(body, protocol, candidates);
+  attachToolMetadata(body, protocol, candidates);
   const occurrences = new Map<string, number>();
   const hashes = new Map<Role, Map<string, string>>();
   const reason = protectionReason(body, protocol);

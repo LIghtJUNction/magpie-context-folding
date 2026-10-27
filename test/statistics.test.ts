@@ -137,8 +137,41 @@ test('batch and recursive counters, response-confirmed money, deduplication, rea
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);
     assert.deepEqual(await readdir(directory), ['state.sqlite']);
-    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'stats', '--json'], { encoding: 'utf8' });
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'stats', '--json'], {
+      encoding: 'utf8', env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: directory },
+    });
     assert.equal(cli.status, 0, cli.stderr);
     assert.equal(JSON.parse(cli.stdout).metrics.itemsFolded, 6);
+  });
+});
+
+test('large token estimates and conditional certificates never imply measured net benefit', async () => {
+  await fixture(async (directory) => {
+    const store = new Store(directory);
+    const scope = await store.scopeFor('benefit-evidence');
+    await store.transaction(scope, true, 64 * 1024 * 1024, snapshot => {
+      snapshot.metrics.foldedTokensEstimated = '99999999999999999999';
+      snapshot.metrics.estimatedTokenDelta = '-100';
+      snapshot.metrics.originalReadCalls = 2;
+    });
+    const estimated = JSON.parse(await execute({ scope, action: 'stats' }));
+    assert.deepEqual(estimated.netBenefit, {
+      status: 'unverified', reason: 'no-certified-comparisons', actualTimeSavingMs: null, measuredOverheadUsd: null,
+    });
+    assert.equal(estimated.money.actualBillSavingUsd, null);
+    assert.equal(estimated.metrics.estimatedTokenDelta, '-100', 'guide overhead remains visible in the signed estimate');
+    assert.equal(estimated.summary.detailViewCount, 2, 'read count stays separate from unknown read cost');
+
+    await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => {
+      snapshot.metrics.certifiedComparisons = 1;
+      snapshot.metrics.savingNanoUsdLower = '1250000000';
+    });
+    const certified = JSON.parse(await execute({ scope, action: 'stats' }));
+    assert.deepEqual(certified.netBenefit, {
+      status: 'unverified', reason: 'conditional-bound-only', actualTimeSavingMs: null, measuredOverheadUsd: null,
+    });
+    assert.equal(certified.money.coveredComparisons, 1);
+    assert.equal(certified.money.certifiedInputSavingLowerUsd, '1.250000000');
+    assert.equal(certified.money.actualBillSavingUsd, null, 'a certificate is not a measured bill');
   });
 });

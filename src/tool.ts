@@ -8,10 +8,17 @@ import { statistics } from './statistics.js';
 import { browse, latestVersions, parentIndex, restoreAncestors } from './tree.js';
 import { loadOptions } from './config.js';
 import { strategySchema } from './modes.js';
+import { foldedFingerprint, markFingerprint, operationReceipt, recordOperation } from './operations.js';
+import type { OperationTarget } from './operations.js';
 
 const peek = z.boolean().default(false);
+const serialize = (value: object): string => JSON.stringify({ ...value, _contextFolding: 'control-result' });
 
-const summary = z.string().trim().min(1).max(2000);
+// Zod's string bounds count code points; the folding contract uses UTF-16 offsets.
+// Enforce the new-input limit explicitly while leaving legacy archive decoding intact.
+const summary = z.string().trim().min(1).superRefine((text, ctx) => {
+  if (text.length > 2000) ctx.addIssue({ code: 'too_big', origin: 'string', maximum: 2000, inclusive: true });
+});
 const markSchema = z.union([
   z.object({ id: z.string(), disposition: z.literal('foldable'), summary }).strict(),
   z.object({ id: z.string(), disposition: z.enum(['keep', 'unmarked']) }).strict(),
@@ -51,6 +58,7 @@ export function diagnostic(error: unknown): string {
   if (error instanceof Error && [
     'Unknown context scope', 'Context scope changed concurrently; retry request',
     'Session archive full; original request retained', 'Global archive full; original request retained',
+    'Too many unacknowledged mark operations; complete the next request before marking more',
   ].includes(error.message)) return error.message;
   return 'Context archive unavailable; check settings, archive access and destination permissions';
 }
@@ -59,13 +67,18 @@ function splitsPair(text: string, offset: number): boolean {
   return offset > 0 && /[\uD800-\uDBFF]/.test(text[offset - 1] ?? '') && /[\uDC00-\uDFFF]/.test(text[offset] ?? '');
 }
 
-function applyMarks(snapshot: Snapshot, marks: z.infer<typeof markSchema>[]) {
+function applyMarks(snapshot: Snapshot, marks: z.infer<typeof markSchema>[], receipt = false) {
   // Stage the whole batch, including groups created earlier in this same batch.
   const next = structuredClone(snapshot);
   const entries = new Map(next.entries.map(entry => [entry.id, entry]));
   const groups = new Map((next.groups ?? []).map(group => [group.id, group]));
   const latest = latestVersions(next);
   const created: string[] = [];
+  const targets: OperationTarget[] = [];
+  const protection = (id: string): string | undefined => {
+    const group = groups.get(id);
+    return group ? group.children.map(protection).find(reason => reason !== undefined) : entries.get(id)?.protectionReason;
+  };
   let restored = 0;
   for (const mark of marks) {
     if ('ids' in mark) {
@@ -90,17 +103,32 @@ function applyMarks(snapshot: Snapshot, marks: z.infer<typeof markSchema>[]) {
           throw new ToolError('Protected entry cannot be grouped; no marks changed');
         }
       }
+      const protectedReason = mark.ids.map(protection).find(reason => reason !== undefined);
+      if (protectedReason) {
+        targets.push({ id, state: 'skipped', reason: protectedReason, markRetained: false });
+        continue;
+      }
       if (!existing) {
         const group = { id, children: [...mark.ids], summary: mark.summary, enabled: true };
         (next.groups ??= []).push(group);
         groups.set(id, group);
       } else existing.enabled = true;
       created.push(id);
+      targets.push({ id, state: 'queued', reason: 'awaiting-next-request', expected: markFingerprint(next, id)!,
+        ...(existing?.folded !== undefined && existing.foldedMark !== markFingerprint(next, id)
+          ? { previousFolded: foldedFingerprint(existing.folded) } : {}) });
       continue;
     }
     const entry = entries.get(mark.id);
     const group = groups.get(mark.id);
     if (!entry && !group) throw new ToolError('Unknown entry or group; no marks changed');
+    const protectedReason = mark.disposition === 'foldable' ? protection(mark.id) : undefined;
+    if (protectedReason) {
+      targets.push({ id: mark.id, state: 'skipped', reason: protectedReason, markRetained: false });
+      continue;
+    }
+    const previousFolded = entry?.folded ?? group?.folded;
+    const appliedMark = entry?.foldedMark ?? group?.foldedMark;
     if (entry) {
       entry.manual = true;
       if (entry.version) entry.version.automatic = false;
@@ -120,22 +148,70 @@ function applyMarks(snapshot: Snapshot, marks: z.infer<typeof markSchema>[]) {
       }
     }
     if (mark.disposition !== 'foldable') restored += restoreAncestors(next, mark.id);
+    targets.push(mark.disposition === 'foldable'
+      ? { id: mark.id, state: 'queued', reason: 'awaiting-next-request', expected: markFingerprint(next, mark.id)!,
+        ...(previousFolded !== undefined && appliedMark !== markFingerprint(next, mark.id)
+          ? { previousFolded: foldedFingerprint(previousFolded) } : {}) }
+      : { id: mark.id, state: 'applied', reason: mark.disposition === 'keep' ? 'kept-expanded' : 'unmarked-expanded' });
   }
   next.metrics = addMetrics(next.metrics, { itemsRestored: restored });
+  const operation = receipt ? recordOperation(next, targets) : undefined;
   snapshot.entries = next.entries;
   if (next.groups !== undefined) snapshot.groups = next.groups;
   snapshot.metrics = next.metrics;
-  return { marked: marks.length, ...(created.length ? { groups: created } : {}),
-    pending: marks.some(mark => mark.disposition === 'foldable'),
-    message: 'Marks saved atomically. Foldable items await the next request: one batch, threshold and full-request shrink check; configured accounting also requires cost approval.' };
+  if (next.operations !== undefined) snapshot.operations = next.operations;
+  const pending = targets.some(target => target.state === 'queued');
+  return { marked: targets.filter(target => target.state !== 'skipped').length, ...(created.length ? { groups: created } : {}),
+    pending, ...(operation ?? {}),
+    message: pending ? 'Marks saved. The next request automatically reports its folding attempt; foldable marks persist until changed.'
+      : targets.some(target => target.state === 'skipped') ? 'Protected items were left unchanged; see each target reason.' : 'Marks applied; originals remain expanded.' };
+}
+
+/** Report numeric bounds without exposing supplied text or arbitrary Zod messages. */
+function validationDetails(error: z.ZodError, input: unknown) {
+  const details: { path: PropertyKey[]; code: string; limit?: number | bigint; actual?: number;
+    unit?: string; hint?: string }[] = [];
+  const visit = (issues: readonly z.core.$ZodIssue[], prefix: PropertyKey[] = []) => {
+    for (const issue of issues) {
+      const path = [...prefix, ...issue.path];
+      if (issue.code === 'invalid_union') {
+        for (const branch of issue.errors) visit(branch, path);
+        continue;
+      }
+      const detail: typeof details[number] = { path, code: issue.code };
+      if (issue.code === 'too_big' || issue.code === 'too_small') {
+        let value = input;
+        for (const key of path) value = value !== null && typeof value === 'object'
+          ? (value as Record<PropertyKey, unknown>)[key] : undefined;
+        const limit = issue.code === 'too_big' ? issue.maximum : issue.minimum;
+        detail.limit = limit;
+        if (typeof value === 'string') {
+          detail.actual = path.at(-1) === 'summary' ? value.trim().length : [...value].length;
+          detail.unit = path.at(-1) === 'summary' ? 'UTF-16 code units' : 'Unicode code points';
+        } else if (Array.isArray(value)) {
+          detail.actual = value.length;
+          detail.unit = 'items';
+        } else if (typeof value === 'number') {
+          detail.actual = value;
+          detail.unit = 'value';
+        }
+        if (path.at(-1) === 'summary') detail.hint = issue.code === 'too_big'
+          ? `Shorten summary to at most ${limit} UTF-16 code units after trimming.`
+          : 'Provide a non-empty summary after trimming.';
+      }
+      if (!details.some(previous => JSON.stringify(previous) === JSON.stringify(detail))) details.push(detail);
+    }
+  };
+  visit(error.issues);
+  return details;
 }
 
 export async function execute(input: unknown): Promise<string> {
   const parsed = argsSchema.safeParse(input);
-  if (!parsed.success) return JSON.stringify({ error: 'Invalid context_folding arguments', details: parsed.error.issues.map(issue => ({ path: issue.path, code: issue.code })) });
+  if (!parsed.success) return serialize({ error: 'Invalid context_folding arguments', details: validationDetails(parsed.error, input) });
   const args = parsed.data;
   try {
-    if (args.action === 'stats') return JSON.stringify(await statistics(args.scope));
+    if (args.action === 'stats') return serialize(await statistics(args.scope));
     const store = new Store();
     if (args.action === 'read' || args.action === 'paste') {
       const recover = () => store.transaction(args.scope, false, 64 * 1024 * 1024, snapshot => {
@@ -169,7 +245,7 @@ export async function execute(input: unknown): Promise<string> {
       if (args.action === 'paste') {
         // Exclusive creation also refuses symlinks and never truncates an existing destination.
         await writeFile(args.path, source.text, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-        return JSON.stringify({ id: source.id, layer: source.layer, kept: source.kept, path: args.path, offset: source.offset,
+        return serialize({ id: source.id, layer: source.layer, kept: source.kept, path: args.path, offset: source.offset,
           nextOffset: source.nextOffset, chars: source.text.length, bytes: Buffer.byteLength(source.text), sha256: digest(source.text),
           ...(source.version ? { version: source.version, latestVersion: source.latestVersion } : {}) });
       }
@@ -180,7 +256,7 @@ export async function execute(input: unknown): Promise<string> {
       } catch {
         // Recovery must remain available even when statistics cannot grow or commit.
       }
-      return JSON.stringify(source);
+      return serialize(source);
     }
     const quotaPolicy = args.action === 'mark' && args.marks.some(mark => mark.disposition === 'foldable')
       ? 'enforce' : 'preserve';
@@ -200,10 +276,11 @@ export async function execute(input: unknown): Promise<string> {
           };
         }
         case 'list': return browse(snapshot, args);
-        case 'mark': return applyMarks(snapshot, args.marks);
+        case 'mark': return applyMarks(snapshot, args.marks, true);
         case 'status': return { entries: snapshot.entries.length, groups: snapshot.groups?.length ?? 0,
           folded: snapshot.entries.filter(entry => entry.folded !== undefined).length + (snapshot.groups ?? []).filter(group => group.folded !== undefined).length,
-          decision: snapshot.decision, metrics: snapshot.metrics };
+          decision: snapshot.decision, metrics: snapshot.metrics,
+          operations: (snapshot.operations ?? []).map(operationReceipt) };
         case 'forget': {
           if (snapshot.entries.some(entry => entry.folded !== undefined) || snapshot.groups?.some(group => group.folded !== undefined)) {
             throw new ToolError('Restore folded entries and groups with mark keep before forgetting recovery data');
@@ -218,8 +295,8 @@ export async function execute(input: unknown): Promise<string> {
     }, undefined, quotaPolicy);
     const result = args.action === 'list' || args.action === 'status'
       ? await retryArchiveRead(operation) : await operation();
-    return JSON.stringify(result);
+    return serialize(result);
   } catch (error) {
-    return JSON.stringify({ error: diagnostic(error) });
+    return serialize({ error: diagnostic(error) });
   }
 }
