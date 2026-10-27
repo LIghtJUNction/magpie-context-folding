@@ -76,18 +76,24 @@ function assertPreserved(output: Body, original: Body, protocol: Protocol, expec
   setText(expected, toolSpans(original, protocol)[0]!.path, expectedOld);
   const key = keyFor(protocol);
   const actual = structuredClone(output);
+  let guidance: string;
   if (protocol === 'chat' || protocol === 'anthropic') {
     const content = actual[key].at(-1).content;
     assert.ok(content.length > expected[key].at(-1).content.length, 'guidance is appended after recent content');
     assert.ok(content.slice(1).every((part: Body) => part.type === 'text' && typeof part.text === 'string'));
+    guidance = content.slice(1).map((part: Body) => part.text).join('\n');
     actual[key].at(-1).content = content.slice(0, 1);
   } else {
     assert.equal(actual[key].length, expected[key].length + 1);
     const guide = extractSpans(actual, protocol).at(-1)!;
     assert.equal(guide.role, 'user');
-    assert.match(guide.text, /<context-budget>/);
+    guidance = guide.text;
     actual[key].pop();
   }
+  assert.match(guidance, /^<context-folding scope=[a-f0-9]{64}>\ntools\["context_folding"\]/);
+  assert.doesNotMatch(guidance, /<context-budget>|source-fold-markers|@context-fold|Folding mode:|Agentic:/);
+  assert.equal(guidance.includes('read(scope,id)'), expectedOld !== toolSpans(original, protocol)[0]!.text,
+    'read guidance is only included while the request contains folded history');
   assert.deepEqual(actual, expected);
   assert.equal(toolSpans(output, protocol)[1]!.text, toolSpans(original, protocol)[1]!.text);
   const spans = extractSpans(output, protocol);

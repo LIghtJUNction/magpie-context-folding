@@ -81,6 +81,7 @@ async function main(): Promise<void> {
     else {
       const m = data.metrics;
       console.log([
+        '净收益：未验证（实际账单节省、任务耗时改善和额外操作费用均未测得）',
         `统计范围：${data.scope === 'global-lifetime' ? '全局累计' : '当前会话'}`,
         `折叠次数：${data.summary.foldCount}`,
         `查看详情次数：${data.summary.detailViewCount}`,
@@ -90,7 +91,8 @@ async function main(): Promise<void> {
         `成功带折叠请求：${m.successfulFoldedRequests}；失败：${m.failedFoldedRequests}；未核实：${m.unverifiedFoldedRequests}`,
         `累计净减少 token（成功请求估算）：${formatTokenCount(m.estimatedTokenDelta)}`,
         `已验证比较的 token 减少下界：${formatTokenCount(m.certifiedTokenDeltaLower)}`,
-        `证书假设下的节省下界累计：USD ${data.money.certifiedInputSavingLowerUsd}（${m.certifiedComparisons} 次比较）`,
+        m.certifiedComparisons === 0 ? '费用证明：暂无（0 次已核实比较）'
+          : `证书假设下的节省下界累计：USD ${data.money.certifiedInputSavingLowerUsd}（${m.certifiedComparisons} 次比较）`,
         `复用请求：${m.replayRequests} 次，未重复计入金额`,
         `展开读取：原文 ${m.originalReadCalls} 次、历史层 ${m.layerReadCalls} 次；恢复条目：${m.itemsRestored}`,
         `存档：${data.storage.activeSessions} 个会话，${data.storage.blobs} 个去重内容，数据库 ${data.storage.databaseBytes} B`,

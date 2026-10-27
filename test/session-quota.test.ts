@@ -37,7 +37,7 @@ async function fixture(run: (f: {
       directory, scope,
       configure: async maxSessionBytes => {
         const result = await onRequest(body, { ...context,
-          options: { maxSessionBytes, policy: { mode: 'bytes', autoRoles: [] } },
+          options: { maxSessionBytes, keepRecentMessages: 1, policy: { mode: 'bytes', autoRoles: [] } },
         });
         assert.ok(JSON.stringify(result).includes('<context-folding scope='));
       },

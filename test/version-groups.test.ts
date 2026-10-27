@@ -26,7 +26,9 @@ const readChat = (reads: { text: string; path?: string; range?: object; callId?:
   { role: 'tool', tool_call_id: read.callId ?? `read-${i}`, content: read.text }]),
   { role: 'user', content: 'Current requirements.' },
 ] });
-const stripGuide = (text: string) => text.replace(/(?:\n\n)?<context-budget>[\s\S]*?<\/context-budget>(?:\n\n<context-folding scope=[a-f0-9]{64}>[\s\S]*?<\/context-folding>)?$/, '');
+// Remove only a generated trailing locator and its optional budget/JSON receipts;
+// a user's intervening text or another markup block must remain comparable.
+const stripGuide = (text: string) => text.replace(/(?:^|\n\n)(?:<context-budget>[^<]*<\/context-budget>\n\n)?<context-folding scope=[a-f0-9]{64}>\ntools\["[^"\n]+"\][^<]*<\/context-folding>(?:\n<context-folding-receipts>\n(?:\{[^\n]*\}\n)+<\/context-folding-receipts>)?$/, '');
 const content = (body: unknown, protocol: Protocol = 'chat') => extractSpans(body as Body, protocol)
   .map(span => stripGuide(span.text)).filter(Boolean);
 const mark = async (scope: string, marks: unknown[]) => {

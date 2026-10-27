@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
 import type { Metrics } from './metrics.js';
 import { modeSchema, strategySchema } from './modes.js';
+import { operationSchema } from './operations.js';
 
 const markSchema = z.discriminatedUnion('disposition', [
   z.object({ disposition: z.literal('unmarked') }),
@@ -25,17 +26,22 @@ const versionSchema = z.object({
 const groupSchema = z.object({
   id: z.string().min(1), children: z.array(z.string()).min(2).max(100),
   summary: z.string().trim().min(1).max(2000), enabled: z.boolean(), folded: z.string().optional(),
+  foldedMark: z.string().optional(),
 });
 const entrySchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant', 'tool']), text: z.string(),
   mark: markSchema, folded: z.string().optional(), layers: z.array(layerSchema).default([]),
   version: versionSchema.optional(), manual: z.boolean().optional(),
+  protectionReason: z.string().optional(),
+  foldedMark: z.string().optional(),
 });
 const snapshotSchema = z.object({
   version: z.literal(1), entries: z.array(entrySchema), groups: z.array(groupSchema).optional(),
   configuredMode: modeSchema.optional(), agenticMode: strategySchema.optional(), appliedMode: strategySchema.optional(),
   decision: z.record(z.string(), z.unknown()).default({}),
   metrics: metricsSchema.default(emptyMetrics),
+  operations: z.array(operationSchema).max(33)
+    .refine(operations => operations.filter(operation => !operation.delivered).length <= 32).optional(),
 });
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const storedLayerSchema = layerSchema.omit({ text: true }).extend({ textHash: hashSchema });
