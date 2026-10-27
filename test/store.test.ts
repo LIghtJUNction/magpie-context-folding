@@ -277,7 +277,7 @@ test('legacy snapshots exactly at their original quota remain readable after met
       database.query("UPDATE sessions SET snapshot = json_remove(snapshot, '$.metrics', '$.payloadBytes', '$.sessionLimitBytes') WHERE scope = ?").run(scope);
     } finally { database.close(); }
     const before = inspect(directory, db => db.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope));
-    const recovered = await store.transaction(scope, false, limit, snapshot => structuredClone(snapshot));
+    const recovered = await store.transaction(scope, false, limit, snapshot => structuredClone(snapshot), undefined, 'preserve');
     assert.equal(recovered.entries[0]?.text, legacy.entries[0]?.text);
     assert.deepEqual(recovered.metrics, emptyMetrics());
     assert.ok(Buffer.byteLength(JSON.stringify(recovered)) > limit);
@@ -302,7 +302,8 @@ test('lowered quotas allow existing snapshots to stay the same size or shrink, b
       snapshot.entries.push(entry('one', 'x'.repeat(2048)));
     });
     const before = inspect(directory, db => db.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope));
-    assert.equal(await store.transaction(scope, false, limit, snapshot => snapshot.entries[0]?.text.length), 2048);
+    assert.equal(await store.transaction(scope, false, limit, snapshot => snapshot.entries[0]?.text.length,
+      undefined, 'preserve'), 2048);
     assert.deepEqual(inspect(directory, db => db.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope)), before);
     await store.transaction(scope, false, limit, snapshot => { snapshot.entries[0]!.text = 'y'.repeat(2048); });
     await store.transaction(scope, false, limit, snapshot => { snapshot.entries[0]!.text = 'z'.repeat(2000); });

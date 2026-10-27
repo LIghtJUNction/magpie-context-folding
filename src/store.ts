@@ -76,6 +76,8 @@ export interface StatsReport {
   storage: { activeSessions: number; blobs: number; databaseBytes: number };
 }
 type StoredSnapshot = z.infer<typeof storedSnapshotSchema>;
+type SessionQuotaPolicy = 'configure' | 'preserve' | 'enforce';
+const defaultSessionLimitBytes = 64 * 1024 * 1024;
 
 export const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
@@ -319,7 +321,7 @@ export class Store {
         const { payloadBytes, sessionLimitBytes, ...base } = stored;
         const previousBytes = payloadBytes ?? legacyPayloadBytes(database, JSON.stringify(base));
         const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics));
-        const limit = sessionLimitBytes ?? 64 * 1024 * 1024;
+        const limit = sessionLimitBytes ?? defaultSessionLimitBytes;
         if (nextBytes > limit) throw new Error('Session archive full; statistics not committed');
         database.query('UPDATE sessions SET revision = ?, snapshot = ? WHERE scope = ?')
           .run(session.revision + 1, JSON.stringify({ ...base, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
@@ -342,6 +344,7 @@ export class Store {
     maxBytes: number,
     run: (snapshot: Snapshot) => Promise<T> | T,
     signal?: AbortSignal,
+    quotaPolicy: SessionQuotaPolicy = 'configure',
   ): Promise<T> {
     signal?.throwIfAborted();
     hashSchema.parse(scope);
@@ -353,12 +356,15 @@ export class Store {
         if (row === null) {
           if (!create) throw new Error('Unknown context scope');
           database.exec('COMMIT');
-          return { revision: 0, rawSnapshot: null, snapshot: snapshotSchema.parse({ version: 1, entries: [], decision: {} }) };
+          return { revision: 0, rawSnapshot: null, sessionLimitBytes: undefined,
+            snapshot: snapshotSchema.parse({ version: 1, entries: [], decision: {} }) };
         }
         const session = sessionRowSchema.parse(row);
-        const snapshot = decode(database, storedSnapshotSchema.parse(JSON.parse(session.snapshot)));
+        const stored = storedSnapshotSchema.parse(JSON.parse(session.snapshot));
+        const snapshot = decode(database, stored);
         database.exec('COMMIT');
-        return { revision: session.revision, rawSnapshot: session.snapshot, snapshot };
+        return { revision: session.revision, rawSnapshot: session.snapshot,
+          sessionLimitBytes: stored.sessionLimitBytes, snapshot };
       } catch (error) {
         if (database.inTransaction) database.exec('ROLLBACK');
         throw error;
@@ -375,11 +381,17 @@ export class Store {
     validateLayers(snapshot);
     const after = JSON.stringify(snapshot);
     const payloadBytes = Buffer.byteLength(after);
+    // maxBytes is this operation's ceiling. Only the configured request may change
+    // the persisted quota; tools preserve it, and new fold marks also enforce it.
+    const sessionLimitBytes = quotaPolicy === 'configure' ? maxBytes
+      : original.sessionLimitBytes ?? defaultSessionLimitBytes;
+    const operationLimit = quotaPolicy === 'enforce' ? Math.min(maxBytes, sessionLimitBytes) : maxBytes;
     // Schema defaults and lowered limits must not block recovery. Existing snapshots
     // may stay the same size or shrink while over quota; only growth is rejected.
-    const allowedBytes = original.revision > 0 ? Math.max(maxBytes, Buffer.byteLength(before)) : maxBytes;
+    const allowedBytes = original.revision > 0 ? Math.max(operationLimit, Buffer.byteLength(before)) : operationLimit;
     if (payloadBytes > allowedBytes) throw new Error('Session archive full; original request retained');
-    if (original.revision > 0 && before === after) {
+    const quotaChanged = quotaPolicy === 'configure' && original.sessionLimitBytes !== sessionLimitBytes;
+    if (original.revision > 0 && before === after && !quotaChanged) {
       await this.database(database => {
         signal?.throwIfAborted();
         assertSameSession(database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope), original);
@@ -387,7 +399,7 @@ export class Store {
       return result;
     }
     const { stored, blobs } = encode(snapshot);
-    const serialized = JSON.stringify({ ...stored, payloadBytes, sessionLimitBytes: maxBytes });
+    const serialized = JSON.stringify({ ...stored, payloadBytes, sessionLimitBytes });
     const metricsDelta = metricsDifference(previousMetrics, snapshot.metrics);
     const metricsChanged = JSON.stringify(previousMetrics) !== JSON.stringify(snapshot.metrics);
 

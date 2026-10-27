@@ -4,7 +4,7 @@ import { appendBudget, estimateTokens } from './budget.js';
 import { evaluatePolicy, planCandidates, policyRequestHash } from './policy.js';
 import type { SavingsProof } from './economics.js';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
-import { extractSpans, replaceExtractedSpans } from './protocol.js';
+import { extractSpans, recoveryToolName, replaceExtractedSpans } from './protocol.js';
 import { Store, digest } from './store.js';
 import type { Entry, Group, Snapshot } from './store.js';
 import { parentIndex } from './tree.js';
@@ -113,7 +113,8 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
     const withBudget = (request: Record<string, unknown>, guide = '') =>
       appendBudget(request, ctx.protocol, guide);
     // Hooks cannot register tools. Only hints are possible without advertised recovery.
-    if (!options.recoveryToolName && !JSON.stringify(body.tools ?? body.config ?? {}).includes('context_folding')) return withBudget(body);
+    const recoveryTool = recoveryToolName(body, ctx.protocol, options.recoveryToolName);
+    if (!recoveryTool) return withBudget(body);
     const spans = extractSpans(body, ctx.protocol);
     if (spans.length === 0 || spans.some(span => span.protectedReason)) return withBudget(body);
     const store = new Store();
@@ -205,7 +206,6 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         ctx.signal?.throwIfAborted();
         planningFailed = true;
       }
-      const recoveryTool = options.recoveryToolName ?? 'context_folding';
       const modeGuide = options.mode === 'agentic'
         ? `Agentic: ${activeMode}; action="mode", mode="intelligence"|"balanced"|"economy" switches this session next request.`
         : `Folding mode: ${activeMode}.`;
