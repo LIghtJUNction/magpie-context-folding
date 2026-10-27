@@ -20,6 +20,56 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Resolve a callable recovery entry point, never a mention in descriptions or schemas. */
+export function recoveryToolName(body: Record<string, unknown>, protocol: Protocol, configured?: string): string | undefined {
+  const config = protocol === "gemini" && isRecord(body.config) ? body.config : {};
+  const toolConfig = body.toolConfig ?? body.tool_config ?? config.toolConfig ?? config.tool_config;
+  const calling = isRecord(toolConfig) ? toolConfig.functionCallingConfig ?? toolConfig.function_calling_config : undefined;
+  const choice = body.tool_choice;
+  if (protocol === "gemini" ? isRecord(calling) && calling.mode === "NONE"
+    : choice === "none" || (isRecord(choice) && choice.type === "none")) return;
+  // An explicit name attests to a verified wrapper (for example code mode).
+  // Its inner tool name need not match the wrapper selected on the wire.
+  if (configured) return configured;
+
+  const functionName = (tool: unknown): string | undefined => {
+    if (!isRecord(tool)) return;
+    let declaration = tool;
+    if (protocol === "chat") {
+      if (tool.type !== "function" || !isRecord(tool.function)) return;
+      declaration = tool.function;
+    } else if (protocol === "responses" && tool.type !== "function") return;
+    else if (protocol === "anthropic" && tool.type !== undefined && tool.type !== "custom") return;
+    return typeof declaration.name === "string" ? declaration.name : undefined;
+  };
+  const tools = body.tools ?? config.tools;
+  if (!Array.isArray(tools)) return;
+  const names = tools.flatMap(tool => {
+    if (protocol !== "gemini") return [functionName(tool)];
+    const declarations = isRecord(tool) ? tool.functionDeclarations ?? tool.function_declarations : undefined;
+    return Array.isArray(declarations) ? declarations.map(functionName) : [];
+  });
+  const allowed = (name: string): boolean => {
+    if (protocol === "gemini") {
+      if (calling === undefined) return true;
+      if (!isRecord(calling) || (calling.mode !== undefined && !["AUTO", "ANY", "VALIDATED", "MODE_UNSPECIFIED"].includes(String(calling.mode)))) return false;
+      const names = calling.allowedFunctionNames ?? calling.allowed_function_names;
+      return names === undefined || (Array.isArray(names) && names.includes(name));
+    }
+    if (choice === undefined || choice === null) return true;
+    if (protocol === "anthropic") return isRecord(choice)
+      && (choice.type === "auto" || choice.type === "any" || (choice.type === "tool" && choice.name === name));
+    if (choice === "auto" || choice === "required") return true;
+    if (!isRecord(choice)) return false;
+    if (choice.type !== "allowed_tools") return functionName(choice) === name;
+    const subset = protocol === "chat" ? choice.allowed_tools : choice;
+    return isRecord(subset) && (subset.mode === "auto" || subset.mode === "required")
+      && Array.isArray(subset.tools) && subset.tools.some(tool => functionName(tool) === name);
+  };
+  return names.find((name): name is string => (name === "context_folding"
+    || name === "mcp__magpie__magpie_context_folding_context_folding") && allowed(name));
+}
+
 function textRole(value: unknown): Role | undefined {
   return value === "user" || value === "assistant" || value === "tool" ? value : undefined;
 }
