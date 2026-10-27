@@ -6,6 +6,12 @@ export async function statistics(scope?: string) {
   return {
     scope: scope === undefined ? 'global-lifetime' : 'session',
     ...result,
+    netBenefit: {
+      status: 'unverified' as const,
+      reason: result.metrics.certifiedComparisons === 0 ? 'no-certified-comparisons' as const : 'conditional-bound-only' as const,
+      actualTimeSavingMs: null,
+      measuredOverheadUsd: null,
+    },
     summary: {
       foldCount: result.metrics.foldBatchesApproved,
       detailViewCount: result.metrics.originalReadCalls + result.metrics.layerReadCalls,
@@ -19,11 +25,10 @@ export async function statistics(scope?: string) {
       actualBillSavingUsd: null,
     },
     notes: [
-      'Fold count and cumulative folded tokens cover newly approved batches, including recursive folds, without recounting replays. Detail views count successful original/layer read calls. Folded tokens are estimated from complete before/after request UTF-8 bytes / 4; historical totals from before this counter was added are not reconstructed.',
-      'Amounts cover certified incremental comparisons on successful matching responses, subject to accounting assumptions; they are not actual billing savings. Current certificates require bounds for all additional work on the same task, including tool calls and model round trips. Historical totals retain their original evidence limits and are not upgraded to full-task savings proofs.',
-      'Estimated token deltas cover all hook-transformed requests with successful matching responses, including guide-only requests, using serialized UTF-8 bytes / 4; guide overhead can make the delta negative. Certified token deltas are incremental lower bounds with a different baseline; neither is actual billing savings.',
-      'Replays without a new certificate have no monetary credit. Marking, reads, restores and other unreserved costs are not automatically deducted.',
-      'Response callbacks can be lost. Missing or failed responses are not assumed successful. Lifetime aggregates survive archive disposal.',
+      'Net benefit is unverified: actual billing savings, elapsed-time savings and measured overhead are unavailable, not zero. Read/restore counts do not measure their cost.',
+      'Fold totals count approved batches, including recursive folds, without recounting replays. Tokens use full-request UTF-8 bytes / 4, not a tokenizer. Signed estimatedTokenDelta includes guide overhead on matching successful responses; fold totals are not full-task savings.',
+      'Certified amounts are conditional incremental lower bounds, not bills. Current certificates require all additional task costs; historical evidence is not upgraded. Uncertified replays and unreserved marking/reading/restoring costs receive no assumed monetary credit or deduction.',
+      'Missing or failed responses are not successful. Lifetime aggregates survive archive disposal; missing historical counters are not reconstructed.',
     ],
   };
 }
