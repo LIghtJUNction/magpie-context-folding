@@ -46,9 +46,14 @@ function request({ protocol, custom }: Variant): Body {
   const text = (role: 'assistant' | 'user', value: string) => protocol === 'gemini'
     ? { role: role === 'assistant' ? 'model' : role, parts: [{ text: value }] }
     : { role, content: [{ type: protocol === 'responses' ? role === 'user' ? 'input_text' : 'output_text' : 'text', text: value }] };
+  const tool = { name: 'context_folding', parameters: { type: 'object' } };
+  const tools = protocol === 'chat' ? [{ type: 'function', function: tool }]
+    : protocol === 'responses' ? [{ type: 'function', ...tool }]
+    : protocol === 'anthropic' ? [{ name: tool.name, input_schema: tool.parameters }]
+    : [{ functionDeclarations: [tool] }];
   return {
     model: 'synthetic', stream: false,
-    tools: [{ type: 'function', function: { name: 'context_folding', parameters: { type: 'object' } } }],
+    tools,
     [keyFor(protocol)]: [...exchange('old-id'), text('assistant', 'Earlier observation finished.'),
       ...exchange('anchor-id'), text('assistant', recentAnswer), text('user', requirements)],
   };

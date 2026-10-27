@@ -85,6 +85,8 @@ Select `expand` and `keep` by exact region name, region ID, or `"*"`. `expandMod
 
 The default `read` of an annotated entry is folded. Use `mode: "original"` for exact original pagination, or `expand: ["*"]` to inspect all annotated code. `paste` always writes the exact original. Resolving the references in a complete compact view reproduces the original, including Unicode, CRLF, and a missing final newline. Read responses include the original ID/reference/hash; folded views additionally report their parser, limitations and folded region names/references. `sha256`, `totalChars`, offsets and `nextOffset` describe the selected view; `originalSha256` and `originalChars` describe the archived original.
 
+The prefix `[[cf:` is reserved in values passed to `resolve`. A folded source view rejects original text containing this prefix in a visible fragment, including a kept or expanded region, instead of confusing a literal with a generated reference. Read that source with `mode: "original"`, or use the whole original entry's returned reference. A literal inside an actually hidden payload remains safe: resolution expands archived text once and never interprets the restored text again. The legacy `fold_regions` helper checks visible fragments before making archive writes.
+
 Each source operation accepts exactly one of UTF-8 `text`, an absolute regular-file `path`, or an archived entry `id`. A `files` array batches 1–100 source objects atomically; outer options supply defaults and per-file options override them. Any invalid source or selector rolls back the whole batch. Do not combine outer `text`/`path`/`id` with `files`.
 
 For example, given this UTF-8 file at `/project/worker.js`:

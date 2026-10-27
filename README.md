@@ -25,6 +25,8 @@ AI 在 agentic 模式下调用 `{"action":"mode","scope":"<当前scope>","mode":
 
 某些客户端将 MCP 工具统一封装在代码执行工具内，外层请求不列出恢复工具。确认连接可用后，可在插件 options 设置 `recoveryToolName` 为真实工具名，或在 TOML 的 `[magpie]` 设置 `recovery_tool_name`。这是已验证恢复入口的声明；未声明也未直接提供恢复工具时，插件只加长度提示，不折叠。Codex code-mode 可使用 `mcp__magpie__magpie_context_folding_context_folding`。
 
+直接提供工具时，插件按当次协议的函数声明精确识别 `context_folding` 或 `mcp__magpie__magpie_context_folding_context_folding`，并在恢复提示中使用实际名字；描述、参数字段或相似工具名不算恢复入口。其他工具名须显式配置。当 `tool_choice` 强制选择其他工具、或允许列表排除原生恢复工具时，保留原文；请求全局禁用工具时，即使显式配置了恢复入口也不折叠或重放旧折叠。
+
 项目还提供两项源码能力，由不依赖 Magpie 的 [context-folding 子项目](context-folding/README.md)实现：
 
 - **注释标记控制代码细节自动折叠**：用整行注释 `@context-fold begin NAME` / `@context-fold end NAME` 指定区域，读取时归档内部原文并显示恢复引用，保留标记行与周边代码，源文件本身不变。Python 还支持自动发现函数、类和复合块；[标记与读取示例](context-folding/README.md#source-annotations-and-compact-reads)。
@@ -300,7 +302,9 @@ $XDG_DATA_HOME/magpie-context-folding/state.sqlite
 
 原文、各层摘要和当前折叠结果以内容哈希去重，跨会话相同文本也不会重复保存。每次请求不生成文件，不保存快照目录、历史日志或自动备份；只保留当前会话状态和被引用的恢复材料。未标记且已离开客户端历史的内容会被回收；`forget` 会删除整个 scope，无其他 scope 引用的数据随之回收。SQLite 自动归还空页，不使用长期增长的 WAL。崩溃时 SQLite 可能留下用于事务恢复的短暂 journal，下次打开会处理。
 
-默认每会话最多 64 MiB，全局实际数据库文件最多 256 MiB。达到上限就拒绝新增存档/折叠并保留原请求，不删除仍需要递归展开的原文。`maxSessionBytes` 只能设在 64 MiB 以内，以保证读取工具始终能够打开存档。数据库文件权限为 0600，新建目录为 0700。
+默认每会话最多 64 MiB，全局实际数据库文件最多 256 MiB。达到上限就拒绝新增存档/折叠并保留原请求，不删除仍需要递归展开的原文。`maxSessionBytes` 只能设在 64 MiB 以内，由请求钩子的生效配置保存并更新；标记工具同时遵守已保存的会话限额，读取和恢复操作不会把该限额改回默认值。降低限额不删除旧存档，仍允许读取和缩小；恢复保护可以使用读取工具的 64 MiB 操作上限，但不提高后续新增折叠的配额。数据库文件权限为 0600，新建目录为 0700。
+
+已知边界：档案恰好占满 64 MiB 时，默认 `read`/`paste` 新增的 `keep` 元数据仍可能因容量不足而失败。此时可用 `read` 的 `peek:true`（CLI `--peek`）读取原文；这不承诺已写入持久保护。统计写入失败不会阻止成功的原文读取。
 
 ## 本地验证
 
