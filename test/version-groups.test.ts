@@ -194,12 +194,15 @@ test('repacking tool results and editing sibling blocks cannot revive old observ
   for (const protocol of ['anthropic', 'gemini'] as const) {
     await fixture(async ({ store, scope, ctx }) => {
       const changed = a.replace('alpha line 0:', 'revised line 0:');
+      const recoveryTools = protocol === 'anthropic'
+        ? [{ name: 'context_folding', input_schema: { type: 'object' } }]
+        : [{ functionDeclarations: [{ name: 'context_folding', parameters: { type: 'object' } }] }];
       const body = (reads: { text: string; id: string }[], note = 'Original note.'): Body => protocol === 'anthropic'
-        ? { tools, messages: [...reads.flatMap(read => [
+        ? { tools: recoveryTools, messages: [...reads.flatMap(read => [
           { role: 'assistant', content: [{ type: 'tool_use', id: read.id, name: 'Read', input: { file_path: './file.ts' } }] },
           { role: 'user', content: [{ type: 'tool_result', tool_use_id: read.id, content: read.text }, { type: 'text', text: note }] },
         ]), { role: 'user', content: 'Current requirements.' }] }
-        : { tools, contents: [...reads.flatMap(read => [
+        : { tools: recoveryTools, contents: [...reads.flatMap(read => [
           { role: 'model', parts: [{ functionCall: { id: read.id, name: 'Read', args: { file_path: './file.ts' } } }] },
           { role: 'user', parts: [{ functionResponse: { id: read.id, name: 'Read', response: { text: read.text } } }, { text: note }] },
         ]), { role: 'user', parts: [{ text: 'Current requirements.' }] }] };
@@ -467,7 +470,7 @@ function toolBody(protocol: Protocol): Body {
   if (protocol === 'chat') return { tools, messages: [...calls.flatMap(({ output, id }) => [
     { role: 'assistant', tool_calls: [{ id, type: 'function', function: { name: 'search', arguments: '{}' } }] },
     { role: 'tool', tool_call_id: id, content: output }]), { role: 'user', content: 'Now.' }] };
-  if (protocol === 'responses') return { tools: [tool], input: [...calls.flatMap(({ output, id }) => [
+  if (protocol === 'responses') return { tools: [{ type: 'function', ...tool }], input: [...calls.flatMap(({ output, id }) => [
     { type: 'function_call', call_id: id, name: 'search', arguments: '{}' },
     { type: 'function_call_output', call_id: id, output }]), { role: 'user', content: 'Now.' }] };
   if (protocol === 'anthropic') return { tools: [tool], messages: [...calls.flatMap(({ output, id }) => [

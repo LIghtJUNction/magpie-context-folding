@@ -238,6 +238,53 @@ class ClientIntegrationTests(unittest.TestCase):
         self.call("roots", ids=[item["id"]])
         self.assertEqual(self.call("read", id=item["id"])["text"], "cold")
 
+    def test_repeated_group_restores_trashed_group_without_changing_children(self):
+        first = self.put("first evidence " * 30)
+        second = self.put("second evidence " * 30)
+        fields = dict(ids=[first["id"], second["id"]], summary="Earlier results")
+        group = self.call("group", **fields)
+        self.call("gc", mode="trash", ids=[group["id"]])
+        self.time.return_value = 2000
+        self.assertEqual(self.call("group", **fields), group)
+        manifest = json.loads(self.call("read", id=group["id"])["text"])
+        self.assertEqual(manifest["children"], fields["ids"])
+        self.assertEqual(self.nodes()[group["id"]]["lastUsedAt"], 2000)
+        for item, text in ((first, "first evidence " * 30), (second, "second evidence " * 30)):
+            self.assertEqual(self.call("read", id=item["id"])["text"], text)
+
+    def test_repeated_group_refreshes_activity_before_automatic_collection(self):
+        first = self.put("first evidence " * 30)
+        second = self.put("second evidence " * 30)
+        fields = dict(ids=[first["id"], second["id"]], summary="Earlier results")
+        group = self.call("group", **fields)
+        self.call("gc", mode="configure", config={"strength": "aggressive", "idleSeconds": 1})
+        self.time.return_value = 2000
+        self.assertEqual(self.call("group", **fields), group)
+        self.assertNotIn("trashedAt", self.nodes()[group["id"]])
+        self.assertEqual(self.nodes()[group["id"]]["lastUsedAt"], 2000)
+        # Reuse does not silently add a lifecycle root or disable future GC.
+        self.time.return_value = 2002
+        self.call("status")
+        self.assertIn("trashedAt", self.nodes()[group["id"]])
+
+    def test_repeated_group_still_rejects_protected_or_trashed_children_atomically(self):
+        first = self.put("first evidence " * 30)
+        second = self.put("second evidence " * 30)
+        fields = dict(ids=[first["id"], second["id"]], summary="Earlier results")
+        group = self.call("group", **fields)
+        self.mark(first, disposition="keep")
+        before = self.stored()
+        with self.assertRaises(FoldingError):
+            self.call("group", **fields)
+        self.assertEqual(self.stored(), before)
+        self.mark(first, disposition="unmarked")
+        self.call("roots", ids=[])
+        self.call("gc", mode="trash", ids=[group["id"], first["id"], second["id"]])
+        before = self.stored()
+        with self.assertRaises(FoldingError):
+            self.call("group", **fields)
+        self.assertEqual(self.stored(), before)
+
     def test_active_group_roots_protect_and_restore_descendants(self):
         first = self.put("first evidence " * 30)
         second = self.put("second evidence " * 30)

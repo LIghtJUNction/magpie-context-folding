@@ -249,7 +249,8 @@ class Client:
         if not self.config["annotations"]["enabled"] and request["action"] == "read-source":
             return self._read(snapshot, {**request, "action": "read", "id": node["id"], "mode": request.get("mode", "original")}, now)
         if language is not None:
-            language = "python" if language.lower() == "py" else language.lower()
+            from .javascript import normalize_language
+            language = "python" if language.lower() == "py" else normalize_language(language)
         annotation = node.get("annotation")
         # Decisions belong to this immutable original, even when a parser/style
         # change temporarily stops discovering their regions. Import legacy marks.
@@ -448,6 +449,8 @@ class Client:
         existing = _nodes(snapshot).get(node_id)
         if existing:
             existing["enabled"] = True
+            existing.pop("trashedAt", None)
+            existing["lastUsedAt"] = now
             return {"id": node_id, "reference": _ref(node_id)}
         if parents.intersection(children):
             _error("Group children must be root nodes")
@@ -571,7 +574,7 @@ class Client:
         if mode not in ("folded", "original"):
             _error("Invalid read mode")
         if node.get("annotation") and request["action"] == "read":
-            from .annotations import compact_source, select_regions
+            from .annotations import ReferenceLiteralError, compact_source, select_regions
             expand_mode = request.get("expandMode", "recursive")
             if expand_mode not in ("single", "recursive"):
                 _error("Invalid source expand mode")
@@ -581,10 +584,13 @@ class Client:
                 for region in annotation["regions"]:
                     if not region.get("manual") and any(fnmatchcase(region["name"], pattern) for pattern in self.config["annotations"]["keep"]):
                         region["disposition"] = "keep"
-                view = compact_source(text, annotation, request.get("expand", []),
-                                      node["mark"]["disposition"] == "keep" or
-                                      bool(node.get("manual") and node["mark"]["disposition"] == "unmarked"),
-                                      expand_mode=expand_mode)
+                try:
+                    view = compact_source(text, annotation, request.get("expand", []),
+                                          node["mark"]["disposition"] == "keep" or
+                                          bool(node.get("manual") and node["mark"]["disposition"] == "unmarked"),
+                                          expand_mode=expand_mode)
+                except ReferenceLiteralError as exc:
+                    raise FoldingError("invalid_request", str(exc)) from None
                 text = view.pop("text")
                 source_view = view
             source_view.update(mode=mode, reference=_ref(node["id"]),

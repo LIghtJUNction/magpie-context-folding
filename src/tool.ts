@@ -163,7 +163,7 @@ export async function execute(input: unknown): Promise<string> {
           text: text.slice(args.offset, end), offset: args.offset,
           nextOffset: end < text.length ? end : null, totalChars: text.length, sha256: digest(text),
         };
-      });
+      }, undefined, 'preserve');
       // Re-read current state and reapply keep; file creation stays outside retries.
       const source = await retryArchiveRead(recover);
       if (args.action === 'paste') {
@@ -182,8 +182,9 @@ export async function execute(input: unknown): Promise<string> {
       }
       return JSON.stringify(source);
     }
-    const maxBytes = args.action === 'mark' && args.marks.some(mark => mark.disposition === 'foldable')
-      ? (await loadOptions()).maxSessionBytes : 64 * 1024 * 1024;
+    const quotaPolicy = args.action === 'mark' && args.marks.some(mark => mark.disposition === 'foldable')
+      ? 'enforce' : 'preserve';
+    const maxBytes = quotaPolicy === 'enforce' ? (await loadOptions()).maxSessionBytes : 64 * 1024 * 1024;
     const operation = () => store.transaction(args.scope, false, maxBytes, (snapshot) => {
       switch (args.action) {
         case 'mode': {
@@ -214,7 +215,7 @@ export async function execute(input: unknown): Promise<string> {
           return { forgotten: true };
         }
       }
-    });
+    }, undefined, quotaPolicy);
     const result = args.action === 'list' || args.action === 'status'
       ? await retryArchiveRead(operation) : await operation();
     return JSON.stringify(result);

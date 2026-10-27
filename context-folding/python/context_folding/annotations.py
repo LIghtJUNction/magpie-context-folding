@@ -329,6 +329,16 @@ def select_regions(regions: list[dict], selectors: Any) -> set[str]:
     return selected
 
 
+class ReferenceLiteralError(ValueError):
+    def __init__(self):
+        super().__init__("Visible source contains a reserved reference prefix; use mode='original'")
+
+
+def _check_literal_references(text: str) -> None:
+    if "[[cf:" in text:
+        raise ReferenceLiteralError()
+
+
 def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bool = False,
                    *, expand_mode: str = "recursive") -> dict:
     if expand_mode not in {"single", "recursive"}:
@@ -355,9 +365,11 @@ def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bo
         payload = text[region["start"]:region["end"]]
         if preserve or region["id"] in protected or len(region["reference"]) >= len(payload):
             continue
+        _check_literal_references(text[cursor:region["start"]])
         chunks.extend((text[cursor:region["start"]], region["reference"]))
         cursor = region["end"]
         visible.append({key: region[key] for key in ("id", "name", "header", "reference", "startLine", "endLine")})
+    _check_literal_references(text[cursor:])
     chunks.append(text[cursor:])
     return {"text": "".join(chunks), "foldedRegions": visible}
 
@@ -391,6 +403,7 @@ def fold_regions(
         raise TypeError("language must be a string or None")
 
     def unchanged(reason: str, line: int | None = None) -> dict[str, Any]:
+        _check_literal_references(text)
         skipped: dict[str, Any] = {"reason": reason}
         if line is not None:
             skipped["line"] = line
@@ -441,8 +454,7 @@ def fold_regions(
     if opened is not None:
         return unchanged("unterminated_region", opened["startLine"])
 
-    chunks: list[str] = []
-    references: list[dict[str, Any]] = []
+    selected = []
     skipped: list[dict[str, Any]] = []
     cursor = 0
     for region in regions:
@@ -455,6 +467,17 @@ def fold_regions(
             continue
         newline = "\r\n" if interior.endswith("\r\n") else "\n" if interior.endswith("\n") else "\r" if interior.endswith("\r") else ""
         payload = interior[:-len(newline)] if newline else interior
+        _check_literal_references(text[cursor:start])
+        selected.append((region, payload, newline, line_count))
+        cursor = end
+    _check_literal_references(text[cursor:])
+
+    # Validate all retained source before the legacy adapter makes any writes.
+    chunks: list[str] = []
+    references: list[dict[str, Any]] = []
+    cursor = 0
+    for region, payload, newline, line_count in selected:
+        start, end = region["start"], region["end"]
         result = client.call({"action": "put", "scope": scope, "text": payload, "role": "tool"})
         reference = result["reference"]
         if not isinstance(reference, str) or not reference:

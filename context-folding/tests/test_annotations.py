@@ -825,6 +825,22 @@ class SourceIntegrationTests(unittest.TestCase):
         result = self.client.annotate("s", id=stored["id"], language="explicit")
         self.assertTrue(all(r["disposition"] == "keep" for r in result["regions"]))
 
+    def test_language_aliases_reuse_archived_regions_without_optional_parsers(self):
+        from unittest.mock import patch
+        source = '// @context-fold begin saved\n' + 'const value = "original";\n' * 20 + '// @context-fold end saved\n'
+        # Legacy explicit-region archives can be read without Tree-sitter.
+        for language, aliases in (("javascript", ("js", "JS", "javascript", "JavaScript")),
+                                  ("typescript", ("ts", "TS", "typescript", "TypeScript"))):
+            annotation = {**discover_source(source, "explicit"), "language": language}
+            with patch("context_folding.annotations.discover_source", return_value=annotation):
+                stored = self.client.annotate(language, text=source, language=language)
+            with patch.dict(sys.modules, {"tree_sitter": None}):
+                for alias in aliases:
+                    with self.subTest(language=alias):
+                        view = self.client.read_source(language, id=stored["id"], language=alias)
+                        self.assertTrue(view["foldedRegions"])
+                        self.assertEqual(self.client.resolve(language, view["text"])["value"], source)
+
     def test_annotation_configuration_and_explicit_overrides(self):
         from context_folding import Client
         with Client(Path(self.directory.name) / "configured.sqlite", config={"annotations": {
