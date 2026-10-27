@@ -86,6 +86,9 @@ test('stats shows folding, detail views and compact token totals with exact JSON
     });
     const result = await invoke(['stats', '--scope', scope]);
     assert.equal(result.code, 0, result.err);
+    assert.ok(result.out.startsWith('净收益：未验证'));
+    assert.ok(result.out.includes('费用证明：暂无（0 次已核实比较）'));
+    assert.ok(!result.out.includes('USD 0.000000000'));
     assert.ok(result.out.includes('折叠次数：7'));
     assert.ok(result.out.includes('查看详情次数：5'));
     assert.ok(result.out.includes('累计折叠 token（估算）：1.25B'));
@@ -95,6 +98,13 @@ test('stats shows folding, detail views and compact token totals with exact JSON
       foldCount: 7, detailViewCount: 5,
       foldedTokensEstimated: '1250000000', foldedTokensDisplay: '1.25B',
     });
+    await new Store(join(directory, 'state')).recordMetrics(scope, {
+      certifiedComparisons: 1, savingNanoUsdLower: '1250000000',
+    });
+    const conditional = await invoke(['stats', '--scope', scope]);
+    assert.equal(conditional.code, 0, conditional.err);
+    assert.ok(conditional.out.startsWith('净收益：未验证'));
+    assert.ok(conditional.out.includes('证书假设下的节省下界累计：USD 1.250000000（1 次比较）'));
   });
 });
 

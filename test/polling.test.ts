@@ -81,7 +81,10 @@ for (const role of ['assistant', 'user']) test(`real hook folds marked historica
     await execute({ action: 'mark', scope, marks: [{ id, disposition: 'foldable', summary: '人工摘要 原样保留🙂' }] });
     const folded = await onRequest(body, context) as typeof body;
     assert.ok(folded.messages[0]!.content.startsWith('[context-folding polling'));
-    assert.equal(folded.messages[1]!.content.split('\n\n<context-budget>')[0], original, 'Latest user content stays intact before the existing budget guide');
+    const latest = folded.messages[1]!.content;
+    assert.equal(latest.slice(0, original.length), original, 'Latest user content stays intact before the recovery locator');
+    assert.match(latest.slice(original.length), /^\n\n<context-folding scope=[a-f0-9]{64}>\ntools\["context_folding"\]/);
+    assert.doesNotMatch(latest.slice(original.length), /<context-budget>|source-fold-markers|@context-fold/);
     assert.equal(folded.messages.length, 2);
     const read = JSON.parse(await execute({ action: 'read', scope, id, peek: true, limit: 24000 }));
     assert.equal(read.text, original);

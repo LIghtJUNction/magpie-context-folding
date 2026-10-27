@@ -66,11 +66,12 @@ async function scopeFor(directory: string) {
   return new Store(directory).scopeFor(JSON.stringify([context.session, '', '', '']));
 }
 
-test('no MCP tool still reports budget without creating an archive', async () => {
+test('no callable recovery tool leaves the request unchanged without an archive', async () => {
   await fixture(async directory => {
     const withoutTool = { ...body, tools: [] };
     const result = await onRequest(withoutTool, context);
-    assert.ok(JSON.stringify(result).includes('<context-budget>'));
+    assert.deepEqual(result, withoutTool);
+    assert.ok(!JSON.stringify(result).includes('<context-budget>'));
     assert.ok(!JSON.stringify(result).includes('Capacity:'));
     assert.ok(!JSON.stringify(result).includes('<context-folding scope='));
     assert.deepEqual(await readdir(directory), []);
@@ -90,23 +91,28 @@ test('Magpie timeout options are accepted and a cancelled hook leaves no archive
 
 test('marking, threshold, nested folding, exact paginated restoration, keep and dedup', async () => {
   await fixture(async (directory, url) => {
-    const ctx = { ...context, options: { thresholdTokens: 1, keepRecentMessages: 1, accounting: { url } } };
-    await onRequest(body, ctx);
+    const ctx = { ...context, state: {}, options: { thresholdTokens: 1, keepRecentMessages: 1, accounting: { url } } };
+    const send = async () => {
+      const output = await onRequest(body, ctx);
+      await onResponse({}, { ...ctx, success: true, request: output });
+      return output;
+    };
+    await send();
     const scope = await scopeFor(directory);
     const id = extractSpans(body, 'chat').find(span => span.text === oldText)?.id;
     assert.ok(id);
-    assert.equal(JSON.stringify(await onRequest(body, ctx)).includes('[context-folding id='), false);
+    assert.equal(JSON.stringify(await send()).includes('[context-folding id='), false);
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Completed research. '.repeat(100) }] });
-    const first = await onRequest(body, ctx);
+    const first = await send();
     assert.ok(JSON.stringify(first).includes('[context-folding id='));
     assert.ok(!JSON.stringify(first).includes(JSON.stringify(oldText).slice(1, -1)));
     assert.ok(JSON.stringify(first).includes('Important system requirement.'));
     assert.ok(JSON.stringify(first).includes('Continue with the current task.'));
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Research completed. '.repeat(50) }] });
-    await onRequest(body, ctx);
+    await send();
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Research completed.' }] });
-    await onRequest(body, ctx);
-    await onRequest(body, ctx);
+    await send();
+    await send();
     const snapshot = await new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => structuredClone(snapshot));
     const entry = snapshot.entries.find(entry => entry.id === id);
     assert.ok(entry);
@@ -130,9 +136,9 @@ test('marking, threshold, nested folding, exact paginated restoration, keep and 
     assert.equal(text, oldText);
     assert.ok(JSON.parse(await execute({ scope, action: 'forget' })).error, 'active recovery data cannot be discarded');
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'keep' }] });
-    assert.ok(JSON.stringify(await onRequest(body, ctx)).includes(JSON.stringify(oldText).slice(1, -1)));
+    assert.ok(JSON.stringify(await send()).includes(JSON.stringify(oldText).slice(1, -1)));
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'foldable', summary: 'Research completed.' }] });
-    assert.ok(JSON.stringify(await onRequest(body, ctx)).includes('[context-folding id='));
+    assert.ok(JSON.stringify(await send()).includes('[context-folding id='));
     const reused = await new Store(directory).transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot.entries.find(entry => entry.id === id));
     assert.equal(reused?.layers.length, 3, 'folding again after keep reuses the saved layer');
     await execute({ scope, action: 'mark', marks: [{ id, disposition: 'keep' }] });
@@ -173,7 +179,9 @@ test('summary-first folds preserve source roles, exact excerpt ranges and the fu
       assert.deepEqual(requests[0]?.before, request);
       assert.deepEqual(requests[0]?.after, folded, 'metadata and the entire guide must be charged');
       assert.ok(JSON.stringify(requests[0]?.after).includes(`<context-folding scope=${scope}>`));
-      assert.ok(JSON.stringify(requests[0]?.after).includes('Stable, verified code: use the source-fold-markers skill to add paired @context-fold comments; https://github.com/LIghtJUNction/magpie-context-folding/tree/main/context-folding/skills/source-fold-markers (copy the whole directory into a discovered skills directory).'));
+      assert.ok(!JSON.stringify(requests[0]?.after).includes('source-fold-markers'));
+      assert.ok(!JSON.stringify(requests[0]?.after).includes('<context-budget>'));
+      assert.ok(JSON.stringify(requests[0]?.after).includes('<context-folding-receipts>'));
       assert.equal(JSON.parse(await execute({ scope, action: 'read', id: span.id, limit: 6 })).text, text.slice(0, 6));
     });
   }
@@ -361,14 +369,14 @@ test('script gets only eligible originals and a missing summary uses truthful re
   });
 });
 
-test('switching models keeps a self-inclusive estimate without plugin-owned capacity or archiving', async () => {
+test('switching models with no spans adds no estimates, capacity claims or archive', async () => {
   await fixture(async directory => {
     for (const model of ['small-window-model', 'large-window-model']) {
       const request = { ...body, model, messages: [] };
       const output = await onRequest(request, { ...context, model });
       const text = JSON.stringify(output);
-      const used = Number(text.match(/Estimate: (\d+) tokens/)?.[1]);
-      assert.equal(used, Math.ceil(Buffer.byteLength(text) / 4));
+      assert.deepEqual(output, request);
+      assert.ok(!text.includes('<context-budget>'));
       assert.ok(!text.includes('Capacity:'));
       assert.ok(!text.includes('used ratio'));
       assert.ok(!text.includes('remaining'));

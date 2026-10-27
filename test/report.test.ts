@@ -129,6 +129,27 @@ test('report excludes folded entries covered by nested groups and retains indepe
   });
 });
 
+test('report leads with unverified benefit for estimates and conditional cost bounds', async () => {
+  await fixture(async (directory, scope) => {
+    const unverified = renderReport(await collectReport(scope));
+    assert.ok(unverified.includes('<h1>净收益未验证</h1>'));
+    assert.ok(unverified.includes('<p class="money">无费用证明</p>'));
+    assert.ok(unverified.includes('请求体积估算不能证明省钱或提速'));
+    assert.ok(unverified.includes('未知，不按零计算'));
+
+    await new Store(join(directory, 'state')).transaction(scope, false, 64 * 1024 * 1024, snapshot => {
+      snapshot.metrics.certifiedComparisons = 1;
+      snapshot.metrics.savingNanoUsdLower = '1250000000';
+    });
+    const conditional = renderReport(await collectReport(scope));
+    assert.ok(conditional.includes('<h1>净收益未验证</h1>'));
+    assert.ok(conditional.includes('已有条件下界；实际账单节省与耗时改善仍未测得'));
+    assert.ok(conditional.includes('<p class="money">1.250000000</p>'));
+    assert.ok(conditional.includes('actualBillSavingUsd = null'));
+    assert.ok(!conditional.includes('<p class="money">无费用证明</p>'));
+  });
+});
+
 test('report refuses overwrite, symlink, relative path and secret-bearing invalid options', async () => {
   await fixture(async (directory, scope, invoke) => {
     const output = join(directory, 'existing.html');
