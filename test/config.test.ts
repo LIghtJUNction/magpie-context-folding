@@ -25,19 +25,23 @@ async function fixture(run: (f: { root: string; project: string; global: string;
   }
 }
 
-test('annotation-only defaults and optional context budget', async () => {
+test('CLI-only defaults use a savings margin and keep optional budget hints off', async () => {
   await fixture(async f => {
     const options = await loadOptions(undefined, f.project);
     assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1,
-      reserveOutputTokens: 0, contextWindowTokens: undefined, gatewayTimeoutMs: undefined, recoveryToolName: undefined });
+      minSavingsTokens: 256, budgetHints: false, reserveOutputTokens: 0, contextWindowTokens: undefined,
+      gatewayTimeoutMs: undefined, shellToolName: undefined, recoveryCommand: undefined });
     assert.deepEqual(parseOptions({ delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000 }), {
       enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000,
+      minSavingsTokens: 256, budgetHints: false,
     });
     const { config, sources } = await loadConfig(f.project);
     assert.deepEqual(config.annotations, { enabled: true, default_fold: true, keep: [] });
     assert.deepEqual(config.gc, { enabled: false, strength: 'conservative', idle_seconds: 2_592_000,
       max_uses: 2, retention_seconds: 2_592_000, auto_purge: false });
     assert.deepEqual(config.magpie, {});
+    assert.equal(config.folding.min_savings_tokens, 256);
+    assert.equal(config.folding.budget_hints, false);
     assert.deepEqual(sources, { global: f.global, project: null });
   });
 });
@@ -45,7 +49,7 @@ test('annotation-only defaults and optional context budget', async () => {
 test('global/project/explicit fields merge without injecting defaults into partial layers', async () => {
   await fixture(async f => {
     await f.file(f.global, 'version=1\n[folding]\ndelay_requests=3\ncontext_window_tokens=128000\nreserve_output_tokens=8000\n[magpie]\ngateway_timeout_ms=700\n');
-    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n[magpie]\nrecovery_tool_name="archive.recall"\n');
+    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n[magpie]\nshell_tool_name="archive.shell"\n');
     const explicit = { enabled: false, delayRequests: 0 };
     const before = structuredClone(explicit);
     const options = await loadOptions(explicit, f.project);
@@ -53,7 +57,7 @@ test('global/project/explicit fields merge without injecting defaults into parti
     assert.equal(options.contextWindowTokens, 128000);
     assert.equal(options.reserveOutputTokens, 8000);
     assert.equal(options.gatewayTimeoutMs, 700);
-    assert.equal(options.recoveryToolName, 'archive.recall');
+    assert.equal(options.shellToolName, 'archive.shell');
     assert.equal(options.enabled, false);
     assert.deepEqual(explicit, before);
     assert.equal((await loadOptions({}, f.project)).delayRequests, 2);
@@ -65,6 +69,34 @@ test('global/project/explicit fields merge without injecting defaults into parti
     assert.equal(shared.config.gc.idle_seconds, 0.5);
     assert.equal(shared.config.gc.retention_seconds, 9);
     assert.equal(shared.config.gc.max_uses, 2);
+  });
+});
+
+test('CLI recovery and savings fields merge globally, per project and through explicit overrides', async () => {
+  await fixture(async f => {
+    await f.file(f.global, '[folding]\nmin_savings_tokens=1024\nbudget_hints=true\n'
+      + '[magpie]\nshell_tool_name="global.shell"\nrecovery_command="global-ctxf"\n');
+    await f.file(join(f.project, '.context-folding.toml'), '[folding]\nmin_savings_tokens=512\n'
+      + '[magpie]\nshell_tool_name="functions.exec"\n');
+    const inherited = await loadOptions({}, f.project);
+    assert.equal(inherited.minSavingsTokens, 512);
+    assert.equal(inherited.budgetHints, true);
+    assert.equal(inherited.shellToolName, 'functions.exec');
+    assert.equal(inherited.recoveryCommand, 'global-ctxf');
+    const explicit = { minSavingsTokens: 0, budgetHints: false, recoveryCommand: "'/opt/local bun' '/app/cli.ts'" };
+    const before = structuredClone(explicit);
+    const overridden = await loadOptions(explicit, f.project);
+    assert.equal(overridden.minSavingsTokens, 0);
+    assert.equal(overridden.budgetHints, false);
+    assert.equal(overridden.shellToolName, 'functions.exec');
+    assert.equal(overridden.recoveryCommand, explicit.recoveryCommand);
+    assert.deepEqual(explicit, before);
+    const effective = await loadConfig(f.project, { folding: { budget_hints: false }, magpie: { recovery_command: 'local-ctxf' } });
+    assert.equal(effective.config.folding.min_savings_tokens, 512);
+    assert.equal(effective.config.folding.budget_hints, false);
+    assert.equal(effective.config.magpie.shell_tool_name, 'functions.exec');
+    assert.equal(effective.config.magpie.recovery_command, 'local-ctxf');
+    assert.equal(parseOptions({ minSavingsTokens: Number.MAX_SAFE_INTEGER }).minSavingsTokens, Number.MAX_SAFE_INTEGER);
   });
 });
 
@@ -123,15 +155,39 @@ test('removed modes, thresholds, policy and accounting explain annotation migrat
   });
 });
 
+test('removed MCP recovery selectors explain the CLI migration without exposing values', async () => {
+  await fixture(async f => {
+    const safeMigration = (error: unknown): boolean => {
+      assert.ok(error instanceof ConfigError);
+      assert.match(error.message, /removed.*MCP.*removed/);
+      assert.match(error.message, /shell_?tool_?name|shellToolName/);
+      assert.match(error.message, /recovery_command|recoveryCommand/);
+      assert.ok(!error.message.includes('private-secret'));
+      return true;
+    };
+    assert.throws(() => parseOptions({ recoveryToolName: 'private-secret' }), safeMigration);
+    await assert.rejects(loadOptions({ recoveryToolName: 'private-secret' }, f.project), safeMigration);
+    await f.file(f.global, '[magpie]\nrecovery_tool_name="private-secret"\n');
+    await assert.rejects(loadOptions({}, f.project), safeMigration);
+    await rm(f.global);
+    await f.file(join(f.project, '.context-folding.toml'), '[magpie]\nrecovery_tool_name="private-secret"\n');
+    await assert.rejects(loadConfig(f.project), safeMigration);
+  });
+});
+
 test('strict schema and numeric limits report safe source paths', async () => {
   await fixture(async f => {
     for (const content of ['unknown=1', 'version=2', 'version=true', 'folding=false',
       '[folding]\nunknown=1', '[folding]\ndelay_requests=-1', '[folding]\ndelay_requests=0.5',
       '[folding]\ncontext_window_tokens=0', '[folding]\nreserve_output_tokens=-1',
       '[folding]\nmax_session_bytes=67108865', '[folding]\nenabled=1',
+      '[folding]\nmin_savings_tokens=-1', '[folding]\nmin_savings_tokens=0.5',
+      '[folding]\nmin_savings_tokens=9007199254740992', '[folding]\nbudget_hints=1',
       '[annotations]\nkeep=[1]', '[annotations]\nkeep=[""]', '[gc]\nstrength="invalid"',
       '[gc]\nidle_seconds=315576001', '[gc]\nmax_uses=1.5', '[gc]\nauto_purge=1',
-      '[magpie]\ngateway_timeout_ms=99', '[magpie]\nrecovery_tool_name="private secret"']) {
+      '[magpie]\ngateway_timeout_ms=99', '[magpie]\nshell_tool_name="private secret"',
+      '[magpie]\nshell_tool_name=""', '[magpie]\nrecovery_command=""',
+      '[magpie]\nrecovery_command="   "', '[magpie]\nrecovery_command="private\\nsecret"']) {
       await f.file(f.global, content);
       await assert.rejects(loadOptions({}, f.project), (error: unknown) => {
         assert.ok(error instanceof ConfigError, content);
@@ -142,7 +198,13 @@ test('strict schema and numeric limits report safe source paths', async () => {
     }
     await rm(f.global);
     for (const explicit of [false, [], { 'private-key': 'private-secret' }, { enabled: 1 },
-      { delayRequests: Number.MAX_SAFE_INTEGER + 1 }, { contextWindowTokens: 0 }]) {
+      { delayRequests: Number.MAX_SAFE_INTEGER + 1 }, { contextWindowTokens: 0 },
+      { minSavingsTokens: -1 }, { minSavingsTokens: 0.5 }, { minSavingsTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { budgetHints: 1 }, { budgetHints: 'false' }, { shellToolName: '' }, { shellToolName: 'private-secret name' },
+      { shellToolName: 'a'.repeat(201) }, { recoveryCommand: '' }, { recoveryCommand: '   ' },
+      { recoveryCommand: 'private-secret\ncommand' }, { recoveryCommand: 'private-secret\rcommand' },
+      { recoveryCommand: 'private-secret\0command' }, { recoveryCommand: 'a'.repeat(4097) }]) {
+      assert.throws(() => parseOptions(explicit), ConfigError);
       await assert.rejects(loadOptions(explicit, f.project), (error: unknown) => {
         assert.ok(error instanceof ConfigError);
         assert.ok(!error.message.includes('private-key'));

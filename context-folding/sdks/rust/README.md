@@ -10,7 +10,7 @@ uv sync
 
 Configure `Config.python` with the absolute path to `context-folding/.venv/bin/python` created by uv, or use another Python interpreter where the package is installed. The default `python3` must itself be able to import `context_folding`.
 
-This is the same engine used by `ctxf fold` and `ctxf mcp`. Point `Config.state` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+This is the same engine used by `ctxf fold` and `ctxf rpc`. Point `Config.state` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
 
 Add the Rust crate as a path dependency, adjusting the path for your application:
 

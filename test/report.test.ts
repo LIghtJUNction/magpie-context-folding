@@ -208,7 +208,7 @@ test('real annotation projection reports full request sizes, response state and 
   await fixture(async (directory) => {
     const context = { protocol: 'chat', model: 'MODEL_PRIVATE_SECRET', session: 'SESSION_PRIVATE_SECRET', cwd: directory,
       options: { delayRequests: 0 }, state: {} };
-    const input = { model: context.model, tools: [{ type: 'function', function: { name: 'context_folding' } }], messages: [
+    const input = { model: context.model, tools: [{ type: 'function', function: { name: 'exec_command' } }], messages: [
       { role: 'assistant', content: '<!-- @context-fold begin completed -->\n' + '正文 PRIVATE_SECRET '.repeat(800) + '\n<!-- @context-fold end completed -->' },
       { role: 'user', content: 'Continue the task.' },
     ] };
@@ -241,7 +241,7 @@ test('real annotation projection reports full request sizes, response state and 
     assert.match(pendingHtml, /请求投影待确认/);
     assert.match(pendingHtml, /原始请求/);
     assert.match(pendingHtml, /最终投影/);
-    assert.match(pendingHtml, /包含预算提示开销/);
+    assert.match(pendingHtml, /包含系统指导等开销/);
     assert.ok(pendingHtml.includes(`${Math.ceil(beforeBytes / 4).toLocaleString('en-US')} → ${Math.ceil(afterBytes / 4).toLocaleString('en-US')}`));
     assert.doesNotMatch(pendingHtml, /未识别的原因|没有记录前后字节数|批准状态未记录/);
     assert.deepEqual(await readFile(database), before);
@@ -269,7 +269,7 @@ test('request reports distinguish grace periods, absent current folds and unsucc
   await fixture(async directory => {
     const context = { protocol: 'chat', model: 'fixture', session: 'report-lifecycle', cwd: directory,
       options: { delayRequests: 1 }, state: {} };
-    const input = { tools: [{ type: 'function', function: { name: 'context_folding' } }], messages: [
+    const input = { tools: [{ type: 'function', function: { name: 'exec_command' } }], messages: [
       { role: 'assistant', content: '<!-- @context-fold begin done -->\n' + 'completed work '.repeat(1000) + '\n<!-- @context-fold end done -->' },
       { role: 'user', content: 'Continue.' },
     ] };

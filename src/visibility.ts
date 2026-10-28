@@ -7,7 +7,7 @@ import { formatTokenCount } from './metrics.js';
 
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const scopeSchema = z.string().regex(/^[a-f0-9]{64}$/);
-const reasonSchema = z.enum(['annotated-regions-folded', 'annotation-grace-period', 'no-eligible-annotations', 'unrecognized']);
+const reasonSchema = z.enum(['annotated-regions-folded', 'annotation-grace-period', 'no-eligible-annotations', 'insufficient-net-savings', 'unrecognized']);
 const statusSchema = z.enum(['pending', 'confirmed', 'failed', 'unverified']);
 const observationSchema = z.object({
   requestId: z.string().uuid(), observedAt: count.max(8_640_000_000_000_000), status: statusSchema,

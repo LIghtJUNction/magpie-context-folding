@@ -17,19 +17,6 @@ def encoded(value):
     return json.dumps(value, ensure_ascii=False).encode("utf-8") + b"\n"
 
 
-def initialize(version="2025-11-25", request_id=1):
-    return {"jsonrpc": "2.0", "id": request_id, "method": "initialize", "params": {
-        "protocolVersion": version, "capabilities": {},
-        "clientInfo": {"name": "transport-test", "version": "1"},
-    }}
-
-
-def mcp_call(request_id, arguments):
-    return {"jsonrpc": "2.0", "id": request_id, "method": "tools/call", "params": {
-        "name": "context_folding", "arguments": arguments,
-    }}
-
-
 class TransportTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -128,7 +115,7 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(replies[0]["error"]["code"], expected)
             self.assertNotIn("private-style", json.dumps(replies))
 
-    def test_comment_styles_public_rpc_and_mcp_forwarding(self):
+    def test_comment_styles_public_rpc_forwarding(self):
         source = '(*! @context-fold begin custom !*)\r\n' + '原文🙂\r\n' * 20 + '(*! @context-fold end custom !*)'
         request = {"action": "annotate", "scope": "bridge", "text": source, "language": "custom",
                    "commentStyles": [{"start": "(*!", "end": "!*)"}]}
@@ -137,11 +124,10 @@ class TransportTests(unittest.TestCase):
         annotated = replies[0]["result"]
         self.assertEqual(len(annotated["regions"]), 1)
         self.assertEqual(annotated["commentStyles"], request["commentStyles"])
-        requests = [initialize(), mcp_call(2, {"action": "read-source", "scope": "bridge", "id": annotated["id"]})]
-        code, replies = self.run_cli("mcp", b"".join(map(encoded, requests)))
+        request = {"action": "read-source", "scope": "bridge", "id": annotated["id"]}
+        code, replies = self.run_cli("rpc", encoded(request))
         self.assertEqual(code, 0, replies)
-        self.assertFalse(replies[1]["result"]["isError"])
-        view = json.loads(replies[1]["result"]["content"][0]["text"])
+        view = replies[0]["result"]
         self.assertEqual(len(view["foldedRegions"]), 1)
         code, replies = self.run_cli("rpc", encoded({"action": "resolve", "scope": "bridge", "value": view["text"]}))
         self.assertEqual(code, 0, replies)
@@ -269,74 +255,24 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(replies[0]["error"]["code"], "input_too_large")
         self.assertIn("result", replies[1])
 
-    def test_mcp_initialize_negotiate_notifications_ping_and_list(self):
-        for version in ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "future"):
-            with self.subTest(version=version):
-                requests = [initialize(version),
-                    {"jsonrpc": "2.0", "method": "notifications/initialized"},
-                    {"jsonrpc": "2.0", "method": "unknown/notification"},
-                    {"jsonrpc": "2.0", "id": 2, "method": "ping"},
-                    {"jsonrpc": "2.0", "id": "list", "method": "tools/list"}]
-                code, replies = self.run_cli("mcp", b"".join(map(encoded, requests)))
-                self.assertEqual(code, 0)
-                self.assertEqual(len(replies), 3)
-                expected = version if version != "future" else "2025-11-25"
-                self.assertEqual(replies[0]["result"]["protocolVersion"], expected)
-                self.assertEqual(replies[1], {"jsonrpc": "2.0", "id": 2, "result": {}})
-                tools = replies[2]["result"]["tools"]
-                self.assertEqual([tool["name"] for tool in tools], ["context_folding"])
-                self.assertEqual(tools[0]["inputSchema"]["required"], ["action", "scope"])
-                for action in ("resolve", "gc", "roots", "pin", "skills"):
-                    self.assertIn(action, tools[0]["inputSchema"]["properties"]["action"]["enum"])
+    def test_removed_mcp_command_fails_without_opening_archive(self):
+        for args in (("mcp", "--state", self.state), ("--state", self.state, "mcp")):
+            with self.subTest(args=args):
+                result = subprocess.run([sys.executable, "-m", "context_folding", *args],
+                    input=b'{"action":"put","scope":"test","text":"must not run"}\n',
+                    capture_output=True, env=self.env, cwd=PACKAGE, timeout=30)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, b"")
+                self.assertEqual(result.stderr, b"MCP support was removed; use ctxf CLI commands or SDK RPC.\n")
+                self.assertFalse(Path(self.state).exists())
 
-    def test_mcp_tool_application_errors_and_success_are_content(self):
-        requests = [initialize(), mcp_call(2, {"action": "unknown", "scope": "test"}),
-            mcp_call(3, {"action": "put", "scope": "test", "text": "original"}),
-            mcp_call(4, {}),
-            {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "other", "arguments": {}}}]
-        code, replies = self.run_cli("mcp", b"".join(map(encoded, requests)))
-        self.assertEqual(code, 0)
-        failure = replies[1]["result"]
-        self.assertTrue(failure["isError"])
-        self.assertIn("error", json.loads(failure["content"][0]["text"]))
-        success = replies[2]["result"]
-        self.assertFalse(success["isError"])
-        self.assertIn("id", json.loads(success["content"][0]["text"]))
-        self.assertTrue(replies[3]["result"]["isError"])
-        self.assertEqual(replies[4]["error"]["code"], -32602)
-
-    def test_mcp_invalid_frames_and_envelopes(self):
-        frames = [b"secret-invalid\n", b"\xff\n", encoded([]),
-            encoded({"jsonrpc": "1.0", "id": 1, "method": "ping"}),
-            encoded({"jsonrpc": "2.0", "id": True, "method": "ping"}),
-            encoded(initialize()),
-            encoded({"jsonrpc": "2.0", "id": 7, "method": "tools/list", "params": []}),
-            encoded({"jsonrpc": "2.0", "id": 8, "method": "unknown"}),
-            encoded({"jsonrpc": "2.0", "id": 9, "method": "ping"})]
-        code, replies = self.run_cli("mcp", b"".join(frames))
-        self.assertEqual(code, 0)
-        self.assertEqual([reply["error"]["code"] for reply in replies[:5]], [-32700, -32700, -32600, -32600, -32600])
-        self.assertEqual(replies[6]["error"]["code"], -32602)
-        self.assertEqual(replies[7]["error"]["code"], -32601)
-        self.assertEqual(replies[8]["result"], {})
-        self.assertNotIn("secret-invalid", json.dumps(replies))
-
-    def test_mcp_oversized_frame_then_success(self):
-        code, replies = self.run_cli("mcp", b"x" * (MAX_INPUT_BYTES + 1024) + b"\n" + encoded(initialize()))
-        self.assertEqual(code, 0)
-        self.assertEqual(len(replies), 2)
-        self.assertEqual(replies[0]["error"]["code"], -32600)
-        self.assertIn("protocolVersion", replies[1]["result"])
-
-    def test_notification_does_not_mutate_archive(self):
-        notification = mcp_call(2, {"action": "put", "scope": "test", "text": "must not run"})
-        del notification["id"]
-        code, replies = self.run_cli("mcp", encoded(initialize()) + encoded(notification))
-        self.assertEqual(code, 0)
-        self.assertEqual(len(replies), 1)
-        code, replies = self.run_cli("call", encoded({"action": "list", "scope": "test"}))
-        self.assertEqual(code, 0)
-        self.assertNotIn("must not run", json.dumps(replies))
+    def test_help_exposes_cli_and_rpc_commands(self):
+        result = subprocess.run([sys.executable, "-m", "context_folding", "--help"],
+            capture_output=True, env=self.env, cwd=PACKAGE, timeout=30)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(b"rpc", result.stdout)
+        self.assertIn(b"fold", result.stdout)
+        self.assertNotIn(b"mcp", result.stdout.lower())
 
 
 if __name__ == "__main__":

@@ -10,6 +10,15 @@ import { test } from 'node:test';
 import { bodyFor, marked, payload, progress } from './helpers.js';
 
 type Reply = { id: unknown; ok: boolean; result?: any; error?: { code: string; message: string } };
+const shellBody = (): Record<string, unknown> => ({ ...bodyFor('chat'), tools: [{ type: 'function', function: { name: 'exec_command',
+  parameters: { type: 'object', properties: { cmd: { type: 'string' } }, required: ['cmd'] } } }] });
+
+async function cli(call: (request: Record<string, unknown>) => Promise<Reply>, argv: string[]): Promise<Reply> {
+  const reply = await call({ op: 'cli', argv });
+  if (reply.ok && reply.result.exit_code === 0) reply.result = JSON.parse(reply.result.stdout);
+  return reply;
+}
+
 const assistantText = (body: any): string => body.messages.find((message: any) => message.role === 'assistant').content;
 
 async function withBridge(run: (f: {
@@ -55,9 +64,9 @@ async function withBridge(run: (f: {
   }
 }
 
-test('Harbor bridge drives the real delayed projection, exact recovery and completion metrics', async () => {
-  await withBridge(async ({ call }) => {
-    const original = bodyFor('chat');
+test('Harbor bridge drives delayed projection, a real CLI recovery process and completion metrics', async () => {
+  await withBridge(async ({ directory, call }) => {
+    const original = shellBody();
     const first = await call({ op: 'project', mode: 'folding', body: original });
     assert.equal(first.ok, true);
     assert.match(first.result.scope, /^[a-f0-9]{64}$/);
@@ -81,24 +90,29 @@ test('Harbor bridge drives the real delayed projection, exact recovery and compl
     assert.equal((original.messages as any[])[2].content, marked());
     await call({ op: 'response', success: true });
 
-    const status = await call({ op: 'recover', args: { action: 'status' } });
+    const status = await cli(call, ['status', '--state-dir', join(directory, 'archive')]);
     assert.equal(status.result.metrics.successfulHookRequests, 3);
     assert.equal(status.result.metrics.successfulFoldedRequests, 1);
     assert.equal(status.result.metrics.itemsFolded, 1);
-    const recovered = await call({ op: 'recover', args: { action: 'read', id: hash, limit: 24000 } });
+    const recovered = await cli(call, ['read', '--id', hash!, '--limit', '24000', '--json']);
     assert.equal(recovered.result.text, payload);
-    assert.equal(recovered.result.kept, true);
+    assert.equal(recovered.result.kept, false);
     assert.equal(recovered.result.nextOffset, null);
 
     const kept = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
-    assert.equal(assistantText(kept.result.body), marked());
+    assert.equal(assistantText(kept.result.body), compact);
+    await call({ op: 'response', success: true });
+    const restored = await cli(call, ['read', '--id', hash!, '--limit', '1', '--restore', '--json']);
+    assert.equal(restored.result.kept, true);
+    const expanded = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
+    assert.equal(assistantText(expanded.result.body), marked());
     await call({ op: 'response', success: true });
   });
 });
 
 test('Harbor baseline remains byte-identical and never creates a folding archive', async () => {
   await withBridge(async ({ directory, call }) => {
-    const body = bodyFor('chat');
+    const body = shellBody();
     const baseline = await call({ op: 'project', mode: 'baseline', body });
     assert.equal(baseline.ok, true);
     assert.deepEqual(baseline.result.body, body);
@@ -106,24 +120,29 @@ test('Harbor baseline remains byte-identical and never creates a folding archive
     assert.equal(baseline.result.input_bytes, baseline.result.output_bytes);
     await call({ op: 'response', success: false });
     assert.equal(existsSync(join(directory, 'archive', 'state.sqlite')), false);
-    assert.equal((await call({ op: 'recover', args: { action: 'status' } })).error?.code, 'archive_unavailable');
+    assert.equal((await cli(call, ['status'])).error?.code, 'archive_unavailable');
     assert.equal((await call({ op: 'project', mode: 'folding', body })).error?.code, 'mode_changed');
   });
 });
 
 test('Harbor recovery cannot write to the host or read another trial scope', async () => {
   await withBridge(async ({ call }) => {
-    await call({ op: 'project', mode: 'folding', body: bodyFor('chat') });
+    await call({ op: 'project', mode: 'folding', body: shellBody() });
     await call({ op: 'response', success: true });
     for (const action of ['paste', 'forget', 'stats', 'mark']) {
-      const denied = await call({ op: 'recover', args: { action, path: '/tmp/forbidden' } });
+      const denied = await call({ op: 'cli', argv: [action, '--path', '/tmp/forbidden'] });
       assert.equal(denied.error?.code, 'unsupported_action');
     }
-    const other = await call({ op: 'recover', args: { action: 'status', scope: 'f'.repeat(64) } });
+    const other = await call({ op: 'cli', argv: ['status', '--scope', 'f'.repeat(64)] });
     assert.equal(other.error?.code, 'scope_mismatch');
-    const invalidArgs = await call({ op: 'recover', args: { action: 'status', path: '/tmp/forbidden' } });
-    assert.equal(invalidArgs.result.error, 'Invalid context_folding arguments');
-    const status = await call({ op: 'recover', args: { action: 'status' } });
+    const otherDirectory = await call({ op: 'cli', argv: ['status', '--state-dir=/tmp/other-trial'] });
+    assert.equal(otherDirectory.error?.code, 'scope_mismatch');
+    const otherEqualsScope = await call({ op: 'cli', argv: ['status', '--scope=' + 'f'.repeat(64)] });
+    assert.equal(otherEqualsScope.error?.code, 'scope_mismatch');
+    const invalidArgs = await call({ op: 'cli', argv: ['status', '--path', '/tmp/forbidden'] });
+    assert.equal(invalidArgs.result.exit_code, 1);
+    assert.match(invalidArgs.result.stderr, /Invalid command options/);
+    const status = await cli(call, ['status']);
     assert.equal(status.ok, true);
     assert.equal(status.result.entries, 1);
   });
@@ -135,14 +154,14 @@ test('Harbor JSONL protocol survives bad input and enforces one completion per r
     assert.equal(malformed.id, null);
     assert.equal(malformed.error?.code, 'invalid_json');
     assert.equal((await call({ op: 'response', success: true })).error?.code, 'no_request');
-    const body = bodyFor('chat');
+    const body = shellBody();
     await call({ op: 'project', mode: 'folding', body });
     assert.equal((await call({ op: 'project', mode: 'folding', body })).error?.code, 'request_pending');
-    assert.equal((await call({ op: 'recover', args: { action: 'status' } })).error?.code, 'request_pending');
+    assert.equal((await cli(call, ['status'])).error?.code, 'request_pending');
     assert.equal((await call({ op: 'response', success: 'true' })).error?.code, 'invalid_request');
     assert.equal((await call({ op: 'response', success: false })).ok, true);
     assert.equal((await call({ op: 'response', success: false })).error?.code, 'no_request');
-    const status = await call({ op: 'recover', args: { action: 'status' } });
+    const status = await cli(call, ['status']);
     assert.equal(status.result.metrics.failedHookRequests, 1);
     assert.equal(status.result.metrics.successfulHookRequests, 0);
   });
