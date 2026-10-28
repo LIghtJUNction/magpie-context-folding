@@ -36,11 +36,6 @@ ROOT = BENCH.parents[1]
 SYSTEM = """Complete the user's task in the sandbox using terminal and read_file.
 Use read_file for complete source files; use terminal to edit and test files.
 When complete, give a short final answer without tool calls.
-Proactively mark completed temporary work that may need later retrieval. In
-conversation, use whole-line <!-- @context-fold begin LABEL --> and
-<!-- @context-fold end LABEL --> comments. In source, use the same directives
-inside valid whole-line comments for that language. Match labels and keep
-conclusions, constraints, failures and next steps outside. Never calculate hashes.
 Never read or modify /tests or verifier logs.
 """
 
@@ -434,7 +429,9 @@ class ScriptedSmokeAgent(MagpieAgent):
         step, self._step = self._step, self._step + 1
         content, name, args = "", "terminal", {"command": "printf 'smoke checkpoint\\n'"}
         if step == 0:
-            content = ("<!-- @context-fold begin smoke-notes -->\n" + "Synthetic recoverable note. " * 80
+            content = ("Smoke task status: the solution still needs to be applied and verified. "
+                       "The note below is synthetic, completed detail and contains no task constraints.\n"
+                       "<!-- @context-fold begin smoke-notes -->\n" + "Synthetic recoverable note. " * 240
                        + "\n<!-- @context-fold end smoke-notes -->\nKeep: solve the task and check output.")
         elif step == 2:
             text = "\n".join(m.get("content") or "" for m in payload["messages"] if m["role"] == "assistant")
@@ -448,7 +445,7 @@ class ScriptedSmokeAgent(MagpieAgent):
         elif step == 3:
             if self.options.mode == "folding":
                 recovered = json.loads(payload["messages"][-1]["content"])
-                if recovered.get("text") != "Synthetic recoverable note. " * 80:
+                if recovered.get("text") != "Synthetic recoverable note. " * 240:
                     raise RuntimeError("Smoke recovery did not return exact original text")
             args = {"command": self._solution}
         elif step >= 4:
