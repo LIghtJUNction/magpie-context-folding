@@ -12,7 +12,9 @@ from unittest.mock import patch
 from context_folding.claude_read import ENV, binding, client, expand, fold, key, start
 
 
-SOURCE = 'def work():\n' + ''.join(f'    value_{i} = {i!r}  # enough source content\n' for i in range(100)) + '    return value_99\n\nprint(work())\n'
+SOURCE = ('# @context-fold begin work\ndef work():\n'
+          + ''.join(f'    value_{i} = {i!r}  # enough source content\n' for i in range(100))
+          + '    return value_99\n# @context-fold end work\n\nprint(work())\n')
 
 
 def event(text=SOURCE):
@@ -24,6 +26,24 @@ def event(text=SOURCE):
 
 
 class ClaudeReadTests(unittest.TestCase):
+    def setUp(self):
+        self.config_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.config_dir.cleanup)
+        root = Path(self.config_dir.name)
+        config = root / "context-folding" / "config.toml"
+        config.parent.mkdir()
+        config.write_text("[folding]\ndelay_requests=0\n")
+        setting = patch.dict(os.environ, {"XDG_CONFIG_HOME": str(root)})
+        setting.start()
+        self.addCleanup(setting.stop)
+
+    def test_default_delay_preserves_post_tool_output_without_host_cycles(self):
+        config = Path(self.config_dir.name) / "context-folding" / "config.toml"
+        config.write_text("[folding]\ndelay_requests=1\n")
+        with tempfile.TemporaryDirectory() as directory, client(Path(directory), 'test', os.getcwd()) as archive:
+            for _ in range(3):
+                self.assertEqual(fold(event(), archive, 'test'), {})
+
     def test_fold_metadata_lines_and_exact_region_recovery(self):
         for newline in ('\n', '\r\n', '\r'):
             with self.subTest(newline=newline), tempfile.TemporaryDirectory() as directory:
@@ -50,62 +70,35 @@ class ClaudeReadTests(unittest.TestCase):
                     self.assertEqual(expand(root, identifier), original['tool_response'])
                     recovered = expand(root, identifier, region)
                     self.assertEqual(recovered['file']['startLine'], 2)
-                    self.assertEqual(recovered['file']['content'], ''.join(original['tool_response']['file']['content'].splitlines(keepends=True)[1:102]))
+                    self.assertEqual(recovered['file']['content'], ''.join(original['tool_response']['file']['content'].splitlines(keepends=True)[1:103]))
                 other = binding(key(root), 'session-b', original['cwd'])
                 with patch.dict(os.environ, {ENV: other}), self.assertRaises(Exception):
                     expand(root, identifier)
                 with patch.dict(os.environ, {ENV: ''}), self.assertRaises(ValueError):
                     expand(root, identifier)
 
-    def test_selective_nested_expansion_preserves_response_and_recovery(self):
-        padding = lambda name, indent: ''.join(f'{indent}{name}_{i} = {i}  # ' + 'x' * 70 + '\n' for i in range(15))
-        source = ('def root():\n' + padding('root_before', '    ') +
-                  '    def left():\n' + padding('left_before', '        ') +
-                  '        def leaf():\n' + padding('leaf_payload', '            ') +
-                  '    def right():\n' + padding('right_payload', '        ') +
-                  'def other():\n' + padding('other_payload', '    ') + 'tail = 1')
-        for newline in ('\n', '\r\n', '\r'):
-            with self.subTest(newline=newline), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                original = event(source.replace('\n', newline))
-                token = binding(key(root), original['session_id'], original['cwd'])
-                with patch.dict(os.environ, {'CLAUDE_ENV_FILE': str(root / 'env'), ENV: token}):
-                    start(original, root)
-                    with client(root, token, original['cwd']) as archive:
-                        output = fold(original, archive, token)
-                    text = output['hookSpecificOutput']['updatedToolOutput']['file']['content']
-                    identifier = re.search(r' expand ([0-9a-f]{24}) ', text).group(1)
-                    single = expand(root, identifier, ['root.left'], 'single')
-                    recursive = expand(root, identifier, ['root.left'], 'recursive')
-                    for response in (single, recursive):
-                        self.assertIn('root_before_0', response['file']['content'])
-                        self.assertIn('left_before_0', response['file']['content'])
-                        self.assertNotIn('right_payload_0', response['file']['content'])
-                        self.assertNotIn('other_payload_0', response['file']['content'])
-                        self.assertEqual(len(response['file']['content'].splitlines()), original['tool_response']['file']['numLines'])
-                        self.assertEqual({**response['file'], 'content': ''}, {**original['tool_response']['file'], 'content': ''})
-                        self.assertEqual(response['extra'], original['tool_response']['extra'])
-                        self.assertTrue(response['file']['content'].endswith('tail = 1'))
-                        for archived_id, region in re.findall(r' expand (\S+) ([0-9a-f]+)\]', response['file']['content']):
-                            self.assertEqual(archived_id, identifier)
-                            self.assertNotIn('NOT SOURCE', expand(root, archived_id, region)['file']['content'])
-                    self.assertNotIn('leaf_payload_0', single['file']['content'])
-                    self.assertIn('leaf_payload_0', recursive['file']['content'])
-                    leaf_id = re.search(r' expand [0-9a-f]{24} ([0-9a-f]+)\]', single['file']['content']).group(1)
-                    leaf = expand(root, identifier, [leaf_id], 'single')
-                    self.assertIn('leaf_payload_0', leaf['file']['content'])
-                    self.assertNotIn('right_payload_0', leaf['file']['content'])
-                    multiple = expand(root, identifier, ['root.left', 'root.right'], 'recursive')
-                    self.assertIn('leaf_payload_0', multiple['file']['content'])
-                    self.assertIn('right_payload_0', multiple['file']['content'])
-                    self.assertNotIn('other_payload_0', multiple['file']['content'])
-                    self.assertEqual(expand(root, identifier, ['*'], 'single'), original['tool_response'])
-                    self.assertEqual(expand(root, identifier, [], 'single'), output['hookSpecificOutput']['updatedToolOutput'])
-                    for mode in ('single', 'recursive'):
-                        with self.assertRaises(Exception):
-                            expand(root, identifier, ['root.left', 'unknown'], mode)
-                    with self.assertRaises(ValueError):
-                        expand(root, identifier, ['root'], 'invalid')
+    def test_selective_sibling_expansion_preserves_response_and_recovery(self):
+        source = "".join(f"# @context-fold begin {name}\n" + (f"{name} = '" + "x" * 80 + "'\n") * 40
+                         + f"# @context-fold end {name}\n" for name in ("left", "right"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = event(source)
+            token = binding(key(root), original['session_id'], original['cwd'])
+            with patch.dict(os.environ, {'CLAUDE_ENV_FILE': str(root / 'env'), ENV: token}):
+                start(original, root)
+                with client(root, token, original['cwd']) as archive:
+                    output = fold(original, archive, token)
+                text = output['hookSpecificOutput']['updatedToolOutput']['file']['content']
+                identifier = re.search(r' expand ([0-9a-f]{24}) ', text).group(1)
+                selected = expand(root, identifier, ['left'], 'single')
+                self.assertIn("left =", selected['file']['content'])
+                self.assertNotIn("right =", selected['file']['content'])
+                self.assertEqual(len(selected['file']['content'].splitlines()), len(source.splitlines()))
+                self.assertEqual(selected['extra'], original['tool_response']['extra'])
+                self.assertEqual(expand(root, identifier), original['tool_response'])
+                self.assertEqual(expand(root, identifier, ['*'], 'recursive'), original['tool_response'])
+                with self.assertRaises(Exception):
+                    expand(root, identifier, ['unknown'], 'single')
 
     def test_unsafe_schema_partial_source_and_non_python_unchanged(self):
         with tempfile.TemporaryDirectory() as directory, client(Path(directory), 'test', os.getcwd()) as archive:
@@ -123,8 +116,7 @@ class ClaudeReadTests(unittest.TestCase):
             cases.extend([event('value = """\n# @context-fold begin fake\nhello\n# @context-fold end fake\n"""\n'), event('x = 1\n')])
             for candidate in cases:
                 self.assertEqual(fold(candidate, archive, 'test'), {})
-            with self.assertRaises(ValueError):
-                fold(event('    return 1\n'), archive, 'test')
+            self.assertEqual(fold(event('    return 1\n'), archive, 'test'), {})
 
     def test_plugin_subprocess_start_hook_recovery_and_fail_open(self):
         script = Path(__file__).resolve().parents[1] / 'scripts/claude-read.py'

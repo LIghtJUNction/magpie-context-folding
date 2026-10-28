@@ -51,7 +51,7 @@ export function latestVersions(snapshot: Snapshot): Set<string> {
 }
 
 interface SearchMatch {
-  source: 'id' | 'path' | 'summary' | 'original';
+  source: 'id' | 'path' | 'summary' | 'original' | 'label';
   offset: number;
   endOffset: number;
   excerptOffset: number;
@@ -63,7 +63,7 @@ function searchMatch(node: Node, pattern: RegExp): SearchMatch | undefined {
   const fields: [SearchMatch['source'], string][] = 'children' in node
     ? [['summary', node.summary], ['id', node.id]]
     : [['original', node.text], ['summary', node.mark.disposition === 'foldable' ? node.mark.summary : ''],
-      ['path', node.version?.path ?? ''], ['id', node.id]];
+      ['label', node.annotation?.label ?? ''], ['path', node.version?.path ?? ''], ['id', node.id]];
   for (const [source, text] of fields) {
     const match = pattern.exec(text);
     if (!match) continue;
@@ -146,6 +146,7 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
         : { ...base, role: node.role, disposition: node.mark.disposition, layers: node.layers.length,
           currentLayer: node.layers.find(layer => layer.text === node.folded)?.id ?? 'original',
           ...(node.mark.disposition === 'foldable' ? { summary: node.mark.summary.slice(0, 240) } : { opening: node.text.slice(0, 100) }),
+          ...(node.annotation ? { annotation: node.annotation } : {}),
           ...(node.version ? { version: node.version, latestVersion: latest.has(id) } : {}) });
     }
     total++;

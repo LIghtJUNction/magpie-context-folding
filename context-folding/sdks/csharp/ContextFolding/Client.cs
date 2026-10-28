@@ -214,14 +214,15 @@ public sealed class Client : IAsyncDisposable
         return CallAsync(request, cancellationToken);
     }
 
+    public Task<JsonElement> FoldAsync(string scope, string text, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
+        => OperationAsync("fold", scope, fields, cancellationToken, ("text", text));
     public Task<JsonElement> PutAsync(string scope, string text, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("put", scope, fields, cancellationToken, ("text", text));
     public Task<JsonElement> ListAsync(string scope, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("list", scope, fields, cancellationToken);
     public Task<JsonElement> ReadAsync(string scope, string id, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("read", scope, fields, cancellationToken, ("id", id));
-    public Task<JsonElement> MarkAsync(string scope, string id, string disposition, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
-        => OperationAsync("mark", scope, fields, cancellationToken, ("id", id), ("disposition", disposition));
+
     public Task<JsonElement> RenderAsync(string scope, IReadOnlyList<string> ids, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("render", scope, fields, cancellationToken, ("ids", ids));
     public Task<JsonElement> ResolveAsync(string scope, object? value, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)

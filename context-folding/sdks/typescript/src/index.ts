@@ -142,6 +142,10 @@ export class ContextFoldingClient implements AsyncDisposable {
     });
   }
 
+  /** Immediately project explicitly marked text using the shared Python archive. */
+  fold<T = unknown>(scope: string, text: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
+    return this.call<T>({ ...fields, action: 'fold', scope, text }, signal);
+  }
   put<T = unknown>(scope: string, text: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'put', scope, text }, signal);
   }
@@ -150,9 +154,6 @@ export class ContextFoldingClient implements AsyncDisposable {
   }
   read<T = unknown>(scope: string, id: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'read', scope, id }, signal);
-  }
-  mark<T = unknown>(scope: string, id: string, disposition: 'foldable' | 'keep' | 'unmarked', fields: Fields = {}, signal?: AbortSignal): Promise<T> {
-    return this.call<T>({ ...fields, action: 'mark', scope, id, disposition }, signal);
   }
   render<T = unknown>(scope: string, ids: readonly string[], fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'render', scope, ids }, signal);
