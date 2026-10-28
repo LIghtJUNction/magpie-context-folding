@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Diagnostic size estimate for folding statistics, never a model context limit. */
+/** JSON size estimate for folding savings and statistics, never a model context limit. */
 export function estimateTokens(body: unknown): number {
   return Math.ceil(Buffer.byteLength(JSON.stringify(body)) / 4);
 }

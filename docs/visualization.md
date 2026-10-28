@@ -15,6 +15,10 @@ MAGPIE_CONTEXT_FOLDING_STATE_DIR=/absolute/state/directory \
 
 可加 `--scope S` 查看一个会话。scope 是恢复能力值，避免写入文件名或分享给其他会话；报告使用临时匿名会话编号。
 
+当前注释协议的记录会显示完整请求输入与返回投影的前后字节数、token 估算、本次替换段数、已有引用数、等待数及响应核实状态。每个会话只显示最近已记录的请求；宽限期、失败和未核实响应不会冒充成功折叠。缺少这些字段的旧归档明确显示“未记录”。
+
+需要持续在客户端查看时，可使用 `statusline`、`sessions` 和 `hook` 命令；Claude Code 状态行与 Codex 通知的接入配置见 [客户端显示接入](client-visibility.md)。
+
 ## 统计口径
 
 当前快照数量与全局累计数量不同。清理归档后，全局计数仍可能保留。估算 token 减少使用请求 JSON 的 UTF-8 字节数除以四，不能当作 tokenizer 实测。数据库大小是本地存储占用，不是请求大小。
