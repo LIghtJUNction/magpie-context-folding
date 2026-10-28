@@ -16,6 +16,7 @@ function stripBudgetText(text: string): string {
 
 /** Replace only our own system metadata, never remove marker-looking user text. */
 export function withoutBudget(body: Body, protocol: Protocol): Body {
+  // @context-fold begin withoutBudget-7b4cee3f11
   const result = structuredClone(body);
   if (protocol === 'chat' && Array.isArray(result.messages)) {
     result.messages = result.messages.filter(item => !(record(item) && item.role === 'system' && isBudget(item.content)));
@@ -43,9 +44,11 @@ export function withoutBudget(body: Body, protocol: Protocol): Body {
     }
   }
   return result;
+  // @context-fold end withoutBudget-7b4cee3f11
 }
 
 function addSystemBudget(body: Body, text: string, protocol: Protocol): Body {
+  // @context-fold begin addSystemBudget-59a4c4dedb
   const result = structuredClone(body);
   if (protocol === 'chat') {
     if (!Array.isArray(result.messages)) return result;
@@ -65,12 +68,14 @@ function addSystemBudget(body: Body, text: string, protocol: Protocol): Body {
     holder[key] = { ...(record(previous) ? previous : {}), parts: [...(record(previous) ? previous.parts as unknown[] : []), { text }] };
   }
   return result;
+  // @context-fold end addSystemBudget-59a4c4dedb
 }
 
 export interface BudgetOptions { contextWindowTokens?: number; reserveOutputTokens?: number; scope?: string }
 
 /** Unknown model capacity stays unknown. This estimate is never a billing claim. */
 export function appendBudget(body: Body, protocol: Protocol, options: BudgetOptions = {}): Body {
+  // @context-fold begin appendBudget-c02b386ed7
   const clean = withoutBudget(body, protocol);
   const render = (used: number) => {
     const reserved = options.reserveOutputTokens ?? 0;
@@ -86,4 +91,5 @@ export function appendBudget(body: Body, protocol: Protocol, options: BudgetOpti
     used = next;
   }
   return render(used);
+  // @context-fold end appendBudget-c02b386ed7
 }

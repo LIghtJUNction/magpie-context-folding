@@ -53,6 +53,7 @@ function splitsPair(text: string, offset: number): boolean {
 
 /** Exact legacy IDs win over hash prefixes. Identical content aliases are one result. */
 function resolveEntry(snapshot: Snapshot, id: string) {
+  // @context-fold begin resolveEntry-db244eec2c
   const exact = snapshot.entries.find(entry => entry.id === id);
   if (exact || snapshot.groups?.some(group => group.id === id)) return { id, aliases: exact ? [exact] : [] };
   if (!/^[a-f0-9]{12,64}$/.test(id)) throw new ToolError('Unknown entry or group; hash prefixes require at least 12 hex digits');
@@ -63,10 +64,12 @@ function resolveEntry(snapshot: Snapshot, id: string) {
     throw new ToolError('Ambiguous content hash prefix; provide more hex digits or an exact archive ID');
   }
   return { id: first.id, aliases };
+  // @context-fold end resolveEntry-db244eec2c
 }
 
 /** Recovery is deliberately independent of current configuration and folding policy. */
 function keepExpanded(snapshot: Snapshot, id: string): void {
+  // @context-fold begin keepExpanded-21cffb3d7c
   const entry = snapshot.entries.find(entry => entry.id === id);
   const group = snapshot.groups?.find(group => group.id === id);
   let restored = 0;
@@ -87,10 +90,12 @@ function keepExpanded(snapshot: Snapshot, id: string): void {
   }
   restored += restoreAncestors(snapshot, id);
   snapshot.metrics = addMetrics(snapshot.metrics, { itemsRestored: restored });
+  // @context-fold end keepExpanded-21cffb3d7c
 }
 
 /** Report numeric bounds without exposing supplied text or arbitrary Zod messages. */
 function validationDetails(error: z.ZodError, input: unknown) {
+  // @context-fold begin validationDetails-22f687fb19
   const details: { path: PropertyKey[]; code: string; limit?: number | bigint; actual?: number;
     unit?: string }[] = [];
   const visit = (issues: readonly z.core.$ZodIssue[], prefix: PropertyKey[] = []) => {
@@ -123,9 +128,11 @@ function validationDetails(error: z.ZodError, input: unknown) {
   };
   visit(error.issues);
   return details;
+  // @context-fold end validationDetails-22f687fb19
 }
 
 export async function execute(input: unknown): Promise<string> {
+  // @context-fold begin execute-29367cef4c
   const parsed = argsSchema.safeParse(input);
   if (!parsed.success) return serialize({ error: 'Invalid context_folding arguments', details: validationDetails(parsed.error, input) });
   const args = parsed.data;
@@ -202,4 +209,5 @@ export async function execute(input: unknown): Promise<string> {
   } catch (error) {
     return serialize({ error: diagnostic(error) });
   }
+  // @context-fold end execute-29367cef4c
 }

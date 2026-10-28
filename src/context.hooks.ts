@@ -27,6 +27,7 @@ function fingerprint(value: unknown): string {
 
 /** IDs distinguish a fresh Read from an old occurrence of identical source. */
 function occurrenceIdentity(body: Body, span: Span): unknown {
+  // @context-fold begin occurrenceIdentity-8c0d952a7b
   let current: unknown = body;
   let identity: unknown;
   for (const part of span.path) {
@@ -38,11 +39,13 @@ function occurrenceIdentity(body: Body, span: Span): unknown {
     current = (current as Record<string | number, unknown>)[part];
   }
   return identity ?? span.path;
+  // @context-fold end occurrenceIdentity-8c0d952a7b
 }
 
 interface Candidate { region: Region; occurrence: string; role: 'assistant' | 'tool' }
 
 function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] {
+  // @context-fold begin candidates-9c5f930e91
   const result: Candidate[] = [];
   let conversation: Span[] = [];
   const collect = (parts: Span[], role: 'assistant' | 'tool') => {
@@ -86,9 +89,11 @@ function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] 
   }
   collect(conversation, 'assistant');
   return result;
+  // @context-fold end candidates-9c5f930e91
 }
 
 export async function onRequest(input: unknown, context: unknown): Promise<unknown> {
+  // @context-fold begin onRequest-d395c56e62
   const parsed = contextSchema.safeParse(context);
   if (!record(input) || !parsed.success) return input;
   const ctx = parsed.data;
@@ -188,9 +193,11 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
     // The transaction must commit every original before a changed request escapes.
     return input;
   }
+  // @context-fold end onRequest-d395c56e62
 }
 
 export async function onResponse(_reply: unknown, context: unknown): Promise<void> {
+  // @context-fold begin onResponse-a62b6b6c8b
   const parsed = z.object({ state: stateSchema, success: z.boolean().optional(), request: z.unknown().optional(),
     signal: z.instanceof(AbortSignal).optional() }).safeParse(context);
   if (!parsed.success) return;
@@ -205,4 +212,5 @@ export async function onResponse(_reply: unknown, context: unknown): Promise<voi
       : { unverifiedHookRequests: 1, unverifiedFoldedRequests: pending.data.folded ? 1 : 0 };
     await new Store().recordMetrics(pending.data.scope, delta, ctx.signal);
   } catch { /* A missing completion is never counted as verified usage. */ }
+  // @context-fold end onResponse-a62b6b6c8b
 }

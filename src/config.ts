@@ -70,6 +70,7 @@ const migrationReason = 'removed: folding now requires agent-authored @context-f
 
 /** Recognize removed public settings without echoing arbitrary input or secret values. */
 function rejectLegacy(value: unknown, source: string, runtime = false): void {
+  // @context-fold begin rejectLegacy-76c9704195
   if (!table(value)) return;
   if (runtime) {
     for (const key of ['mode', 'thresholdTokens', 'keepRecentMessages', 'headChars', 'minimumSavingUsd', 'policy', 'accounting']) {
@@ -86,9 +87,11 @@ function rejectLegacy(value: unknown, source: string, runtime = false): void {
   if (table(value.magpie) && Object.hasOwn(value.magpie, 'accounting')) {
     throw new ConfigError(source, 'magpie.accounting', migrationReason);
   }
+  // @context-fold end rejectLegacy-76c9704195
 }
 
 function validated<T extends z.ZodType>(schema: T, value: unknown, source: string): z.infer<T> {
+  // @context-fold begin validated-6a51de1f8d
   const result = schema.safeParse(value);
   if (!result.success) {
     const issue = result.error.issues[0]!;
@@ -97,6 +100,7 @@ function validated<T extends z.ZodType>(schema: T, value: unknown, source: strin
     throw new ConfigError(source, path.join('.') || 'settings', 'invalid or unknown setting');
   }
   return result.data;
+  // @context-fold end validated-6a51de1f8d
 }
 
 export function parseOptions(value: unknown): Options {
@@ -118,6 +122,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 export async function projectConfigPath(cwd = process.cwd()): Promise<string | null> {
+  // @context-fold begin projectConfigPath-e5b3265de1
   let directory = resolve(cwd);
   try {
     if (!(await stat(directory)).isDirectory()) throw new Error();
@@ -128,9 +133,11 @@ export async function projectConfigPath(cwd = process.cwd()): Promise<string | n
     if (await exists(join(directory, '.git')) || dirname(directory) === directory) return null;
     directory = dirname(directory);
   }
+  // @context-fold end projectConfigPath-e5b3265de1
 }
 
 async function readConfig(path: string): Promise<unknown | undefined> {
+  // @context-fold begin readConfig-e7fa292b70
   let handle;
   try { handle = await open(path, 'r'); }
   catch (error) {
@@ -153,6 +160,7 @@ async function readConfig(path: string): Promise<unknown | undefined> {
     if (error instanceof ConfigError) throw error;
     throw new ConfigError(path, 'file', 'cannot read settings');
   } finally { await handle.close(); }
+  // @context-fold end readConfig-e7fa292b70
 }
 
 function merge(base: Table, update: Table): void {
@@ -180,6 +188,7 @@ function apply(base: Table, input: unknown, source: string): void {
 }
 
 function fromOptions(input: unknown): Table {
+  // @context-fold begin fromOptions-1a94c69f7b
   const value = input ?? {};
   rejectLegacy(value, '<overrides>', true);
   const { enabled, maxSessionBytes, delayRequests, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, recoveryToolName } =
@@ -189,9 +198,11 @@ function fromOptions(input: unknown): Table {
       context_window_tokens: contextWindowTokens, reserve_output_tokens: reserveOutputTokens },
     magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs },
   };
+  // @context-fold end fromOptions-1a94c69f7b
 }
 
 export async function loadConfig(cwd?: string, overrides?: unknown) {
+  // @context-fold begin loadConfig-e6b8752772
   const config: Table = {};
   const global = globalConfigPath();
   const sources = { global, project: await projectConfigPath(cwd) };
@@ -203,10 +214,12 @@ export async function loadConfig(cwd?: string, overrides?: unknown) {
   }
   if (overrides !== undefined) apply(config, overrides, '<overrides>');
   return { config: validated(configSchema, config, '<effective settings>'), sources };
+  // @context-fold end loadConfig-e6b8752772
 }
 
 /** Merge global settings, nearest project settings, then explicit camelCase plugin options. */
 export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Options> {
+  // @context-fold begin loadOptions-69cb98dd63
   const { config } = await loadConfig(cwd, fromOptions(explicit));
   const f = config.folding;
   const m = config.magpie;
@@ -215,4 +228,5 @@ export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Opt
     contextWindowTokens: f.context_window_tokens, reserveOutputTokens: f.reserve_output_tokens,
     recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms,
   }, '<effective settings>');
+  // @context-fold end loadOptions-69cb98dd63
 }

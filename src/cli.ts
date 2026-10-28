@@ -43,6 +43,7 @@ const options: Record<string, ParseArgsConfig['options']> = {
 class UsageError extends Error {}
 
 async function main(): Promise<void> {
+  // @context-fold begin main-5a1db74d0b
   const [command, ...argv] = process.argv.slice(2);
   if (command === undefined || command === '--help' || command === '-h') {
     console.log(usage);
@@ -134,6 +135,7 @@ async function main(): Promise<void> {
   const result = JSON.parse(await execute(args)) as { error?: string };
   if (result.error) throw new UsageError(result.error);
   console.log(JSON.stringify(result));
+  // @context-fold end main-5a1db74d0b
 }
 
 try { await main(); }

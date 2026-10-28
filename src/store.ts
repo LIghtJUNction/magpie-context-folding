@@ -109,6 +109,7 @@ function readLifetimeMetrics(database: Database): Metrics {
 }
 
 function legacyPayloadBytes(database: Database, metadata: string): number {
+  // @context-fold begin legacyPayloadBytes-963f724ad0
   const sizes = z.object({ adjustment: z.number().int(), missing: z.number().int().nonnegative() }).parse(database.query(`
     SELECT COALESCE(SUM(length(CAST(blobs.text AS BLOB)) - 70), 0) AS adjustment,
       COALESCE(SUM(CASE WHEN blobs.hash IS NULL THEN 1 ELSE 0 END), 0) AS missing
@@ -119,9 +120,11 @@ function legacyPayloadBytes(database: Database, metadata: string): number {
   if (sizes.missing > 0) throw new Error('Archive content is missing');
   // Each stored hash replaces a JSON string (66 bytes) and adds four bytes to its key.
   return Buffer.byteLength(metadata) + sizes.adjustment;
+  // @context-fold end legacyPayloadBytes-963f724ad0
 }
 
 function validateLayers(snapshot: Snapshot): void {
+  // @context-fold begin validateLayers-f7672102a2
   const entries = new Set<string>();
   for (const entry of snapshot.entries) {
     if (entries.has(entry.id)) throw new Error('Duplicate archive entry ID');
@@ -168,9 +171,11 @@ function validateLayers(snapshot: Snapshot): void {
       current = parents.get(current);
     }
   }
+  // @context-fold end validateLayers-f7672102a2
 }
 
 function encode(snapshot: Snapshot): { stored: StoredSnapshot; blobs: Map<string, string> } {
+  // @context-fold begin encode-e38d4c8d08
   const blobs = new Map<string, string>();
   const archive = (text: string): string => {
     // JSON string encoding preserves lone UTF-16 surrogates that SQLite TEXT cannot encode directly.
@@ -186,9 +191,11 @@ function encode(snapshot: Snapshot): { stored: StoredSnapshot; blobs: Map<string
     layers: layers.map(({ text: layerText, ...layer }) => ({ ...layer, textHash: archive(layerText) })),
   }));
   return { stored: { ...snapshot, entries }, blobs };
+  // @context-fold end encode-e38d4c8d08
 }
 
 function decode(database: Database, stored: StoredSnapshot): Snapshot {
+  // @context-fold begin decode-4ab4086d3c
   const texts = new Map<string, string>();
   const load = (hash: string): string => {
     const cached = texts.get(hash);
@@ -208,6 +215,7 @@ function decode(database: Database, stored: StoredSnapshot): Snapshot {
   const snapshot = snapshotSchema.parse({ ...stored, entries });
   validateLayers(snapshot);
   return snapshot;
+  // @context-fold end decode-4ab4086d3c
 }
 
 export class Store {
@@ -223,6 +231,7 @@ export class Store {
   }
 
   private async database<T>(run: (database: Database) => T): Promise<T> {
+    // @context-fold begin database-094f17a959
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const path = join(this.directory, 'state.sqlite');
     const file = await open(path, 'a', 0o600);
@@ -261,6 +270,7 @@ export class Store {
     } finally {
       database.close();
     }
+    // @context-fold end database-094f17a959
   }
 
   async scopeFor(identity: string): Promise<string> {
@@ -272,6 +282,7 @@ export class Store {
   }
 
   async readStats(scope?: string): Promise<StatsReport> {
+    // @context-fold begin readStats-6c01d10458
     if (scope !== undefined) hashSchema.parse(scope);
     const path = join(this.directory, 'state.sqlite');
     let file;
@@ -302,9 +313,11 @@ export class Store {
       if (database.inTransaction) database.exec('ROLLBACK');
       throw error;
     } finally { database.close(); }
+    // @context-fold end readStats-6c01d10458
   }
 
   async recordMetrics(scope: string, delta: Partial<Metrics>, signal?: AbortSignal): Promise<void> {
+    // @context-fold begin recordMetrics-8a08af355b
     signal?.throwIfAborted();
     hashSchema.parse(scope);
     const increment = addMetrics(emptyMetrics(), delta);
@@ -344,6 +357,7 @@ export class Store {
         throw error;
       }
     });
+    // @context-fold end recordMetrics-8a08af355b
   }
 
   async transaction<T>(
@@ -354,6 +368,7 @@ export class Store {
     signal?: AbortSignal,
     quotaPolicy: SessionQuotaPolicy = 'configure',
   ): Promise<T> {
+    // @context-fold begin transaction-52062fd795
     signal?.throwIfAborted();
     hashSchema.parse(scope);
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid session archive size limit');
@@ -449,5 +464,6 @@ export class Store {
       }
     });
     return result;
+    // @context-fold end transaction-52062fd795
   }
 }

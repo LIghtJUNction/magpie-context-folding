@@ -13,6 +13,7 @@ export function isFoldingTool(name: unknown): boolean {
 
 /** Only whole synthetic blocks are ignored; a user's text plus a guide is still a user turn. */
 export function isPluginGuide(text: string): boolean {
+  // @context-fold begin isPluginGuide-a2ae9c8e4d
   let rest = text.trim();
   if (!rest) return false;
   while (rest) {
@@ -25,10 +26,12 @@ export function isPluginGuide(text: string): boolean {
     rest = rest.slice(end + closing.length).trim();
   }
   return true;
+  // @context-fold end isPluginGuide-a2ae9c8e4d
 }
 
 /** Literal member calls only: never evaluate code or treat quoted instructions as calls. */
 function codeCallsFolding(args: unknown): boolean {
+  // @context-fold begin codeCallsFolding-e0d5fee979
   if (typeof args === 'string') {
     try { args = JSON.parse(args); } catch { /* Custom tools carry raw code. */ }
   }
@@ -67,6 +70,7 @@ function codeCallsFolding(args: unknown): boolean {
     if (isFoldingTool(name) && next === '(') return true;
   }
   return false;
+  // @context-fold end codeCallsFolding-e0d5fee979
 }
 
 const authorizationStatus = /^(?:requires_authentication|authentication_required|requires_authorization|authorization_required|awaiting_authorization|authorization_pending|pending_authorization|awaiting_approval|approval_required|login_required)$/i;
@@ -77,6 +81,7 @@ const receiptTool = /(?:^|__|[.:])(?:github_)?(?:create_commit|update_ref|merge_
 /** Inspect real result fields and recognizable output lines, not arbitrary keyword mentions. */
 export function toolActivity(name: unknown, args: unknown, payload: unknown, envelope?: unknown,
   parseText: (text: string) => unknown = JSON.parse): ActivityReason | undefined {
+  // @context-fold begin toolActivity-92da82756a
   if (isFoldingTool(name) || (typeof name === 'string' && /(?:^|__|[.:/])(?:exec|execute|run_code|code_mode)$/.test(name)
     && codeCallsFolding(args))) return 'plugin-control';
   let failed = false;
@@ -120,10 +125,12 @@ export function toolActivity(name: unknown, args: unknown, payload: unknown, env
   visit(envelope, 0);
   visit(payload, 0);
   return control ? 'plugin-control' : authorization ? 'authorization-required' : failed ? 'tool-error' : receipt ? 'operation-receipt' : undefined;
+  // @context-fold end toolActivity-92da82756a
 }
 
 /** Lifecycle protection is per span; it must never be used as protocol-wide unsafety. */
 export function activityProtectedSpans(spans: readonly Span[], lastUserIndex: number): Map<string, string> {
+  // @context-fold begin activityProtectedSpans-728c5cbfb7
   const protectedSpans = new Map<string, string>();
   const lastMessageIndex = spans.reduce((last, span) => span.role === 'user' && isPluginGuide(span.text)
     ? last : Math.max(last, span.messageIndex), -1);
@@ -139,4 +146,5 @@ export function activityProtectedSpans(spans: readonly Span[], lastUserIndex: nu
     }
   }
   return protectedSpans;
+  // @context-fold end activityProtectedSpans-728c5cbfb7
 }

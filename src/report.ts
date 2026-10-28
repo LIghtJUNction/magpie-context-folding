@@ -84,6 +84,7 @@ export interface EffectsReport {
 }
 
 export async function collectReport(scope?: string): Promise<EffectsReport> {
+  // @context-fold begin collectReport-03e463b91a
   if (scope !== undefined && !/^[a-f0-9]{64}$/.test(scope)) throw new Error('Invalid scope');
   const stats = await statistics(scope);
   const path = join(stateDirectory(), 'state.sqlite');
@@ -138,6 +139,7 @@ export async function collectReport(scope?: string): Promise<EffectsReport> {
   }
   if (scope !== undefined && sessions.length === 0) throw new Error('Unknown context scope');
   return { generatedAt: new Date().toISOString(), statistics: stats, sessions };
+  // @context-fold end collectReport-03e463b91a
 }
 
 export async function writeReport(output: string, scope?: string): Promise<void> {

@@ -25,6 +25,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Resolve a callable recovery entry point, never a mention in descriptions or schemas. */
 export function recoveryToolName(body: Record<string, unknown>, protocol: Protocol, configured?: string): string | undefined {
+  // @context-fold begin recoveryToolName-143a590025
   const config = protocol === "gemini" && isRecord(body.config) ? body.config : {};
   const toolConfig = body.toolConfig ?? body.tool_config ?? config.toolConfig ?? config.tool_config;
   const calling = isRecord(toolConfig) ? toolConfig.functionCallingConfig ?? toolConfig.function_calling_config : undefined;
@@ -71,6 +72,7 @@ export function recoveryToolName(body: Record<string, unknown>, protocol: Protoc
   };
   return names.find((name): name is string => (name === "context_folding"
     || name === "mcp__magpie__magpie_context_folding_context_folding") && allowed(name));
+  // @context-fold end recoveryToolName-143a590025
 }
 
 function textRole(value: unknown): Role | undefined {
@@ -97,6 +99,7 @@ function addTextParts(
   messageIndex: number,
   types: ReadonlySet<string>,
 ): void {
+  // @context-fold begin addTextParts-7fcf324ec9
   if (typeof content === "string") {
     addText(candidates, content, role, path, messageIndex);
   } else if (Array.isArray(content)) {
@@ -106,12 +109,14 @@ function addTextParts(
       }
     });
   }
+  // @context-fold end addTextParts-7fcf324ec9
 }
 
 const chatTextTypes = new Set(["text"]);
 const responseTextTypes = new Set(["input_text", "output_text", "text"]);
 
 function chatSpans(body: Record<string, unknown>): Candidate[] {
+  // @context-fold begin chatSpans-989606946f
   const candidates: Candidate[] = [];
   if (!Array.isArray(body.messages)) return candidates;
   body.messages.forEach((message: unknown, index) => {
@@ -121,9 +126,11 @@ function chatSpans(body: Record<string, unknown>): Candidate[] {
     addTextParts(candidates, message.content, role, ["messages", index, "content"], index, chatTextTypes);
   });
   return candidates;
+  // @context-fold end chatSpans-989606946f
 }
 
 function responseSpans(body: Record<string, unknown>): Candidate[] {
+  // @context-fold begin responseSpans-98fa8058ec
   const candidates: Candidate[] = [];
   if (typeof body.input === "string") {
     addText(candidates, body.input, "user", ["input"], 0);
@@ -141,9 +148,11 @@ function responseSpans(body: Record<string, unknown>): Candidate[] {
     });
   }
   return candidates;
+  // @context-fold end responseSpans-98fa8058ec
 }
 
 function anthropicSpans(body: Record<string, unknown>): Candidate[] {
+  // @context-fold begin anthropicSpans-bcb6333a91
   const candidates: Candidate[] = [];
   if (!Array.isArray(body.messages)) return candidates;
   body.messages.forEach((message: unknown, messageIndex) => {
@@ -165,9 +174,11 @@ function anthropicSpans(body: Record<string, unknown>): Candidate[] {
     }
   });
   return candidates;
+  // @context-fold end anthropicSpans-bcb6333a91
 }
 
 function geminiSpans(body: Record<string, unknown>): Candidate[] {
+  // @context-fold begin geminiSpans-61d0aad857
   const candidates: Candidate[] = [];
   if (!Array.isArray(body.contents)) return candidates;
   body.contents.forEach((content: unknown, messageIndex) => {
@@ -187,11 +198,13 @@ function geminiSpans(body: Record<string, unknown>): Candidate[] {
     });
   });
   return candidates;
+  // @context-fold end geminiSpans-61d0aad857
 }
 
 type Source = NonNullable<Span["source"]>;
 
 function readSource(name: unknown, value: unknown): Source | undefined {
+  // @context-fold begin readSource-f4ded7d328
   if (name !== "read" && name !== "Read" && name !== "read_file") return;
   if (typeof value === "string") {
     try { value = JSON.parse(value); } catch { return; }
@@ -222,9 +235,11 @@ function readSource(name: unknown, value: unknown): Source | undefined {
       ? `start:${start ?? "default"}:end:${end ?? "default"}`
       : "full";
   return { path, range };
+  // @context-fold end readSource-f4ded7d328
 }
 
 function unsafeReadResult(value: unknown): boolean {
+  // @context-fold begin unsafeReadResult-72463ac361
   if (Array.isArray(value)) return value.some(unsafeReadResult);
   if (!isRecord(value)) return false;
   if (["signature", "thoughtSignature", "encrypted_content", "encryptedContent", "error", "inlineData", "inline_data", "fileData", "file_data", "image_url", "audio", "input_audio"].some((key) => key in value)
@@ -233,9 +248,11 @@ function unsafeReadResult(value: unknown): boolean {
     || ["exit_code", "exitCode"].some(key => typeof value[key] === "number" && value[key] !== 0)
     || (typeof value.status === "string" && /^(?:error|failed|failure|timeout|timed_out|cancelled|canceled|incomplete)$/i.test(value.status))) return true;
   return Object.values(value).some((entry) => (isRecord(entry) || Array.isArray(entry)) && unsafeReadResult(entry));
+  // @context-fold end unsafeReadResult-72463ac361
 }
 
 function singleReadText(value: unknown, types: ReadonlySet<string>, textSafety: Map<string, boolean>, parseText: (text: string) => unknown): boolean {
+  // @context-fold begin singleReadText-42475cd03b
   if (typeof value === "string") {
     const cached = textSafety.get(value);
     if (cached !== undefined) return cached;
@@ -250,9 +267,11 @@ function singleReadText(value: unknown, types: ReadonlySet<string>, textSafety: 
     && typeof value[0].type === "string" && types.has(value[0].type)
     && !unsafeReadResult(value[0]) && singleReadText(value[0].text, types, textSafety, parseText)
     && !Object.keys(value[0]).some((key) => !["type", "text", "annotations"].includes(key));
+  // @context-fold end singleReadText-42475cd03b
 }
 
 function attachToolMetadata(body: Record<string, unknown>, protocol: Protocol, candidates: Candidate[]): void {
+  // @context-fold begin attachToolMetadata-4142b987b9
   type Call = { id: unknown; name: unknown; args: unknown; safe: boolean };
   type Result = { id: unknown; name?: unknown; path: Path; safe: boolean; payload: unknown; envelope: unknown };
   const events: ({ call: Call } | { result: Result })[] = [];
@@ -387,9 +406,11 @@ function attachToolMetadata(body: Record<string, unknown>, protocol: Protocol, c
     if (!source) continue;
     if (spans.length === 1) spans[0]!.source = source;
   }
+  // @context-fold end attachToolMetadata-4142b987b9
 }
 
 function hasPendingCalls(body: Record<string, unknown>, protocol: Protocol): boolean {
+  // @context-fold begin hasPendingCalls-3252eef855
   const pending = new Map<string, number>();
   const add = (id: unknown): void => {
     if (typeof id === "string") pending.set(id, (pending.get(id) ?? 0) + 1);
@@ -427,9 +448,11 @@ function hasPendingCalls(body: Record<string, unknown>, protocol: Protocol): boo
     }
   }
   return pending.size > 0;
+  // @context-fold end hasPendingCalls-3252eef855
 }
 
 function protectionReason(body: Record<string, unknown>, protocol: Protocol): string | undefined {
+  // @context-fold begin protectionReason-4a1b1bb07a
   if (hasPendingCalls(body, protocol)) return "unfinished-tool-exchange";
   if (protocol === "responses" && (typeof body.previous_response_id === "string" || typeof body.conversation === "string" || isRecord(body.conversation))) {
     return "server-managed-history";
@@ -439,9 +462,11 @@ function protectionReason(body: Record<string, unknown>, protocol: Protocol): st
     if (isRecord(last) && last.role === "assistant") return "assistant-prefill";
   }
   return undefined;
+  // @context-fold end protectionReason-4a1b1bb07a
 }
 
 export function extractSpans(body: Record<string, unknown>, protocol: Protocol): Span[] {
+  // @context-fold begin extractSpans-7850d8cd78
   let candidates: Candidate[];
   switch (protocol) {
     case "chat": candidates = chatSpans(body); break;
@@ -468,9 +493,11 @@ export function extractSpans(body: Record<string, unknown>, protocol: Protocol):
     occurrences.set(hash, occurrence + 1);
     return { ...candidate, id: `${hash}-${occurrence}`, ...(reason ? { protectedReason: reason } : {}) };
   });
+  // @context-fold end extractSpans-7850d8cd78
 }
 
 function setText(root: Record<string, unknown>, path: Path, text: string): void {
+  // @context-fold begin setText-2a7f2cd8cc
   let current: unknown = root;
   for (const part of path.slice(0, -1)) {
     if (Array.isArray(current) && typeof part === "number") current = current[part];
@@ -480,6 +507,7 @@ function setText(root: Record<string, unknown>, path: Path, text: string): void 
   const leaf = path.at(-1);
   if (Array.isArray(current) && typeof leaf === "number" && typeof current[leaf] === "string") current[leaf] = text;
   else if (isRecord(current) && typeof leaf === "string" && Object.hasOwn(current, leaf) && typeof current[leaf] === "string") current[leaf] = text;
+  // @context-fold end setText-2a7f2cd8cc
 }
 
 export function replaceSpans(
@@ -522,6 +550,7 @@ export function appendGuide(
   guide: string,
   protocol: Protocol,
 ): Record<string, unknown> {
+  // @context-fold begin appendGuide-8ec2f258a8
   const result = structuredClone(body);
   if (!guide || protectionReason(body, protocol)) return result;
   if (protocol === "responses") {
@@ -541,4 +570,5 @@ export function appendGuide(
     result.messages = messages;
   }
   return result;
+  // @context-fold end appendGuide-8ec2f258a8
 }

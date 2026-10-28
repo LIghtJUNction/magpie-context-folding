@@ -11,6 +11,7 @@ export interface Slice { id: string; start: number; end: number }
 export interface Region { label: string; text: string; sha256: string; slices: Slice[]; origin: { id: string; ordinal: number } }
 
 function marker(line: string): { kind: 'begin' | 'end'; label: string; style: string } | 'invalid' | undefined {
+  // @context-fold begin marker-68a6064dd3
   const value = line.trim();
   for (const [start, end] of styles) {
     if (!value.startsWith(start) || (end && !value.endsWith(end))) continue;
@@ -20,6 +21,7 @@ function marker(line: string): { kind: 'begin' | 'end'; label: string; style: st
     if (inner.startsWith('@context-fold')) return 'invalid';
   }
   return;
+  // @context-fold end marker-68a6064dd3
 }
 
 /**
@@ -28,6 +30,7 @@ function marker(line: string): { kind: 'begin' | 'end'; label: string; style: st
  * Ambiguous or nested regions stay readable; independent earlier regions remain eligible.
  */
 export function parseRegions(parts: readonly TextPart[]): Region[] {
+  // @context-fold begin parseRegions-9a007b50ac
   const regions: Region[] = [];
   const byId = new Map(parts.map(part => [part.id, part]));
   let opened: { label: string; style: string; slices: Slice[]; invalid: boolean; depth: number; origin: Region['origin'] } | undefined;
@@ -78,6 +81,7 @@ export function parseRegions(parts: readonly TextPart[]): Region[] {
     }
   }
   return regions;
+  // @context-fold end parseRegions-9a007b50ac
 }
 
 /** A prefix is a display/lookup key, never an authority or a substitute for SHA-256. */
@@ -92,6 +96,7 @@ export const reference = (hash: string): string => `[[cf:v2:${hash}]]`;
 
 /** Apply disjoint text ranges from the end so original offsets stay valid. */
 export function replaceRegions(parts: readonly TextPart[], selected: readonly { region: Region; reference: string }[]): Map<string, string> {
+  // @context-fold begin replaceRegions-0085c09ff4
   const edits = new Map<string, { start: number; end: number; text: string }[]>();
   for (const { region, reference: text } of selected) {
     for (const slice of region.slices) {
@@ -109,4 +114,5 @@ export function replaceRegions(parts: readonly TextPart[], selected: readonly { 
     if (text !== part.text) replacements.set(part.id, text);
   }
   return replacements;
+  // @context-fold end replaceRegions-0085c09ff4
 }

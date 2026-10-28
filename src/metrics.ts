@@ -30,6 +30,7 @@ export const metricsSchema = z.object({
 export type Metrics = z.infer<typeof metricsSchema>;
 
 export function emptyMetrics(): Metrics {
+  // @context-fold begin emptyMetrics-f78670fdef
   return {
     foldBatchesApproved: 0,
     itemsFolded: 0,
@@ -52,9 +53,11 @@ export function emptyMetrics(): Metrics {
     certifiedTokenDeltaLower: '0',
     savingNanoUsdLower: '0',
   };
+  // @context-fold end emptyMetrics-f78670fdef
 }
 
 export function addMetrics(current: Metrics, delta: Partial<Metrics>): Metrics {
+  // @context-fold begin addMetrics-18fee8148c
   const value = metricsSchema.parse(current);
   const increment = metricsSchema.partial().parse(delta);
   const addCounter = (before: number, after = 0): number => counterSchema.parse(before + after);
@@ -81,6 +84,7 @@ export function addMetrics(current: Metrics, delta: Partial<Metrics>): Metrics {
     certifiedTokenDeltaLower: addInteger(value.certifiedTokenDeltaLower, increment.certifiedTokenDeltaLower),
     savingNanoUsdLower: addInteger(value.savingNanoUsdLower, increment.savingNanoUsdLower),
   };
+  // @context-fold end addMetrics-18fee8148c
 }
 
 export function formatNanoUsd(value: string): string {
@@ -90,6 +94,7 @@ export function formatNanoUsd(value: string): string {
 }
 
 export function formatTokenCount(value: string): string {
+  // @context-fold begin formatTokenCount-5601cdefd5
   const amount = BigInt(integerTextSchema.parse(value));
   const absolute = amount < 0n ? -amount : amount;
   let divisor = 1n;
@@ -108,4 +113,5 @@ export function formatTokenCount(value: string): string {
   const hundredths = rounded();
   const fraction = (hundredths % 100n).toString().padStart(2, '0').replace(/0+$/, '');
   return `${amount < 0n ? '-' : ''}${hundredths / 100n}${fraction ? '.' + fraction : ''}${suffix}`;
+  // @context-fold end formatTokenCount-5601cdefd5
 }

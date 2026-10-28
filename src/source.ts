@@ -6,6 +6,7 @@ import { extname } from 'node:path';
  * visible; the standalone language-aware source adapter can handle those.
  */
 export function sourceMarkerOffsets(text: string, path: string): ReadonlySet<number> | undefined {
+  // @context-fold begin sourceMarkerOffsets-0f40430b3b
   const extension = extname(path).toLowerCase();
   const python = ['.py', '.pyi'].includes(extension);
   const javascript = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.cts', '.tsx'].includes(extension);
@@ -93,4 +94,5 @@ export function sourceMarkerOffsets(text: string, path: string): ReadonlySet<num
     i++;
   }
   return offsets;
+  // @context-fold end sourceMarkerOffsets-0f40430b3b
 }
