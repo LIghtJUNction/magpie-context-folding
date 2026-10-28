@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { Store } from '../src/store.js';
 import { collectReport } from '../src/report.js';
 import { escapeHtml, renderReport } from '../src/report-html.js';
+import { onRequest, onResponse } from '../src/context.hooks.js';
 
 const cli = join(import.meta.dir, '..', 'src', 'cli.ts');
 async function fixture(run: (directory: string, scope: string, invoke: (args: string[]) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
@@ -201,4 +202,121 @@ test('report on unused installation stays empty and creates no state directory',
     assert.ok((await readFile(output, 'utf8')).includes('还没有归档会话'));
     await assert.rejects(stat(state), { code: 'ENOENT' });
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('real annotation projection reports full request sizes, response state and no private binding', async () => {
+  await fixture(async (directory) => {
+    const context = { protocol: 'chat', model: 'MODEL_PRIVATE_SECRET', session: 'SESSION_PRIVATE_SECRET', cwd: directory,
+      options: { delayRequests: 0 }, state: {} };
+    const input = { model: context.model, tools: [{ type: 'function', function: { name: 'exec_command' } }], messages: [
+      { role: 'assistant', content: '<!-- @context-fold begin completed -->\n' + '正文 PRIVATE_SECRET '.repeat(800) + '\n<!-- @context-fold end completed -->' },
+      { role: 'user', content: 'Continue the task.' },
+    ] };
+    const store = new Store(join(directory, 'state'));
+    const scope = await store.scopeFor(JSON.stringify([context.session, '', '', directory]));
+    const output = await onRequest(input, context);
+    assert.match(JSON.stringify(output), /\[\[cf:v2:[a-f0-9]+\]\]/);
+    const report = await collectReport(scope);
+    const session = report.sessions[0]!;
+    const beforeBytes = Buffer.byteLength(JSON.stringify(input));
+    const afterBytes = Buffer.byteLength(JSON.stringify(output));
+    assert.deepEqual(session.comparison, { beforeBytes, afterBytes });
+    assert.ok(afterBytes < beforeBytes);
+    assert.equal(session.approved, null, 'a projection is not cost approval or a successful response');
+    assert.equal(session.observation?.status, 'pending');
+    assert.equal(session.observation?.foldedRegions, 1);
+    assert.equal(session.observation?.replayedReferences, 0);
+    assert.equal(session.observation?.waiting, 0);
+    assert.match(session.reason, /本次请求含折叠内容/);
+    const binding = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot =>
+      snapshot.decision.observation as { requestId: string; sessionKey: string });
+    for (const secret of ['PRIVATE_SECRET', scope, binding.requestId, binding.sessionKey]) {
+      assert.equal(JSON.stringify(report).includes(secret), false);
+      assert.equal(renderReport(report).includes(secret), false);
+    }
+    const database = join(directory, 'state', 'state.sqlite');
+    const before = await readFile(database);
+    const beforeStat = await stat(database);
+    const pendingHtml = renderReport(await collectReport(scope));
+    assert.match(pendingHtml, /请求投影待确认/);
+    assert.match(pendingHtml, /原始请求/);
+    assert.match(pendingHtml, /最终投影/);
+    assert.match(pendingHtml, /包含系统指导和恢复定位信息开销/);
+    assert.ok(pendingHtml.includes(`${Math.ceil(beforeBytes / 4).toLocaleString('en-US')} → ${Math.ceil(afterBytes / 4).toLocaleString('en-US')}`));
+    assert.doesNotMatch(pendingHtml, /未识别的原因|没有记录前后字节数|批准状态未记录/);
+    assert.deepEqual(await readFile(database), before);
+    assert.equal((await stat(database)).mtimeMs, beforeStat.mtimeMs);
+
+    const completingAt = Date.now();
+    await onResponse({}, { ...context, success: true, request: output });
+    const confirmed = await collectReport(scope);
+    assert.equal(confirmed.sessions[0]!.observation?.status, 'confirmed');
+    const completedAt = confirmed.sessions[0]!.observation?.completedAt;
+    assert.equal(typeof completedAt, 'number');
+    assert.ok(completedAt! >= completingAt && completedAt! <= Date.now());
+    const confirmedHtml = renderReport(confirmed);
+    assert.match(confirmedHtml, /已匹配成功响应/);
+    assert.ok(confirmedHtml.includes(`回调记录时间：${new Date(completedAt!).toISOString()}`));
+    for (const secret of ['PRIVATE_SECRET', scope, binding.requestId, binding.sessionKey]) {
+      assert.equal(JSON.stringify(confirmed).includes(secret), false);
+      assert.equal(confirmedHtml.includes(secret), false);
+    }
+    assert.equal(confirmed.statistics.money.actualBillSavingUsd, null);
+  });
+});
+
+test('request reports distinguish grace periods, absent current folds and unsuccessful responses', async () => {
+  await fixture(async directory => {
+    const context = { protocol: 'chat', model: 'fixture', session: 'report-lifecycle', cwd: directory,
+      options: { delayRequests: 1 }, state: {} };
+    const input = { tools: [{ type: 'function', function: { name: 'exec_command' } }], messages: [
+      { role: 'assistant', content: '<!-- @context-fold begin done -->\n' + 'completed work '.repeat(1000) + '\n<!-- @context-fold end done -->' },
+      { role: 'user', content: 'Continue.' },
+    ] };
+    const scope = await new Store(join(directory, 'state')).scopeFor(JSON.stringify([context.session, '', '', directory]));
+    const waiting = await onRequest(input, context);
+    const waitingReport = await collectReport(scope);
+    assert.equal(waitingReport.sessions[0]!.observation?.foldedRegions, 0);
+    assert.equal(waitingReport.sessions[0]!.observation?.waiting, 1);
+    assert.match(waitingReport.sessions[0]!.reason, /等待周期/);
+    await onResponse({}, { ...context, success: true, request: waiting });
+
+    const nextInput = { ...input, messages: [...input.messages, { role: 'user', content: 'A different next request.' }] };
+    const folded = await onRequest(nextInput, context);
+    assert.match(JSON.stringify(folded), /\[\[cf:v2:/);
+    await onResponse({}, { ...context, success: false, request: folded });
+    const failed = await collectReport(scope);
+    assert.equal(failed.sessions[0]!.observation?.status, 'failed');
+    assert.match(renderReport(failed), /请求失败/);
+    assert.equal(failed.statistics.metrics.successfulFoldedRequests, 0);
+
+    const retry = await onRequest(nextInput, context);
+    await onResponse({}, { ...context, request: retry });
+    const unverified = await collectReport(scope);
+    assert.equal(unverified.sessions[0]!.observation?.status, 'unverified');
+    assert.match(renderReport(unverified), /响应未核实/);
+
+    await onRequest({ ...input, messages: [{ role: 'user', content: 'A new history with no old annotation.' }] }, context);
+    const absent = await collectReport(scope);
+    assert.equal(absent.sessions[0]!.foldedEntries, 1, 'the recoverable archive remains');
+    assert.equal(absent.sessions[0]!.observation?.foldedRegions, 0, 'archive count is not current-request count');
+    assert.equal(absent.sessions[0]!.observation?.replayedReferences, 0);
+    assert.match(absent.sessions[0]!.reason, /本次没有可折叠区域/);
+    assert.match(renderReport(absent), /归档数量不代表最近记录的请求实际包含的折叠数量/);
+  });
+});
+
+test('current reasons in older records are recognized without inventing missing measurements', async () => {
+  await fixture(async (directory, scope) => {
+    await new Store(join(directory, 'state')).transaction(scope, false, 64 * 1024 * 1024, snapshot => {
+      snapshot.decision = { reason: 'annotated-regions-folded', foldedRegions: 2, waiting: 0, replayedReferences: 0 };
+    });
+    const report = await collectReport(scope);
+    assert.equal(report.sessions[0]!.comparison, null);
+    assert.equal(report.sessions[0]!.observation, undefined);
+    const html = renderReport(report);
+    assert.doesNotMatch(html, /未识别的原因/);
+    assert.match(html, /没有记录前后字节数/);
+    assert.doesNotMatch(html, /已匹配成功响应/);
+  });
 });

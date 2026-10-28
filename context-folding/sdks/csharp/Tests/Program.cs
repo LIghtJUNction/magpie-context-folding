@@ -1,4 +1,5 @@
 using ContextFolding;
+using System.Text;
 using System.Text.Json;
 
 var directory = Path.Combine(Path.GetTempPath(), "cf-csharp-" + Guid.NewGuid());
@@ -57,14 +58,18 @@ try
             {
                 ["action"] = "wrong", ["scope"] = "wrong", ["text"] = "wrong",
                 ["language"] = "explicit", ["commentStyles"] = new[] { new { start = ";;" } },
-            }));
+            }),
+            client.GrepAsync("scope", "needle", new Dictionary<string, object?> { ["query"] = "wrong", ["id"] = "entry", ["limit"] = 2 }),
+            client.MetaAsync("scope", "entry", new Dictionary<string, object?> { ["id"] = "wrong", ["limit"] = 2 }));
         Check(values.Select(v => v.GetProperty("pid").GetInt32()).Distinct().Count() == 1, "Process must persist");
-        Check(values.Select(Action).SequenceEqual(new[] { "put", "list", "read", "read-source", "render", "resolve", "fold" }), "Wrappers forward actions");
+        Check(values.Select(Action).SequenceEqual(new[] { "put", "list", "read", "read-source", "render", "resolve", "fold", "grep", "meta" }), "Wrappers forward actions");
         Check(values[0].GetProperty("request").GetProperty("text").GetString() == "原文🙂", "Unicode round trip");
         Check(values[0].GetProperty("argv")[1].GetString()!.EndsWith("state with spaces.sqlite"), "ArgumentList preserves spaces");
         var foldRequest = values[6].GetProperty("request");
         Check(foldRequest.GetProperty("scope").GetString() == "scope" && foldRequest.GetProperty("text").GetString() == "", "Fold preserves explicit arguments and empty text");
         Check(foldRequest.GetProperty("commentStyles")[0].GetProperty("start").GetString() == ";;", "Fold forwards comment styles");
+        Check(values[7].GetProperty("request").GetProperty("query").GetString() == "needle", "Grep preserves explicit query");
+        Check(values[8].GetProperty("request").GetProperty("id").GetString() == "entry", "Meta preserves explicit id");
         await Reject(client.CallAsync(new Dictionary<string, object?> { ["action"] = "error", ["scope"] = "s" }), "missing");
         Check(Action(await client.CallAsync(new Dictionary<string, object?> { ["action"] = "stderr", ["scope"] = "s" })) == "stderr", "stderr drained");
         var slow = client.CallAsync(new Dictionary<string, object?> { ["action"] = "slow", ["scope"] = "s" });
@@ -121,8 +126,10 @@ try
         var resolved = await real.ResolveAsync("real", new { content = view });
         Check(resolved.GetProperty("value").GetProperty("content").GetString() == text, "Exact annotated source recovery");
         var id = first.GetProperty("id").GetString()!;
-        Check((await real.ReadAsync("real", id)).GetProperty("text").GetString() == text, "Read returns original");
-        Check((await real.CallAsync(SourceRequest(3))).GetProperty("text").GetString() == text, "Recovered source stays visible");
+        Check((await real.ReadAsync("real", id, new Dictionary<string, object?> { ["limit"] = 120 })).GetProperty("text").GetString()!.EnumerateRunes().Count() <= 120, "Read stays bounded");
+        await real.GrepAsync("real", "evidence", new Dictionary<string, object?> { ["id"] = id, ["limit"] = 2 });
+        await real.MetaAsync("real", id);
+        Check((await real.CallAsync(SourceRequest(3))).GetProperty("text").GetString() == view, "Queries do not set keep or unfold history");
         var item = await real.PutAsync("real", "A🙂B", new Dictionary<string, object?> { ["role"] = "tool" });
         var read = await real.ReadAsync("real", item.GetProperty("id").GetString()!, new Dictionary<string, object?> { ["offset"] = 1, ["limit"] = 1 });
         Check(read.GetProperty("text").GetString() == "🙂" && read.GetProperty("nextOffset").GetInt32() == 2, "Python Unicode code-point offsets");
@@ -132,7 +139,7 @@ try
             ["disposition"] = "foldable", ["summary"] = "obsolete",
         }));
         await real.ListAsync("real");
-        Console.WriteLine("PASS: actual Python source marker delay, retry, fresh occurrence, exact recovery, keep and Unicode offsets");
+        Console.WriteLine("PASS: actual Python source marker delay, retry, fresh occurrence, query purity and Unicode offsets");
         var empty = await real.FoldAsync("fold-test", "");
         Check(empty.GetProperty("scope").GetString() == "fold-test" && empty.GetProperty("text").GetString() == "", "Fold accepts empty text");
         Check(empty.GetProperty("references").GetArrayLength() == 0, "Empty text has no references");
@@ -153,6 +160,33 @@ try
         Check((await real.ReadAsync("fold-test", hash)).GetProperty("text").GetString() == body, "Fold hash reads original marked body");
         await Reject(real.ReadAsync("another-scope", hash));
         Console.WriteLine("PASS: immediate fold, empty input, complete view, Unicode hash and scoped recovery");
+        var detail = string.Concat(Enumerable.Repeat(new string('x', 350) + " needle=42 中文🙂\n", 20));
+        var nestedText = "<!-- @context-fold begin parent -->\nparent summary\n<!-- @context-fold begin child -->\n"
+            + detail + "<!-- @context-fold end child -->\n<!-- @context-fold end parent -->";
+        var nested = await real.FoldAsync("nested", nestedText);
+        Check(nested.GetProperty("references").GetArrayLength() == 1, "Only top-level references are returned");
+        var nodeId = nested.GetProperty("references")[0].GetProperty("id").GetString()!;
+        var metadata = await real.MetaAsync("nested", nodeId);
+        Check(metadata.GetProperty("sha256").GetString() == nodeId && metadata.GetProperty("childCount").GetInt32() == 1, "Metadata exposes nested structure");
+        Check(!metadata.TryGetProperty("text", out _), "Metadata does not open the body");
+        var childId = metadata.GetProperty("children")[0].GetString()!;
+        var listed = await real.ListAsync("nested", new Dictionary<string, object?> { ["id"] = nodeId, ["depth"] = 1, ["limit"] = 10 });
+        Check(listed.GetProperty("entries").EnumerateArray().Any(entry => entry.GetProperty("id").GetString() == childId), "List discovers child nodes");
+        var parent = await real.ReadAsync("nested", nodeId, new Dictionary<string, object?> { ["limit"] = 1000 });
+        Check(parent.GetProperty("text").GetString()!.Contains("[[cf:v2:") && !parent.GetProperty("text").GetString()!.Contains("needle=42"), "Parent read preserves child references");
+        Check(parent.GetProperty("sha256").GetString() != parent.GetProperty("viewSha256").GetString(), "Original and view hashes are separate");
+        var line = await real.ReadAsync("nested", nodeId, new Dictionary<string, object?> { ["startLine"] = 1, ["endLine"] = 1, ["limit"] = 60 });
+        Check(line.GetProperty("text").GetString()!.StartsWith("parent summary"), "Line slices refer to the node view");
+        var found = await real.GrepAsync("nested", "needle=42", new Dictionary<string, object?> { ["id"] = nodeId, ["limit"] = 2, ["context"] = 1 });
+        Check(found.GetProperty("matches").GetArrayLength() == 2, "Recursive grep respects match limit");
+        Check(found.GetProperty("matches")[0].GetProperty("id").GetString() == childId, "Grep identifies the child node");
+        Check(found.GetProperty("matches").EnumerateArray().All(hit => hit.GetProperty("text").GetString()!.Contains("needle=42")
+            && hit.GetProperty("text").GetString()!.EnumerateRunes().Count() <= 160), "Grep returns bounded snippets around the match");
+        var direct = await real.GrepAsync("nested", "needle=42", new Dictionary<string, object?> { ["id"] = nodeId, ["recursive"] = false });
+        Check(direct.GetProperty("matches").GetArrayLength() == 0, "Nonrecursive grep does not open children");
+        Check((await real.ReadAsync("nested", childId)).GetProperty("text").GetString()!.EnumerateRunes().Count() <= 1200, "Default read stays bounded");
+        Check((await real.FoldAsync("nested", nestedText)).GetProperty("text").GetString() == nested.GetProperty("text").GetString(), "Queries preserve the folded view");
+        Console.WriteLine("PASS: nested discovery, metadata, bounded reads, recursive snippets and unchanged folding");
     }
     else Console.WriteLine("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH to context-folding/python");
 }

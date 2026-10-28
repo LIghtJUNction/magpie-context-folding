@@ -25,15 +25,15 @@ async function fixture(run: (f: { root: string; project: string; global: string;
   }
 }
 
-test('CLI-only defaults use a savings margin and keep optional budget hints off', async () => {
+test('CLI-only defaults use a savings margin without context budgeting', async () => {
   await fixture(async f => {
     const options = await loadOptions(undefined, f.project);
     assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1,
-      minSavingsTokens: 256, budgetHints: false, reserveOutputTokens: 0, contextWindowTokens: undefined,
+      minSavingsTokens: 256,
       gatewayTimeoutMs: undefined, shellToolName: undefined, recoveryCommand: undefined });
-    assert.deepEqual(parseOptions({ delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000 }), {
-      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000,
-      minSavingsTokens: 256, budgetHints: false,
+    assert.deepEqual(parseOptions({ delayRequests: 0 }), {
+      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0,
+      minSavingsTokens: 256,
     });
     const { config, sources } = await loadConfig(f.project);
     assert.deepEqual(config.annotations, { enabled: true, default_fold: true, keep: [] });
@@ -41,27 +41,28 @@ test('CLI-only defaults use a savings margin and keep optional budget hints off'
       max_uses: 2, retention_seconds: 2_592_000, auto_purge: false });
     assert.deepEqual(config.magpie, {});
     assert.equal(config.folding.min_savings_tokens, 256);
-    assert.equal(config.folding.budget_hints, false);
+    assert.ok(!Object.hasOwn(config.folding, 'context_window_tokens'));
+    assert.ok(!Object.hasOwn(config.folding, 'reserve_output_tokens'));
+    assert.ok(!Object.hasOwn(config.folding, 'budget_hints'));
     assert.deepEqual(sources, { global: f.global, project: null });
   });
 });
 
 test('global/project/explicit fields merge without injecting defaults into partial layers', async () => {
   await fixture(async f => {
-    await f.file(f.global, 'version=1\n[folding]\ndelay_requests=3\ncontext_window_tokens=128000\nreserve_output_tokens=8000\n[magpie]\ngateway_timeout_ms=700\n');
+    await f.file(f.global, 'version=1\n[folding]\ndelay_requests=3\nmax_session_bytes=20000\n[magpie]\ngateway_timeout_ms=700\n');
     await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n[magpie]\nshell_tool_name="archive.shell"\n');
     const explicit = { enabled: false, delayRequests: 0 };
     const before = structuredClone(explicit);
     const options = await loadOptions(explicit, f.project);
     assert.equal(options.delayRequests, 0);
-    assert.equal(options.contextWindowTokens, 128000);
-    assert.equal(options.reserveOutputTokens, 8000);
+    assert.equal(options.maxSessionBytes, 20000);
     assert.equal(options.gatewayTimeoutMs, 700);
     assert.equal(options.shellToolName, 'archive.shell');
     assert.equal(options.enabled, false);
     assert.deepEqual(explicit, before);
     assert.equal((await loadOptions({}, f.project)).delayRequests, 2);
-    assert.equal((await loadConfig(f.project, { folding: { reserve_output_tokens: 12000 } })).config.folding.delay_requests, 2);
+    assert.equal((await loadConfig(f.project, { folding: { max_session_bytes: 12000 } })).config.folding.delay_requests, 2);
     await f.file(join(f.project, '.context-folding.toml'), '[annotations]\nkeep=["active"]\n[gc]\nstrength="balanced"\nretention_seconds=9\n');
     await f.file(f.global, '[gc]\nidle_seconds=123\n');
     const shared = await loadConfig(f.project, { gc: { idle_seconds: 0.5 } });
@@ -74,26 +75,23 @@ test('global/project/explicit fields merge without injecting defaults into parti
 
 test('CLI recovery and savings fields merge globally, per project and through explicit overrides', async () => {
   await fixture(async f => {
-    await f.file(f.global, '[folding]\nmin_savings_tokens=1024\nbudget_hints=true\n'
+    await f.file(f.global, '[folding]\nmin_savings_tokens=1024\n'
       + '[magpie]\nshell_tool_name="global.shell"\nrecovery_command="global-ctxf"\n');
     await f.file(join(f.project, '.context-folding.toml'), '[folding]\nmin_savings_tokens=512\n'
       + '[magpie]\nshell_tool_name="functions.exec"\n');
     const inherited = await loadOptions({}, f.project);
     assert.equal(inherited.minSavingsTokens, 512);
-    assert.equal(inherited.budgetHints, true);
     assert.equal(inherited.shellToolName, 'functions.exec');
     assert.equal(inherited.recoveryCommand, 'global-ctxf');
-    const explicit = { minSavingsTokens: 0, budgetHints: false, recoveryCommand: "'/opt/local bun' '/app/cli.ts'" };
+    const explicit = { minSavingsTokens: 0, recoveryCommand: "'/opt/local bun' '/app/cli.ts'" };
     const before = structuredClone(explicit);
     const overridden = await loadOptions(explicit, f.project);
     assert.equal(overridden.minSavingsTokens, 0);
-    assert.equal(overridden.budgetHints, false);
     assert.equal(overridden.shellToolName, 'functions.exec');
     assert.equal(overridden.recoveryCommand, explicit.recoveryCommand);
     assert.deepEqual(explicit, before);
-    const effective = await loadConfig(f.project, { folding: { budget_hints: false }, magpie: { recovery_command: 'local-ctxf' } });
+    const effective = await loadConfig(f.project, { magpie: { recovery_command: 'local-ctxf' } });
     assert.equal(effective.config.folding.min_savings_tokens, 512);
-    assert.equal(effective.config.folding.budget_hints, false);
     assert.equal(effective.config.magpie.shell_tool_name, 'functions.exec');
     assert.equal(effective.config.magpie.recovery_command, 'local-ctxf');
     assert.equal(parseOptions({ minSavingsTokens: Number.MAX_SAFE_INTEGER }).minSavingsTokens, Number.MAX_SAFE_INTEGER);
@@ -106,12 +104,12 @@ test('nearest project settings stop at git/worktree boundary and HOME is a fallb
     const child = join(f.project, 'nested');
     await mkdir(child);
     assert.equal(await projectConfigPath(child), null);
-    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\ncontext_window_tokens=32000\n');
+    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n');
     assert.equal((await loadOptions({}, child)).delayRequests, 2);
     const nearest = join(child, '.context-folding.toml');
     await f.file(nearest, '[folding]\ndelay_requests=3\n');
     assert.equal(await projectConfigPath(child), nearest);
-    assert.equal((await loadOptions({}, child)).contextWindowTokens, undefined);
+    assert.equal((await loadOptions({}, child)).delayRequests, 3);
     await rm(nearest);
     await rm(join(f.project, '.context-folding.toml'));
     await rm(join(f.project, '.git'), { recursive: true });
@@ -172,6 +170,33 @@ test('removed MCP recovery selectors explain the CLI migration without exposing 
     await rm(f.global);
     await f.file(join(f.project, '.context-folding.toml'), '[magpie]\nrecovery_tool_name="private-secret"\n');
     await assert.rejects(loadConfig(f.project), safeMigration);
+  });
+});
+
+test('removed context window and output reserve settings fail at every config entry point', async () => {
+  await fixture(async f => {
+    const removed = (source: string, field: string) => (error: unknown) => {
+      assert.ok(error instanceof ConfigError);
+      assert.equal(error.source, source);
+      assert.equal(error.field, field);
+      assert.match(error.message, /removed/);
+      assert.ok(!error.message.includes('private-secret'));
+      return true;
+    };
+    for (const key of ['contextWindowTokens', 'reserveOutputTokens', 'budgetHints']) {
+      assert.throws(() => parseOptions({ [key]: 128000 }), removed('<options>', key));
+      await assert.rejects(loadOptions({ [key]: 'private-secret' }, f.project), removed('<overrides>', key));
+    }
+    for (const key of ['context_window_tokens', 'reserve_output_tokens', 'budget_hints']) {
+      await assert.rejects(loadConfig(f.project, { folding: { [key]: 128000 } }), removed('<overrides>', `folding.${key}`));
+      await f.file(f.global, `[folding]\n${key}=128000\n`);
+      await assert.rejects(loadOptions({}, f.project), removed(f.global, `folding.${key}`));
+      await rm(f.global);
+      const project = join(f.project, '.context-folding.toml');
+      await f.file(project, `[folding]\n${key}="private-secret"\n`);
+      await assert.rejects(loadConfig(f.project), removed(project, `folding.${key}`));
+      await rm(project);
+    }
   });
 });
 

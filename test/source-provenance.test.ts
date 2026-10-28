@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
-import { withoutBudget } from '../src/budget.js';
+import { withoutRecoveryMetadata } from '../src/recovery.js';
 import { withoutGuidance } from '../src/guidance.js';
 import { digest } from '../src/store.js';
 import { bodyFor, fixture, progress } from './helpers.js';
-const withoutMetadata = (body: Record<string, unknown>, protocol: Protocol) => withoutGuidance(withoutBudget(body, protocol), protocol);
+const withoutMetadata = (body: Record<string, unknown>, protocol: Protocol) => withoutGuidance(withoutRecoveryMetadata(body, protocol), protocol);
 
 
 const code = '  execute_operation("中文😀");\n'.repeat(70).trimEnd();

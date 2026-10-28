@@ -32,7 +32,10 @@ const entrySchema = z.object({
   version: versionSchema.optional(), manual: z.boolean().optional(),
   protectionReason: z.string().optional(),
   foldedMark: z.string().optional(),
-  annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string() }).optional(),
+  annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string(),
+    children: z.array(z.object({ id: z.string().min(1), label: z.string(),
+      start: z.number().int().nonnegative(), end: z.number().int().positive() })).optional(),
+  }).optional(),
   occurrences: z.record(z.string(), z.object({
     firstSeen: z.number().int().nonnegative(), lastSeen: z.number().int().nonnegative(), folded: z.boolean().optional(),
   })).optional(),
@@ -82,6 +85,10 @@ export type Group = z.infer<typeof groupSchema>;
 export interface StatsReport {
   metrics: Metrics;
   storage: { activeSessions: number; blobs: number; databaseBytes: number };
+}
+export interface ObservationCompletion {
+  requestId: string;
+  status: 'confirmed' | 'failed' | 'unverified';
 }
 type StoredSnapshot = z.infer<typeof storedSnapshotSchema>;
 type SessionQuotaPolicy = 'configure' | 'preserve' | 'enforce';
@@ -137,6 +144,32 @@ function validateLayers(snapshot: Snapshot): void {
     }
   }
   const byId = new Map(snapshot.entries.map(entry => [entry.id, entry]));
+  const visiting = new Set<string>();
+  const checked = new Set<string>();
+  const validateChildren = (entry: Entry) => {
+    if (visiting.has(entry.id)) throw new Error('Cyclic annotation graph');
+    if (checked.has(entry.id)) return;
+    visiting.add(entry.id);
+    let previousEnd = 0;
+    for (const edge of entry.annotation?.children ?? []) {
+      const child = byId.get(edge.id);
+      if (!child?.annotation || edge.start < previousEnd || edge.end <= edge.start || edge.end > entry.text.length) {
+        throw new Error('Invalid annotation child range');
+      }
+      const body = entry.text.slice(edge.start, edge.end);
+      const ref = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(body.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
+      if (body !== child.text && (!ref || !child.annotation.sha256.startsWith(ref)
+        || snapshot.entries.some(other => other.annotation?.sha256.startsWith(ref)
+          && other.annotation.sha256 !== child.annotation!.sha256))) {
+        throw new Error('Annotation child content mismatch');
+      }
+      previousEnd = edge.end;
+      validateChildren(child);
+    }
+    visiting.delete(entry.id);
+    checked.add(entry.id);
+  };
+  for (const entry of snapshot.entries) validateChildren(entry);
   const latestSeries = new Set<string>();
   for (const entry of snapshot.entries) {
     const version = entry.version;
@@ -316,10 +349,13 @@ export class Store {
     // @context-fold end readStats-6c01d10458
   }
 
-  async recordMetrics(scope: string, delta: Partial<Metrics>, signal?: AbortSignal): Promise<void> {
+  async recordMetrics(scope: string, delta: Partial<Metrics>, signal?: AbortSignal, completion?: ObservationCompletion): Promise<void> {
     // @context-fold begin recordMetrics-8a08af355b
     signal?.throwIfAborted();
     hashSchema.parse(scope);
+    if (completion !== undefined) z.object({
+      requestId: z.string().uuid(), status: z.enum(['confirmed', 'failed', 'unverified']),
+    }).strict().parse(completion);
     const increment = addMetrics(emptyMetrics(), delta);
     try { await stat(join(this.directory, 'state.sqlite')); }
     catch (error) {
@@ -335,17 +371,26 @@ export class Store {
         const session = sessionRowSchema.parse(row);
         const stored = storedSnapshotSchema.parse(JSON.parse(session.snapshot));
         const metrics = addMetrics(stored.metrics, increment);
-        if (JSON.stringify(metrics) === JSON.stringify(stored.metrics)) {
+        let decision = stored.decision;
+        const observed = z.object({ requestId: z.string().uuid() }).safeParse(decision.observation);
+        // A delayed response belongs to its own request. It may contribute to
+        // lifetime counters, but must never confirm a newer projection.
+        if (completion && observed.success && observed.data.requestId === completion.requestId) {
+          decision = { ...decision, observation: { ...(decision.observation as Record<string, unknown>),
+            status: completion.status, completedAt: Date.now() } };
+        }
+        if (JSON.stringify(metrics) === JSON.stringify(stored.metrics) && JSON.stringify(decision) === JSON.stringify(stored.decision)) {
           database.exec('COMMIT');
           return;
         }
         const { payloadBytes, sessionLimitBytes, ...base } = stored;
         const previousBytes = payloadBytes ?? legacyPayloadBytes(database, JSON.stringify(base));
-        const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics));
+        const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics))
+          + Buffer.byteLength(JSON.stringify(decision)) - Buffer.byteLength(JSON.stringify(stored.decision));
         const limit = sessionLimitBytes ?? defaultSessionLimitBytes;
         if (nextBytes > limit) throw new Error('Session archive full; statistics not committed');
         database.query('UPDATE sessions SET revision = ?, snapshot = ? WHERE scope = ?')
-          .run(session.revision + 1, JSON.stringify({ ...base, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
+          .run(session.revision + 1, JSON.stringify({ ...base, decision, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
         const lifetime = addMetrics(readLifetimeMetrics(database), increment);
         database.query("INSERT INTO meta (key, value) VALUES ('lifetime-metrics', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
           .run(JSON.stringify(lifetime));

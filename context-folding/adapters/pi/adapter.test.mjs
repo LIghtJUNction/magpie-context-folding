@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createCore, createReadAdapter, restoreOriginal, scopeFor, entryType } from './adapter.mjs';
+import { createCore, createReadAdapter, querySnapshot, restoreOriginal, scopeFor, entryType } from './adapter.mjs';
 
 function context(cwd, session = 'one', entries = []) {
   return { cwd, sessionManager: { getSessionId: () => session, getBranch: () => entries } };
@@ -50,6 +50,34 @@ test('real core round trip, scope and branch isolation, immutable snapshot', asy
     const foreign = await call({ action: 'put', scope: 'unrelated', text: 'secret' });
     await assert.rejects(restoreOriginal(call, ctx, foreign.id));
     assert.equal(entries[0].customType, entryType);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('Pi queries stay bounded, recursive and tied to active branch snapshots', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pi-query-'));
+  try {
+    await writeFile(join(directory, '.context-folding.toml'), '[folding]\ndelay_requests=0\n');
+    const call = createCore({ statePath: join(directory, 'archive.sqlite'), projectDir: directory });
+    const entries = [], ctx = context(directory, 'query-session', entries);
+    const adapter = createReadAdapter({ call, appendEntry: (customType, data) => entries.push({ type: 'custom', customType, data }) });
+    assert.ok(await adapter(event(source), ctx));
+    const rootId = entries[0].data.id;
+    const listing = await querySnapshot(call, ctx, { action: 'list' });
+    assert.equal(listing.entries[0].id, rootId);
+    const child = listing.entries.find(entry => entry.id !== rootId);
+    assert.ok(child?.reference.startsWith('[[cf:v2:'));
+    const hash = child.reference.slice(8, -2);
+    const page = await querySnapshot(call, ctx, { action: 'read', id: hash, limit: 80 });
+    assert.ok(page.text.includes('def example'));
+    assert.ok(Array.from(page.text).length <= 80, `Expected 80 code points, got ${Array.from(page.text).length}`);
+    const found = await querySnapshot(call, ctx, { action: 'grep', query: 'value_99', limit: 2 });
+    assert.ok(found.matches.some(match => match.text.includes('value_99')));
+    const metadata = await querySnapshot(call, ctx, { action: 'meta', id: rootId });
+    assert.ok(metadata.children.includes(child.id));
+    await assert.rejects(querySnapshot(call, context(directory, 'different', entries), { action: 'list' }));
+    await assert.rejects(querySnapshot(call, context(directory, 'query-session', []), { action: 'read', id: hash }));
+    const unrelated = await call({ action: 'put', scope: scopeFor(ctx), text: 'unrelated private entry' });
+    await assert.rejects(querySnapshot(call, ctx, { action: 'read', id: unrelated.id }));
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -104,11 +132,12 @@ test('no-benefit and persistence failures preserve existing pin state', async ()
     for (const failure of ['no-benefit', 'append-failed']) {
       let pinned = previouslyPinned, pinCalls = 0, appended = false;
       const call = async request => {
-        if (request.action === 'annotate') return { id: 'snapshot' };
+        if (request.action === 'annotate') return { id: 'snapshot', sha256: createHash('sha256').update(source).digest('hex') };
         if (request.action === 'pin') { pinCalls++; pinned = request.pinned; return {}; }
         const text = request.mode === 'original' || failure === 'no-benefit' ? source : 'def example(): ...';
         return { id: 'snapshot', offset: 0, text, nextOffset: null,
-          totalChars: Array.from(text).length, sha256: createHash('sha256').update(text).digest('hex') };
+          totalChars: Array.from(text).length, sha256: createHash('sha256').update(text).digest('hex'),
+          foldedRegions: failure === 'no-benefit' ? [] : [{ id: 'work' }] };
       };
       const adapter = createReadAdapter({ call, appendEntry() { appended = true; throw Error('session unavailable'); } });
       assert.equal(await adapter(event(source), context('/project')), undefined);
