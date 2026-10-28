@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Context Folding RPC v2",
-  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI, MCP and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls.",
+  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls.",
   "type": "object",
   "required": [
     "action",

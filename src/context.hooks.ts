@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { ConfigError, loadOptions } from './config.js';
-import { appendRecoveryMetadata, withoutRecoveryMetadata } from './recovery.js';
+import { withoutRecoveryMetadata } from './recovery.js';
+import { appendGuidance, defaultRecoveryCommand, withoutGuidance } from './guidance.js';
 import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, emptyMetrics, estimateTokens, metricsSchema } from './metrics.js';
-import { extractSpans, recoveryToolName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
+import { extractSpans, recoveryShellName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
 
@@ -13,6 +15,7 @@ const stateSchema = z.custom<Body>(record);
 const pendingKey = 'contextFoldingStatistics';
 const pendingSchema = z.object({
   scope: z.string().regex(/^[a-f0-9]{64}$/), bodyHash: z.string(), folded: z.boolean(), successDelta: metricsSchema,
+  requestId: z.string().uuid(),
 });
 const contextSchema = z.object({
   protocol: z.enum(['chat', 'responses', 'anthropic', 'gemini']), model: z.string(), session: z.string().min(1),
@@ -102,11 +105,21 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
     ctx.signal?.throwIfAborted();
     const options = await loadOptions(ctx.options, ctx.cwd);
     if (!options.enabled) return input;
-    const body = withoutRecoveryMetadata(input, ctx.protocol);
+    const body = withoutGuidance(withoutRecoveryMetadata(input, ctx.protocol), ctx.protocol);
     const spans = extractSpans(body, ctx.protocol);
     if (!spans.length || spans.some(span => span.protectedReason)) return input;
-    if (!recoveryToolName(body, ctx.protocol, options.recoveryToolName)) return input;
+    // Recovery uses the host's existing shell, never a registered plugin tool.
+    // A shell-less request must retain its input, including all original text.
+    if (!recoveryShellName(body, ctx.protocol, options.shellToolName)) return input;
     const store = new Store();
+    const command = options.recoveryCommand ?? defaultRecoveryCommand();
+    const decorate = (value: Body, scope?: string): Body => {
+      const guided = appendGuidance(value, ctx.protocol, { command,
+        ...(scope ? { scope, stateDirectory: store.directory } : {}) });
+      return guided;
+    };
+    // Check the real system field before doing any archive work.
+    decorate(body);
     const scope = await store.scopeFor(JSON.stringify([ctx.session, ctx.origin ?? '', ctx.agent ?? '', ctx.cwd ?? '']));
     let pending: z.infer<typeof pendingSchema> | undefined;
     const output = await store.transaction(scope, true, options.maxSessionBytes, snapshot => {
@@ -118,26 +131,29 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       snapshot.cycle = cycle;
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
-      const proposed: { region: Region; reference: string }[] = [];
+      const proposed: { region: Region; reference: string; entry: Entry; occurrence: string }[] = [];
+      const created = new Set<string>();
+      const waitingHashes = new Set<string>();
       const found = candidates(body, spans, ctx.protocol);
       // Allocate references against the entire batch so collision handling is
       // independent of parse order. Full hashes and original text stay in storage.
       const hashes = new Set([...byHash.keys(), ...snapshot.entries.map(entry => entry.id),
         ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256)]);
-      let newlyFolded = 0;
       let waiting = 0;
+      let skipped = 0;
       for (const { region, occurrence, role } of found) {
         const ref = reference(shortHash(region.sha256, hashes));
         const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
           spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
         const after = region.slices.length * Buffer.byteLength(JSON.stringify(ref));
-        if (after >= before) continue;
+        if (after >= before || Math.floor((before - after) / 4) < options.minSavingsTokens) { skipped++; continue; }
         let entry = byHash.get(region.sha256);
         if (!entry) {
           entry = { id: region.sha256, role, text: region.text, annotation: { sha256: region.sha256, label: region.label },
             mark: { disposition: 'unmarked' }, layers: [], occurrences: {} } satisfies Entry;
           snapshot.entries.push(entry);
           byHash.set(region.sha256, entry);
+          created.add(entry.id);
         } else if (entry.text !== region.text) throw new Error('Annotation content hash mismatch');
         const occurrences = entry.occurrences ??= {};
         let observed = occurrences[occurrence];
@@ -146,10 +162,8 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         if (!observed || observed.lastSeen < previousCycle) observed = occurrences[occurrence] = { firstSeen: cycle, lastSeen: cycle };
         observed.lastSeen = cycle;
         if (entry.mark.disposition === 'keep') continue;
-        if (cycle - observed.firstSeen < options.delayRequests) { waiting++; continue; }
-        proposed.push({ region, reference: ref });
-        entry.folded = ref;
-        if (!observed.folded) { newlyFolded++; observed.folded = true; }
+        if (cycle - observed.firstSeen < options.delayRequests) { waiting++; waitingHashes.add(entry.id); continue; }
+        proposed.push({ region, reference: ref, entry, occurrence });
       }
       // Occurrence metadata is a short-lived cursor; originals and old references
       // are durable until explicitly forgotten.
@@ -162,18 +176,47 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
         [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
           [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
-      const hasFolded = proposed.length > 0 || existingReferences.length > 0;
-      const projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
+      let hasFolded = proposed.length > 0 || existingReferences.length > 0;
+      let projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
+      let result = decorate(projected, hasFolded ? scope : undefined);
+      // Compare the complete outgoing request, including system guidance,
+      // archive scope/path and references. Even a
+      // configured zero floor never authorizes a net-negative transformation.
+      const netSaving = estimateTokens(body) - estimateTokens(result);
+      const insufficient = proposed.length > 0 && (netSaving <= 0 || netSaving < options.minSavingsTokens);
+      if (insufficient) {
+        skipped += proposed.length;
+        proposed.length = 0;
+        snapshot.entries = snapshot.entries.filter(entry => !created.has(entry.id) || waitingHashes.has(entry.id));
+        hasFolded = existingReferences.length > 0;
+        projected = body;
+        result = decorate(body, hasFolded ? scope : undefined);
+      }
+      const newRegions = proposed.filter(({ entry, occurrence }) => !entry.occurrences![occurrence]!.folded);
+      const newlyFolded = newRegions.length;
+      for (const { entry, occurrence, reference: ref } of proposed) {
+        entry.folded = ref;
+        entry.occurrences![occurrence]!.folded = true;
+      }
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
-      const result = appendRecoveryMetadata(projected, ctx.protocol, scope);
-      snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
-        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length };
+      const requestId = randomUUID();
+      snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period'
+        : skipped ? 'insufficient-net-savings' : 'no-eligible-annotations',
+        cycle, waiting, skipped, foldedRegions: proposed.length, replayedReferences: existingReferences.length,
+        estimatedNetSavings: estimateTokens(body) - estimateTokens(result),
+        // Compare the full hook input with its returned projection, including
+        // metadata overhead. Archived bytes are not this request's savings.
+        beforeBytes: Buffer.byteLength(JSON.stringify(input)), afterBytes: Buffer.byteLength(JSON.stringify(result)),
+        observation: { requestId, observedAt: Date.now(), status: 'pending', sessionKey: digest(ctx.session) } };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
-        foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(projected))),
+        // A request can replay older folds alongside a newly completed region.
+        // Only first-time replacements contribute to cumulative gross savings.
+        foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(
+          replaceExtractedSpans(body, replaceRegions(spans, newRegions), ctx.protocol, spans)))),
       });
-      pending = { scope, bodyHash: fingerprint(result), folded: hasFolded,
+      pending = { scope, requestId, bodyHash: fingerprint(result), folded: hasFolded,
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
           guideOnlyRequests: hasFolded ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
@@ -205,7 +248,10 @@ export async function onResponse(_reply: unknown, context: unknown): Promise<voi
     const delta = ctx.success === false ? { failedHookRequests: 1, failedFoldedRequests: pending.data.folded ? 1 : 0 }
       : ctx.success === true && matches ? pending.data.successDelta
       : { unverifiedHookRequests: 1, unverifiedFoldedRequests: pending.data.folded ? 1 : 0 };
-    await new Store().recordMetrics(pending.data.scope, delta, ctx.signal);
+    await new Store().recordMetrics(pending.data.scope, delta, ctx.signal, {
+      requestId: pending.data.requestId,
+      status: ctx.success === false ? 'failed' : ctx.success === true && matches ? 'confirmed' : 'unverified',
+    });
   } catch { /* A missing completion is never counted as verified usage. */ }
   // @context-fold end onResponse-a62b6b6c8b
 }

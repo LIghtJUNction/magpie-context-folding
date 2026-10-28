@@ -5,9 +5,9 @@
  * commands. All stdout is protocol data. No Magpie server is required.
  */
 import { createInterface } from 'node:readline';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { onRequest, onResponse } from '../../src/context.hooks.js';
-import { execute } from '../../src/tool.js';
 
 type RecordValue = Record<string, unknown>;
 type Mode = 'baseline' | 'folding';
@@ -91,17 +91,38 @@ export class FoldingBridge {
       await onResponse(undefined, { state: pending.state, request: pending.body, success: input.success });
       return { recorded: true };
     }
-    if (input.op === 'recover') {
+    if (input.op === 'cli') {
       requireCondition(!this.pending, 'request_pending', 'Complete the previous request first');
-      requireCondition(record(input.args), 'invalid_request', 'Recovery requires an args object');
-      requireCondition(['read', 'list', 'status'].includes(String(input.args.action)),
+      requireCondition(Array.isArray(input.argv) && input.argv.length > 0 && input.argv.length <= 32
+        && input.argv.every(value => typeof value === 'string' && value.length <= 4096 && !value.includes('\0')),
+      'invalid_request', 'CLI requires a bounded array of arguments');
+      const argv = input.argv as string[];
+      requireCondition(['read', 'list', 'status'].includes(argv[0]!),
         'unsupported_action', 'Only read, list and status are available in benchmarks');
       requireCondition(this.scope !== null && this.mode === 'folding',
         'archive_unavailable', 'This trial has no recovery archive');
-      requireCondition(input.args.scope === undefined || input.args.scope === this.scope,
-        'scope_mismatch', 'Recovery is restricted to this trial');
-      const result: unknown = JSON.parse(await execute({ ...input.args, scope: this.scope }));
-      return result;
+      const confined: string[] = [];
+      for (let index = 0; index < argv.length; index++) {
+        const argument = argv[index]!;
+        if (argument === '--scope' || argument.startsWith('--scope=')) {
+          const scope = argument === '--scope' ? argv[++index] : argument.slice('--scope='.length);
+          requireCondition(scope === this.scope, 'scope_mismatch', 'Recovery is restricted to this trial');
+        } else if (argument === '--state-dir' || argument.startsWith('--state-dir=')) {
+          const directory = argument === '--state-dir' ? argv[++index] : argument.slice('--state-dir='.length);
+          requireCondition(typeof directory === 'string' && isAbsolute(directory)
+            && resolve(directory) === resolve(process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR!),
+          'scope_mismatch', 'Recovery is restricted to this trial archive directory');
+        } else confined.push(argument);
+      }
+      // This is the installed CLI contract over the existing shell tool, not a
+      // model-visible recovery tool. Never pass model text to a host shell.
+      const child = Bun.spawn([process.execPath, fileURLToPath(new URL('../../src/cli.ts', import.meta.url)),
+        ...confined, '--scope', this.scope], { cwd: this.cwd, env: process.env,
+        stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+      ]);
+      return { exit_code: exitCode, stdout, stderr };
     }
     if (input.op === 'close') {
       await this.close();

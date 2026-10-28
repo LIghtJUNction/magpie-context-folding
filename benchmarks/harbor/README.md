@@ -2,17 +2,17 @@
 
 **本质上是把同一道题交给同一个 Agent 跑两遍：一遍发送完整历史，一遍在发请求前调用项目现有折叠钩子，最后用独立测试判题。**
 
-本目录基于 0.4.0 主动注释协议。它固定 `harbor==0.25.0`，完整 Python 依赖记录在 `uv.lock`；实际任务格式为该发布包的 `schema_version = "1.4"`。生产 npm 包不依赖 Harbor。Harbor 的[自定义 Agent 接口](https://docs.harborframework.com/agents/custom-agents)、[任务格式](https://docs.harborframework.com/tasks/overview)和[结果格式](https://docs.harborframework.com/jobs/configs)可查官方文档；移动中的在线文档与固定发布包不同，以本目录已校验的包接口为准。
+本目录基于 0.5.0 的主动注释与 CLI 恢复协议。它固定 `harbor==0.25.0`，完整 Python 依赖记录在 `uv.lock`；实际任务格式为该发布包的 `schema_version = "1.4"`。生产 npm 包不依赖 Harbor。Harbor 的[自定义 Agent 接口](https://docs.harborframework.com/agents/custom-agents)、[任务格式](https://docs.harborframework.com/tasks/overview)和[结果格式](https://docs.harborframework.com/jobs/configs)可查官方文档；移动中的在线文档与固定发布包不同，以本目录已校验的包接口为准。
 
 ## 测的是什么
 
 | 组成 | 实际工作 |
 | --- | --- |
 | Harbor | 建立任务容器，执行一个 trial，收集产物，在另一容器运行评分器。 |
-| `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；工具是容器里的 `terminal`、完整 `read_file` 和当前 trial 的原文恢复。 |
-| `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse` 和 `src/tool.ts` 的 `execute`。没有另写压缩算法。 |
-| baseline | 完整历史；仍有相同的标记教学与工具定义，用来隔离请求投影的影响。 |
-| folding | 同一教学、工具与模型参数；启用实际折叠钩子，延迟一个请求，仅含 scope 的恢复元数据及恢复开销全部计入请求。 |
+| `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；只提供容器里的 `exec_command` 和完整 `read_file`；当前 trial 原文通过终端中的 CLI 按需查看。 |
+| `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse`，恢复由真实 CLI 子进程完成。没有另写压缩算法。 |
+| baseline | 完整历史，使用同一基础任务提示与终端工具；没有插件专属工具或手工教学。 |
+| folding | 同一基础提示、工具与模型参数；实际钩子自动注入短规则，默认延迟一个请求，指导和 CLI 回查开销全部计入请求，不注入模型窗口预算。 |
 
 Agent 始终保留原始 transcript。每轮只将发送给模型的副本交给 bridge。普通 Assistant 标记和明确识别的源码完整读取可折叠；普通 shell 输出不伪装成源码读取。模型必须自己决定写哪些注释，没有额外总结模型，也没有自动挑选历史。
 
@@ -45,7 +45,7 @@ npm run bench:harbor -- smoke
 | `oracle` | 参考实现通过，reward = 1。 |
 | `nop` | 不做任务，应失败，reward = 0；这是评分器的负向控制。 |
 | `ScriptedSmokeAgent` + baseline | 确定性脚本通过，历史不折叠。 |
-| `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实延迟折叠、精确恢复、原文保持可见。 |
+| `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实延迟折叠、精确 CLI 查阅，查看后历史继续保持折叠。 |
 
 脚本 Agent 直接使用仓库中公开的 oracle，并不测模型解题能力。它不会连接模型服务，token/费用保持未知，不伪造为零。命令会检查所有预期 trial 的实际结果，不能只因 Harbor 进程退出码为 0 就判通过。
 
@@ -114,4 +114,4 @@ npm run bench:harbor -- report \
 
 ## 验证范围
 
-组件测试调用真实 Harbor schema、实际 Bun hook 和独立评分器，覆盖延迟、重试、恢复、scope 隔离、缺失 usage、HTTP 失败、取消清理及失败分母。它们明确使用假模型和本地环境替身，不冒充容器运行。完整执行结果与当前环境限制记录在 [验证回执](../../docs/harbor-validation.md) 中。
+组件测试调用真实 Harbor schema、实际 Bun hook 和独立评分器，覆盖延迟、重试、恢复、scope 隔离、缺失 usage、HTTP 失败、取消清理及失败分母。它们明确使用假模型和本地环境替身，不冒充容器运行。0.4.0 的历史容器执行结果见[历史验证回执](../../docs/harbor-validation.md)；本轮 CLI-only 改动的验证范围见[0.5.0 记录](../../docs/validation-0.5.0.md)。

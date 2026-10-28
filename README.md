@@ -4,151 +4,96 @@
 
 # magpie-context-folding
 
-**Agent 用一对注释圈出以后可以收起的内容；插件保存原文，等一个请求周期，再把它换成带短哈希的引用。**
+**把明确标记的长过程存到本地，用短引用替换；真正需要原文时，才通过现有终端工具调用 CLI。**
 
-0.4.0 的折叠决定全部来自 Agent 写出的标记。没有智力、平衡、经济档位，也不需要先列目录、再调用 `mark`。未标记的内容保持完整。什么时候整理上下文、哪些内容可以收起，由 Agent 判断；本项目只负责按标记保存、折叠和恢复原文。
+0.5.0 自动把一条简短规则放进请求的系统指令。没有 MCP 服务、额外模型工具、每轮状态查询或“折叠后再读回验证”的流程。折叠由 Magpie 请求钩子完成，CLI 负责按需查阅。此源码版本尚未发布到 npm。
 
-这是正在开发的 **0.4.0 源码版本，未发布到 npm**。本页只描述当前源码；旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
+## 在 Codex / Claude Code 中看到折叠效果
 
-## 文本管道与独立 MCP：ctxf
-
-独立 Python 核心提供 `ctxf`，CLI 和 MCP 共用同一个折叠操作及持久归档：
+折叠发生在 Magpie 发往模型的请求副本里。客户端已显示的聊天记录不会因此变成可点击的折叠块，原生 compaction 提示也不会被触发。要查看实际变化，使用本次源码修复新增的本地显示命令：
 
 ```sh
-uv tool install ./context-folding
-
-# 默认从 stdin 读 UTF-8 文本，只向 stdout 写折叠后的完整文本。
-cat notes.txt | ctxf > notes.folded.txt
-
-# 显式子命令等价；源码可指定语言，以识别真正的注释。
-ctxf fold --language python < module.py > module.folded.txt
-
-# 启动同一核心的 MCP stdio 服务。
-ctxf mcp
+magpie-context-folding sessions                 # 找到已有会话的 scope 和最近记录
+magpie-context-folding statusline --scope S     # 最近请求：前后估算、段数、响应确认状态
+magpie-context-folding statusline               # 明确标记的全局累计
 ```
 
-`ctxf fold` 是一次明确的文本转换：立即处理已经闭合的合法注释，不等待后续请求，也不修改宿主延迟配置。无标记、未闭合区域和已有折叠引用保持原样。它先持久保存正文，再输出短引用；标准输出不附加日志、JSON 外壳或换行，错误写到标准错误。`ctxf fold --json` 可查看文本、scope 和引用元数据。
+Claude Code 的 `statusLine.command` 可运行 `magpie-context-folding statusline --client`；Codex 的 `Stop` hook 可运行 `magpie-context-folding hook`，只输出界面消息。两者只在客户端 `session_id` 与 Magpie 观察到的会话标识唯一匹配时自动绑定，也支持明确指定 `--scope`。无法绑定时不会拿其他会话冒充当前会话。
 
-默认归档位于 `$XDG_DATA_HOME/context-folding/archive.sqlite3`，未设置 XDG 时使用 `~/.local/share/context-folding/archive.sqlite3`；`CTXF_STATE` 或 `--state` 可覆盖。默认 scope 为 `default`，可用 `--scope` 分开保存任务。使用同一归档和 scope，`ctxf read --id HASH --raw` 返回实际哈希对应的完整原文；把 `HASH` 替换为生成的短哈希。默认读取保护原文，`--peek` 只查看。
+显示读取本地元数据，不增加模型输入。每次对比包含系统指导和恢复路径等开销；“待确认”“匹配成功”“失败”“未核实”分开显示。真实供应商 token 用量保持原样，插件的字节 / 4 估算单独标注。配置示例、同机状态目录要求与界面边界见 [客户端显示接入](docs/client-visibility.md)。
 
-MCP 客户端可配置：
-
-```json
-{
-  "mcpServers": {
-    "ctxf": {"command": "ctxf", "args": ["mcp"]}
-  }
-}
-```
-
-调用 `context_folding` 的 `fold` action，传入 `scope` 和 `text`，返回 `{scope, text, references}`。宿主消费返回的 `text`；MCP 服务本身不能修改其他工具或既有对话历史。自动处理历史的 Magpie 请求钩子仍使用前文的默认延迟。
-
-`ctxf` 由独立 Python 包提供；根 npm 包的 `magpie-context-folding` 继续管理 Magpie 自己的归档。两个后端的归档和 scope 不互通，恢复引用时使用生成它的后端。详细命令、恢复与传输合同见[独立核心说明](context-folding/README.md)和[传输协议](context-folding/docs/TRANSPORT.md)。
-
-## 怎么用
-
-### 1. 安装 Magpie 插件
-
-从仓库根目录安装本地源码。开发检查需要 Bun >= 1.4.0、Node.js >= 22 和 npm：
+## 安装后直接工作
 
 ```sh
 npm ci
-npm run check
 magpie plugin add /absolute/path/magpie-context-folding
 ```
 
-Magpie 直接加载 TypeScript 源码，不依赖安装时执行构建脚本。根 npm 包只包含 Magpie 插件；[Python 核心及源码适配器](context-folding/README.md)单独安装。
+Magpie 用 Bun 加载源码。Agent 需要已有的终端工具，例如 `exec_command`、`bash` 或 `shell`，并能访问 Magpie 的插件文件和归档目录。请求需要稳定的会话标识，例如 `X-Magpie-Session`。不需要配置 MCP，也不需要手工复制指导语。
 
-让 Agent 连接 Magpie 的工具服务，例如在客户端 MCP 配置中填写：
+插件自动提供的固定规则只有一条：长且已完成的过程才写配对标记，结论和约束放外面；系统自行折叠，不查询状态、不演示、不为验证而读回。指导进入 Chat 的 system/developer、Responses 的 instructions、Anthropic 的 system 或 Gemini 的 systemInstruction。保留宿主指令前缀，同一请求中不累积副本。
 
-```json
-{
-  "mcpServers": {
-    "magpie": {
-      "url": "http://127.0.0.1:3425/mcp/magpie/tools"
-    }
-  }
-}
-```
+发生折叠后，指导才附上实际可执行的 CLI 命令、当前 scope 和归档目录。默认使用已运行的 Bun 与插件 CLI 的绝对路径，不假设可执行文件已进入 Agent PATH。没有可调用终端、工具被禁用、系统字段不支持或归档失败时，保留原请求。
 
-客户端的具体 transport 配置格式可能不同。确认工具列表中有 `context_folding`。请求还需要稳定的会话标识，例如 `X-Magpie-Session`。插件只在确认有可调用恢复入口时改变上下文。
+更新源码后，在 Magpie 中关闭再开启插件以重新加载，并在 Agent 端刷新工具列表或开启新会话，清除旧 MCP 工具定义。远程 Agent 的终端如果不能访问这些路径，需要先接通真实的 CLI 执行环境；配置命令本身不会建立远程通道。
 
-工具封装在 code-mode 等外层工具内时，可将 `[magpie].recovery_tool_name` 配置为已核实可调用的实际工具名。该配置声明一个真实入口，不会安装工具。请求禁止所有工具时，插件保留原文。
+## 正常使用时发生什么
 
-### 2. 给 Agent 一段短提示词
-
-将下面这段加入宿主的固定提示词一次即可：
-
-> 用整行 `<!-- @context-fold begin LABEL -->` 和 `<!-- @context-fold end LABEL -->` 包住以后可回查的过程文本，两个 LABEL 必须一致。需要继续保留的结论、约束和待办放在标记外。闭合后经过一个请求周期，系统会保存原文并折叠。源码使用相同标记和对应语言的注释语法。不要计算哈希；需要原文时，用系统给出的 scope 和短哈希调用 context_folding 的 read。未闭合或嵌套标记保持原样。
-
-`LABEL` 是简短名称，例如 `route-analysis`。它帮助 Agent 识别内容，不是唯一编号，不要求手工维护哈希。
-
-### 3. 输出开始标记，完成后输出结束标记
+Agent 只为值得保留但暂时不需要的长过程写标记：
 
 ```text
 <!-- @context-fold begin route-analysis -->
-这一段是阶段性的排查、比较或推导过程。
-可以是一条消息，也可以分布在同一任务轮次的多条 Assistant 普通文本消息里。
+这里放已完成、篇幅较长的排查或比较过程。
 <!-- @context-fold end route-analysis -->
 
-保留结论：下一步检查 router.ts 的超时分支；失败重试仍未验证。
+保留结论：下一步检查 router.ts 的超时分支。
 ```
 
-第一次请求观察到完整标记时，正文仍可见。下一次组装请求时，正文才替换成 `[[cf:v2:<hash>]]`，两个标记行保留。相同请求的重试不消耗等待周期；没有后台计时器，不会修改正在生成的流式响应。跨消息配对只收起 Assistant 的普通文本切片，每个切片显示同一个引用，避免制造空消息；工具调用及工具结果留在原位置；新的用户消息会截断尚未闭合的范围。
+这个简短例子用于说明语法，默认不会被折叠。两条标记必须各占一整行、使用相同 LABEL，不能嵌套。源码使用同样的指令及该语言的注释语法。
 
-源码用同一核心语法，例如：
+默认保留一次完整请求的观察机会；之后的请求满足收益门槛时，正文变成 `[[cf:v2:HASH]]`。请求重试不消耗等待周期。未闭合或错误标记保持原样。无需调用 fold、status 或 stats 来推动它。
 
-```rust
-// @context-fold begin parse-options
-let options = parse_options(input)?;
-validate_options(&options)?;
-// @context-fold end parse-options
-```
+折叠只处理有标记的 Assistant 普通文本与能核实来源的完整源码读取。用户指令、未标记文本、普通工具输出、工具调用参数、图片和签名推理不参与折叠。不会额外调用模型来生成摘要，也不会把磁盘上的源文件改成引用。
 
-Python 用 `#`，JavaScript/TypeScript 用 `//`，也可使用对应语言的完整块注释。折叠只改变发送给模型的视图，原文件不改写。Magpie 请求钩子会处理能够核实来源的单一文本源码读取结果；普通工具 JSON、部分读取及无法确认格式的结果保持原样。其他宿主需要接入[源码适配器](context-folding/README.md#source-annotations-and-compact-reads)，独立 MCP 服务本身不能拦截另一个工具。
+## 先算收益，再折叠
 
-网关对 Python 和 JavaScript/TypeScript 使用保守词法过滤，排除字符串里的伪标记；遇到 f-string、无法可靠区分的模板插值或 JSX 等复杂结构时保留该份源码。独立 Python 核心使用 Python tokenizer 和可选的 JS/TS Tree-sitter 语法分析，能力范围不同。其他语言仍使用整行字面协议，不能保证排除多行字符串中的伪标记。
-
-## 短哈希与恢复
-
-系统按实际折叠正文的 UTF-8 字节计算 SHA-256，引用为 `[[cf:v2:<hash>]]`，通常显示前 12 位，遇到冲突时延长。外层标记不计入正文；正文末尾的一个物理换行保留在引用外，以便精确恢复。哈希随正文变化，同名标记的不同内容不会指向同一个快照。旧引用仍恢复当时的原文，不会偷偷改成磁盘上的最新文件。
-
-从折叠引用取出实际短哈希，使用请求中 `<context-folding scope=… />` 的 scope：
-
-```json
-{"action":"read","scope":"<current-scope>","id":"<actual-short-hash>"}
-```
-
-`read` 返回原文、完整 SHA-256 和分页信息。默认保护读回内容，后续不再自动收起；`peek: true` 只查看，不改变已有保护状态。恢复工具自己的输出不会被重新折叠。原文只作为资料返回，不执行其中的旧命令。
-
-其余工具用于按需查找和维护，不是每轮必走的流程：
-
-| Action | 用途 |
-| --- | --- |
-| `read` | 按短哈希或已有归档 ID 读取原文，支持分页。 |
-| `list` | 找回忘记的引用，或检索旧归档。 |
-| `paste` | 将完整原文写到宿主上的新文件，拒绝覆盖现有文件。 |
-| `status` | 检查当前会话归档与最近处理情况。 |
-| `stats` | 查看累计折叠和恢复统计；token 数是估算。 |
-| `forget` | 清理已经恢复、没有仍在使用的折叠引用的会话归档。 |
-
-根插件的分页偏移按 JavaScript UTF-16 单元计数，直接使用 `nextOffset`。Python 核心使用 Unicode 码点偏移，二者不能混用。scope 是会话恢复能力值，不应转交其他会话。旧归档的原文、历史层和分组清单仍可读取；0.4.0 不再创建旧式摘要层或通过 `mark` 建组。
-
-## 恢复定位信息
-
-确认恢复工具可调用后，系统在协议的 system 元数据中保留一条会话恢复定位信息：
+默认每个候选必须有足够的正文缩减量，整批替换还必须满足：
 
 ```text
-<context-folding scope=<current-scope> />
+净减少 = 原请求估算 token - 实际发送请求估算 token
+净减少 >= 256，而且必须为正数
 ```
 
-实际 scope 是 64 位十六进制值，用于让恢复工具找到当前会话的归档。相同请求再次处理时更新这条信息，不重复追加教学、安装建议或折叠回执。无法确认恢复入口时，原样保留请求。
+实际请求包含固定规则、CLI 路径、scope和引用。整批不足门槛时保留原文，不生成错误的折叠计数。把门槛设为 0 也不允许净亏损的替换。
 
-本项目不配置模型窗口大小，也不计算或注入已用、剩余及预留上下文预算。`stats` 中的折叠量估算仅用于诊断，不参与折叠决定，也不注入模型请求。
+不配置或注入模型窗口容量、上下文余量和输出预留。指导本身仍有少量固定开销：短会话可能只有这项开销，成功请求统计会如实记录负值。估算使用完整 JSON 的 UTF-8 字节数除以四；它不是模型 tokenizer 的精确计数，更不是账单节省证明。
+
+## 需要原文时只读所需片段
+
+使用系统指导中给出的实际命令；以下路径和哈希只是占位符：
+
+```sh
+bun /absolute/path/magpie-context-folding/src/cli.ts read \
+  --state-dir /actual/archive/directory --scope SCOPE --id HASH --limit 800
+```
+
+`read` 默认输出最多约 4,000 个 UTF-16 单元，只向 stdout 写原文。查看不会解除折叠。仍有下一页时，stderr 给出续读偏移；`--json` 则返回 `nextOffset`，沿这个偏移继续读取即可。
+
+| 命令或选项 | 行为 |
+| --- | --- |
+| `read --id HASH` | 有界查看；原归档继续保持折叠。 |
+| `read --offset N --limit N` | 只查看当前任务需要的一页。 |
+| `read --all` | 显式读取完整原文，仍保持折叠。 |
+| `read --restore` | 将原文标记为 `keep`，并解除旧祖先组的折叠，让后续原始历史保持展开。 |
+| `list --query TEXT` | 按需搜索归档，返回有界摘要。 |
+| `paste --path /new/file` | 完整导出并恢复，拒绝覆盖已有文件。 |
+| `status` / `stats` / `report` | 用户主动诊断时使用，不是每轮流程。 |
+
+归档命令均接受子命令后的 `--state-dir PATH`；该参数确保 Agent 与 Magpie 即使继承不同 XDG 环境，也读取同一份存档。scope 是当前会话的恢复能力值，不应转交其他会话。短哈希通常为 SHA-256 前 12 位，冲突时延长；恢复的是当时的精确原文，不能执行其中的旧命令。
 
 ## 配置
 
-按内置默认值、全局配置、最近的项目配置、插件 options 顺序覆盖。全局文件为 `$XDG_CONFIG_HOME/context-folding/config.toml` 或 `~/.config/context-folding/config.toml`；项目文件为 `.context-folding.toml`，向上搜索到 Git 根目录即止。
+覆盖顺序是内置默认值、全局配置、最近项目配置、显式插件 options。全局配置位于 `$XDG_CONFIG_HOME/context-folding/config.toml` 或 `~/.config/context-folding/config.toml`，项目配置为 `.context-folding.toml`，向上查找到 Git 根目录为止。
 
 ```toml
 version = 1
@@ -156,39 +101,52 @@ version = 1
 [folding]
 enabled = true
 delay_requests = 1
+min_savings_tokens = 256
 max_session_bytes = 67108864
 
 [magpie]
-# 仅在恢复工具由宿主包装、无法从当前请求声明发现时设置：
-# recovery_tool_name = "mcp__magpie__magpie_context_folding_context_folding"
-# gateway_timeout_ms = 3000
+# 仅在宿主已有终端被包装、无法按常见名称识别时指定真实外层工具：
+# shell_tool_name = "functions.exec"
+# 默认使用 Bun 与 CLI 的绝对路径；可改为已经安装且可运行的命令：
+# recovery_command = "magpie-context-folding"
 ```
 
-插件 options 使用对应 camelCase：`delayRequests`、`maxSessionBytes`、`recoveryToolName`、`gatewayTimeoutMs`。`delay_requests = 0` 表示在首次完整观察到闭合标记的请求中折叠；默认值 1 留出一次完整观察机会。
+对应插件 options 为 `delayRequests`、`minSavingsTokens`、`maxSessionBytes`、`shellToolName`、`recoveryCommand`。宿主请求钩子的超时需在 Magpie 插件 options 中设置 `gatewayTimeoutMs`；TOML 不会调整宿主的超时期限。配置的 shell 也必须出现在当前请求且未被 tool choice 禁用。`delay_requests=0` 允许首次看到完整闭合块时折叠，仍受收益与恢复条件约束。
 
-`max_session_bytes` 是归档容量上限，不是折叠阈值。存档失败、容量不足、并发状态冲突或无法确认恢复入口时，保留原文。默认状态目录为 `$XDG_DATA_HOME/magpie-context-folding` 或 `~/.local/share/magpie-context-folding`，可通过 `MAGPIE_CONTEXT_FOLDING_STATE_DIR` 指定。
+默认 Magpie 归档目录为 `$XDG_DATA_HOME/magpie-context-folding` 或 `~/.local/share/magpie-context-folding`，`MAGPIE_CONTEXT_FOLDING_STATE_DIR` 可覆盖。保存失败、容量不足或并发状态冲突时保留原文。
 
-## 从 0.3.x 升级
+## 从旧版升级
 
-删除配置中的 `mode`、`threshold_tokens`、`keep_recent_messages`、`head_chars`、`minimum_saving_usd`、`[policy]` 和 `[magpie.accounting]`。这些设置不会静默映射成另一种自动策略；旧配置会给出迁移错误。
+删除仅为本插件添加的 MCP 客户端配置，以及提示词中的 mark、status 轮询、手工演示和读回验证要求。`recovery_tool_name` / `recoveryToolName` 已移除；如果确实需要自定义终端入口，改用 `shell_tool_name` / `shellToolName`。旧设置会给出明确迁移错误，不会默默指向不存在的工具。
 
-早期 0.4.0 配置中的 `context_window_tokens`、`reserve_output_tokens` 及插件 options 中的 `contextWindowTokens`、`reserveOutputTokens` 也已移除。删除这些字段；继续使用会返回明确的已移除设置错误。已有提示词若要求从预算信息读取 scope，改为读取 `<context-folding scope=… />`。
+删除旧配置中的 `context_window_tokens`、`reserve_output_tokens`、`budget_hints` 及对应 camelCase options；继续使用会得到明确的迁移错误。收益门槛只比较替换前后请求体积，不管理模型容量，也不会自行选择未标记内容。
 
-删除 Agent 提示词里关于 `mark`、三档切换、自动摘要和成本批准的操作要求，换成上面的标记说明。保留旧数据库，以便恢复仍在引用的内容；不要靠删除归档解决配置错误。
+保留归档数据库，旧哈希及历史层仍可读取。CLI 的 `read` 现在默认有界查看：旧脚本需要完整输出时加 `--all`，需要持久展开时加 `--restore`。内部归档 API 的恢复语义保持兼容。
 
-## 机制边界
+0.3.x 的 `mode`、`threshold_tokens`、`keep_recent_messages`、`head_chars`、`minimum_saving_usd`、`[policy]` 和 `[magpie.accounting]` 仍为已移除配置。
 
-- 未闭合、错配或嵌套的区域保持原文，其中的子区也不折叠；此前独立闭合的合法区域不受影响。孤立结束标记保持字面文本。普通句子中的示例字符串不是标记，标记必须独占一行。
-- 未标记内容、用户指令、工具调用参数、普通工具结果、图片及签名推理字段不会被此协议顺带删除。
-- 内容哈希和出现位置分别跟踪。同一份内容刚被再次读取，不能仅因旧副本曾折叠就立即藏起。
-- 先持久保存原文，成功后才替换视图；归档引用是恢复入口，不是授权凭据。
-- 插件修改本次发给模型的请求，不接管客户端默认 compaction，也无法修改供应商保存的隐藏历史。需要当前完整、可编辑的历史才能应用折叠。
-- 字节减少、估算 token 减少、任务质量和真实账单节省是不同指标。本次源码重构不继承旧策略的性能或费用结论。
+## 独立文本管道：ctxf
 
-详细协议见 [注释协议](docs/annotation-protocol.md)，并发恢复见 [恢复一致性](docs/recovery-consistency.md)。测试使用 `npm run check`；源码适配器与 SDK 的验证命令见[子项目说明](context-folding/README.md)。
+Python 核心仍可独立使用：
 
-## Harbor 基准测试
+```sh
+uv tool install ./context-folding
+cat notes.txt | ctxf > notes.folded.txt
+ctxf fold --language python < module.py > module.folded.py
+ctxf read --id HASH --raw
+```
 
-已接入固定版本 Harbor，以相同模型、任务和工具分别测试完整历史与主动注释折叠。适配层调用本项目实际请求钩子和恢复工具，记录独立判题结果、API 用量、恢复次数及耗时。提供不调用模型的 Docker smoke、两个合成任务和外部数据集入口。
+`ctxf` 是明确的文本转换：先保存标记内原文，再输出替换结果。CLI、Python API 和 SDK 的本地 JSON Lines RPC 共享该核心；MCP 服务及 `ctxf mcp` 已移除。独立 CLI 没有注入系统提示，不会自行修改其他宿主的对话历史。
 
-使用方式见 [Harbor 基准说明](benchmarks/harbor/README.md)，验证范围见 [接入回执](docs/harbor-validation.md)。
+Python 核心与 Magpie 插件使用不同的归档后端与 scope；必须使用生成引用的那个后端恢复。Python 的 `read --raw` 保留完整管道输出契约，不能与根插件有界 `read` 的参数及偏移混用。详见[独立核心说明](context-folding/README.md)。
+
+## 验证与边界
+
+```sh
+npm run check
+npm run test:host
+```
+
+核心的四协议投影、并发、CLI 跨进程恢复与真实 Magpie HTTP 宿主测试分开验证；后者需要可运行的 Magpie 和隔离能力。插件只修改当前完整请求，不能重写供应商隐藏历史，也不接管客户端默认 compaction。
+
+协议细节见[注释协议](docs/annotation-protocol.md)，恢复一致性见[归档说明](docs/recovery-consistency.md)，本次结果见[0.5.0 验证记录](docs/validation-0.5.0.md)。[Harbor 基准](benchmarks/harbor/README.md)继续使用真实 hook 与 CLI；未做真实模型 A/B 时，不宣称任务质量或账单已经改善。

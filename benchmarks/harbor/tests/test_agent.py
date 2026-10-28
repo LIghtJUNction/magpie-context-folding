@@ -42,9 +42,9 @@ def assistant(content="done", calls=None, usage=None):
     return reply
 
 
-def tool_call(name="terminal", args=None, call_id="call-1"):
+def tool_call(name="exec_command", args=None, call_id="call-1"):
     return {"id": call_id, "type": "function", "function": {
-        "name": name, "arguments": json.dumps(args or {"command": "true"})}}
+        "name": name, "arguments": json.dumps(args or {"cmd": "true"})}}
 
 
 FULL_USAGE = {"prompt_tokens": 10, "completion_tokens": 4,
@@ -149,7 +149,7 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
         # An oversized result is a visible read failure, never a partial source.
         oversized = FakeEnvironment(ExecResult(stdout="x" * 32001, stderr="", return_code=0))
         self.assertIn("error", json.loads(await self.agent._tool("read_file", {"path": path}, oversized, None)))
-        terminal = json.loads(await self.agent._tool("terminal", {"command": "fixture"}, oversized, None))
+        terminal = json.loads(await self.agent._tool("exec_command", {"cmd": "fixture"}, oversized, None))
         self.assertEqual(len(terminal["stdout"]), 32000)
         self.assertIs(terminal["stdout_truncated"], True)
 
@@ -191,7 +191,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                 await first.call("response", success=True)
                 await second.call("response", success=True)
                 with self.assertRaisesRegex(RuntimeError, "scope_mismatch"):
-                    await second.call("recover", args={"action": "status", "scope": one["scope"]})
+                    await second.call("cli", argv=["status", "--scope", one["scope"]])
             finally:
                 await first.close()
                 await second.close()
@@ -222,7 +222,8 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     if mode == "folding":
                         self.assertIn("[[cf:v2:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
-                        self.assertIn(original, all_text(agent.received[3]))
+                        self.assertNotIn(original, all_text(agent.received[3]))
+                        self.assertIn("[[cf:v2:", all_text(agent.received[3]))
                     else:
                         self.assertIn(original, all_text(agent.received[2]))
                     metrics = context.metadata["magpie_harbor"]
@@ -277,11 +278,14 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     text = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
                     self.test.assertIn("[[cf:v2:", text)
                     reference = text.split("[[cf:v2:", 1)[1].split("]]", 1)[0]
-                    return assistant(calls=[tool_call("context_folding", {"action": "read", "id": reference,
-                                                                             "limit": 24000}, "recover-source")])
-                self.test.assertEqual(json.loads(request["messages"][-1]["content"])["text"], payload.rstrip("\n"))
+                    return assistant(calls=[tool_call("exec_command",
+                        {"cmd": f"magpie-context-folding read --id {reference} --limit 24000 --json"}, "recover-source")])
+                output = json.loads(request["messages"][-1]["content"])
+                self.test.assertEqual(output["exit_code"], 0)
+                self.test.assertEqual(json.loads(output["stdout"])["text"], payload.rstrip("\n"))
                 restored = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
-                self.test.assertEqual(restored, source)
+                self.test.assertIn("[[cf:v2:", restored)
+                self.test.assertNotIn(payload, restored)
                 return assistant()
 
         agent = SourceAgent(logs_dir=self.directory / "logs", model_name="fixture/model",
@@ -320,11 +324,11 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
         environment, context = FakeEnvironment(), AgentContext()
         await agent.setup(environment)
         agent._complete = AsyncMock(side_effect=[
-            assistant(calls=[tool_call("context_folding", {"action": "status"})]), assistant()])
+            assistant(calls=[tool_call("exec_command", {"cmd": "magpie-context-folding status"})]), assistant()])
         await agent.run("Component fixture", environment, context)
         self.assertEqual(context.metadata["magpie_harbor"]["completion"], "final")
         payload = agent._complete.await_args_list[1].args[0]
-        self.assertIn("error", json.loads(payload["messages"][-1]["content"]))
+        self.assertEqual(json.loads(payload["messages"][-1]["content"])["exit_code"], 1)
 
     async def test_cancellation_closes_real_bridge_and_preserves_unknown_usage(self):
         entered = asyncio.Event()
