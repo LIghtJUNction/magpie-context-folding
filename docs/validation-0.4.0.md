@@ -1,4 +1,27 @@
-# 0.4.0 注释主动折叠验收记录
+# 0.4.0 主动折叠与有界检索验收记录
+
+## 最新结果（2026-10-28，PR #8）
+
+**当前行为以本节为准；下方原始记录保留为历史回执，其旧测试数量、全量恢复和 read 后 keep 语义不再适用。**
+
+- 源码注释与 Assistant 普通文本同用成对的 `@context-fold begin/end LABEL`，合法嵌套形成持久父子树。历史消息保持原角色，折叠仅替换文本。父节点的查询视图保留子引用，不自动装入子正文。
+- `read`、`list`、`grep`、`meta` 是纯查询，不修改 keep、出现状态或历史投影。read 默认 1,200 字符、单次最多 24,000；list/grep 默认 10 项；grep 使用字面匹配，默认递归遍历节点视图，单条片段最多 160 字符。支持 `--lines A:B`、`--offset`、`--limit`、`--depth`、`--recursive` 与 `--json`。
+- `ctxf` 从 UTF-8 stdin 接收内容，输出完整折叠后的文本；`ctxf mcp` 只暴露 `fold/list/grep/read/meta/status` 六项。旧显式原文恢复接口仅留作兼容，不出现在 Agent 默认工作流。
+- Pi Agent 工具已由自动恢复全文改为 `context_folding_query`；Claude Read 插件提示使用同一有界查询入口。根 Magpie 宿主只修改可编辑请求内容，不改变外部提供商的 compaction 行为。
+
+| 检查 | 最新执行结果 |
+| --- | --- |
+| 根 Bun 测试，含 Harbor bridge 子进程 | **187 通过，0 失败，22 个测试文件**（Harbor 子进程在获准运行环境验证） |
+| 根 TypeScript 类型检查、构建 | 均通过 |
+| Python 完整套件 | **163 通过，0 失败，0 跳过** |
+| TypeScript SDK 编译和真实 Python 核心测试 | 编译通过；**8 通过，0 失败** |
+| Pi 适配器集成 | **7 通过，0 失败，1 跳过**（缺真实 Pi 宿主包） |
+| Claude 适配器 | 5 项通过，已计入 Python 套件 |
+| Git 补丁空白检查 | `git diff --check` 通过 |
+
+真实 Magpie、Rust、.NET 与实际安装的 Pi 宿主仍未运行；尚无真实模型任务质量、Token 账单节约、计费或默认 compaction 的实验结论。Harbor bridge 测试证明本项目的投影/查询/统计连接运行，但不是完整 Harbor 模型基准任务评分。
+
+## 历史：首次重构与最初 ctxf 管道验收
 
 验证日期：2026-10-28。此记录对应本次源码重构，不表示 npm 已发布，也不继承旧三档策略的性能或账单结论。
 
