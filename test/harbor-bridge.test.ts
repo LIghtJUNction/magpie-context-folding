@@ -81,16 +81,23 @@ test('Harbor bridge drives the real delayed projection, exact recovery and compl
     assert.equal((original.messages as any[])[2].content, marked());
     await call({ op: 'response', success: true });
 
-    const status = await call({ op: 'recover', args: { action: 'status' } });
+    const status = await call({ op: 'recover', args: { action: 'status', detail: true } });
     assert.equal(status.result.metrics.successfulHookRequests, 3);
     assert.equal(status.result.metrics.successfulFoldedRequests, 1);
     assert.equal(status.result.metrics.itemsFolded, 1);
     const recovered = await call({ op: 'recover', args: { action: 'read', id: hash, limit: 24000 } });
     assert.equal(recovered.result.text, payload);
-    assert.equal(recovered.result.kept, true);
+    assert.equal(recovered.result.kept, false);
     assert.equal(recovered.result.nextOffset, null);
 
-    const kept = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
+    const readBody = progress(nextBody, 'chat');
+    const stillFolded = await call({ op: 'project', mode: 'folding', body: readBody });
+    assert.equal(assistantText(stillFolded.result.body), compact);
+    await call({ op: 'response', success: true });
+    const restored = await call({ op: 'recover', args: { action: 'restore', id: hash, limit: 24000 } });
+    assert.equal(restored.result.kept, true);
+    assert.equal(restored.result.text, payload);
+    const kept = await call({ op: 'project', mode: 'folding', body: progress(readBody, 'chat') });
     assert.equal(assistantText(kept.result.body), marked());
     await call({ op: 'response', success: true });
   });
@@ -123,7 +130,7 @@ test('Harbor recovery cannot write to the host or read another trial scope', asy
     assert.equal(other.error?.code, 'scope_mismatch');
     const invalidArgs = await call({ op: 'recover', args: { action: 'status', path: '/tmp/forbidden' } });
     assert.equal(invalidArgs.result.error, 'Invalid context_folding arguments');
-    const status = await call({ op: 'recover', args: { action: 'status' } });
+    const status = await call({ op: 'recover', args: { action: 'status', detail: true } });
     assert.equal(status.ok, true);
     assert.equal(status.result.entries, 1);
   });
@@ -142,7 +149,7 @@ test('Harbor JSONL protocol survives bad input and enforces one completion per r
     assert.equal((await call({ op: 'response', success: 'true' })).error?.code, 'invalid_request');
     assert.equal((await call({ op: 'response', success: false })).ok, true);
     assert.equal((await call({ op: 'response', success: false })).error?.code, 'no_request');
-    const status = await call({ op: 'recover', args: { action: 'status' } });
+    const status = await call({ op: 'recover', args: { action: 'status', detail: true } });
     assert.equal(status.result.metrics.failedHookRequests, 1);
     assert.equal(status.result.metrics.successfulHookRequests, 0);
   });

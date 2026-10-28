@@ -212,7 +212,7 @@ keep = []
 enabled = false
 ```
 
-The core also accepts the root plugin's `[magpie]` settings so a project can share one file; those settings do not install Magpie hooks. Remove old `folding.mode`, threshold/head/keep-recent controls, `[policy]` and accounting settings. They return migration errors, not a silent policy fallback.
+The core also accepts the root plugin's `[magpie]` settings and `folding.min_saving_tokens` so a project can share one file; those settings do not install Magpie hooks. `min_saving_tokens` is validated as a nonnegative safe integer (default 256), but only the Magpie hook applies it to complete model requests. It does not change explicit Python `fold`, source projection, or the Python default of protecting content on `read`; use `peek: true` or CLI `--peek` for inspection. The Magpie plugin's separate `restore` action is not a Python action. Remove old `folding.mode`, threshold/head/keep-recent controls, `[policy]` and accounting settings. They return migration errors, not a silent policy fallback.
 
 The budget-related fields describe host capacity; the standalone archive does not count an unseen full model request. See the [root README](../README.md) for Magpie's estimate and its limits.
 

@@ -42,7 +42,7 @@ async function command(directory: string, args: string[], input?: string) {
   return { stdout, stderr, code };
 }
 
-test('CLI restores paginated exact text with no added newline and supports JSON/range/pipe export/config', async () => {
+test('CLI reads exact text without restoring and supports explicit restoration, ranges and exports', async () => {
   await fixture(async (store, scope, directory, text) => {
     await writeFile(join(directory, '.context-folding.toml'), '[folding]\nenabled = false\n');
     const config = await command(directory, ['config']);
@@ -53,7 +53,7 @@ test('CLI restores paginated exact text with no added newline and supports JSON/
     assert.equal(read.code, 0, read.stderr);
     assert.equal(read.stderr, '');
     assert.equal(read.stdout, text);
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
     const json = await command(directory, ['read', '--scope', scope, '--id', 'a', '--json']);
     assert.equal(JSON.parse(json.stdout).text, text);
     const range = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '11', '--limit', '11', '--json']);
@@ -64,10 +64,15 @@ test('CLI restores paginated exact text with no added newline and supports JSON/
     assert.equal(tail.stdout, text.slice(-11));
     const peek = await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', '-', '--peek']);
     assert.equal(peek.stdout, text);
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
     const destination = join(directory, 'destination');
     assert.equal((await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', destination])).code, 0);
     assert.equal(await readFile(destination, 'utf8'), text);
+    const restored = await command(directory, ['restore', '--scope', scope, '--id', 'a', '--json']);
+    assert.equal(restored.code, 0, restored.stderr);
+    assert.equal(JSON.parse(restored.stdout).text, text);
+    assert.equal(JSON.parse(restored.stdout).kept, true);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
     for (const action of ['status', 'list', 'stats']) {
       const result = await command(directory, [action, '--scope', scope, '--json']);
       assert.equal(result.code, 0);

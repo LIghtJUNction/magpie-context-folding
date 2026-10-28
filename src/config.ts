@@ -8,6 +8,7 @@ export const optionsSchema = z.object({
   enabled: z.boolean().default(true),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
   delayRequests: nonnegativeInteger.default(1),
+  minSavingTokens: nonnegativeInteger.default(256),
   contextWindowTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   reserveOutputTokens: nonnegativeInteger.default(0),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
@@ -19,6 +20,7 @@ const foldingSchema = z.object({
   enabled: optionsSchema.shape.enabled,
   max_session_bytes: optionsSchema.shape.maxSessionBytes,
   delay_requests: optionsSchema.shape.delayRequests,
+  min_saving_tokens: optionsSchema.shape.minSavingTokens,
   context_window_tokens: optionsSchema.shape.contextWindowTokens,
   reserve_output_tokens: optionsSchema.shape.reserveOutputTokens,
 }).strict();
@@ -191,10 +193,10 @@ function fromOptions(input: unknown): Table {
   // @context-fold begin fromOptions-1a94c69f7b
   const value = input ?? {};
   rejectLegacy(value, '<overrides>', true);
-  const { enabled, maxSessionBytes, delayRequests, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, recoveryToolName } =
+  const { enabled, maxSessionBytes, delayRequests, minSavingTokens, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, recoveryToolName } =
     explicitFields(validated(optionsSchema.partial(), value, '<overrides>'), value);
   return {
-    folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests,
+    folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests, min_saving_tokens: minSavingTokens,
       context_window_tokens: contextWindowTokens, reserve_output_tokens: reserveOutputTokens },
     magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs },
   };
@@ -224,7 +226,7 @@ export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Opt
   const f = config.folding;
   const m = config.magpie;
   return validated(optionsSchema, {
-    enabled: f.enabled, maxSessionBytes: f.max_session_bytes, delayRequests: f.delay_requests,
+    enabled: f.enabled, maxSessionBytes: f.max_session_bytes, delayRequests: f.delay_requests, minSavingTokens: f.min_saving_tokens,
     contextWindowTokens: f.context_window_tokens, reserveOutputTokens: f.reserve_output_tokens,
     recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms,
   }, '<effective settings>');

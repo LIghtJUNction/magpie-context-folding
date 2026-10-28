@@ -86,8 +86,8 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.equal(metrics.savingNanoUsdLower, '0');
     assert.equal(metrics.certifiedTokenDeltaLower, '0');
 
-    await execute({ scope, action: 'read', id: ids[0], limit: 10 });
-    await execute({ scope, action: 'read', id: ids[1], limit: 5 });
+    await execute({ scope, action: 'read', id: ids[0], limit: 10, peek: false });
+    await execute({ scope, action: 'read', id: ids[1], limit: 5, peek: false });
     const session = await call({ scope, action: 'stats' });
     assert.equal(session.metrics.originalReadCalls, 2);
     assert.equal(session.metrics.layerReadCalls, 0);

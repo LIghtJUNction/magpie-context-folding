@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -222,9 +223,22 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     if mode == "folding":
                         self.assertIn("[[cf:v2:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
-                        self.assertIn(original, all_text(agent.received[3]))
+                        # A lookup returns exact evidence as a tool result; it
+                        # must not undo the folding of the original history.
+                        result_message = agent.received[3]["messages"][-1]
+                        self.assertEqual(result_message["role"], "tool")
+                        self.assertEqual(result_message["tool_call_id"], "smoke-2")
+                        recovered = json.loads(result_message["content"])
+                        self.assertEqual(recovered["text"], original)
+                        self.assertEqual(recovered["sha256"], hashlib.sha256(original.encode()).hexdigest())
+                        self.assertIs(recovered["kept"], False)
+                        self.assertIsNone(recovered["nextOffset"])
+                        for request in agent.received[3:]:
+                            self.assertIn("[[cf:v2:", all_text(request))
+                            self.assertNotIn(original, all_text(request))
                     else:
-                        self.assertIn(original, all_text(agent.received[2]))
+                        for request in agent.received[2:]:
+                            self.assertIn(original, all_text(request))
                     metrics = context.metadata["magpie_harbor"]
                     self.assertEqual(metrics["measurement"], "scripted-smoke")
                     self.assertEqual(metrics["completion"], "final")
@@ -281,6 +295,13 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                                                                              "limit": 24000}, "recover-source")])
                 self.test.assertEqual(json.loads(request["messages"][-1]["content"])["text"], payload.rstrip("\n"))
                 restored = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
+                if step == 3:
+                    self.test.assertFalse(json.loads(request["messages"][-1]["content"])["kept"])
+                    self.test.assertIn("[[cf:v2:", restored)
+                    reference = restored.split("[[cf:v2:", 1)[1].split("]]", 1)[0]
+                    return assistant(calls=[tool_call("context_folding", {"action": "restore", "id": reference,
+                                                                             "limit": 24000}, "restore-source")])
+                self.test.assertTrue(json.loads(request["messages"][-1]["content"])["kept"])
                 self.test.assertEqual(restored, source)
                 return assistant()
 
@@ -291,7 +312,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.setup(environment)
         await agent.run("Read and recover source component fixture", environment, context)
         self.assertEqual(len(environment.commands), 2)
-        self.assertEqual(context.metadata["magpie_harbor"]["recovery_calls"], 1)
+        self.assertEqual(context.metadata["magpie_harbor"]["recovery_calls"], 2)
 
     async def test_subprocess_start_failure_closes_open_stderr_and_records_failure(self):
         bridges = []

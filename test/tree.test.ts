@@ -83,7 +83,7 @@ test('archive rejects multiple latest markers and cyclic or reversed revision ch
   });
 });
 
-test('reading a nested legacy member releases every ancestor and preserves its historical metadata', async () => {
+test('restoring a nested legacy member releases every ancestor and preserves its historical metadata', async () => {
   await fixture(async (store, scope) => {
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.groups = [group('g-one', ['a', 'b']), group('g-two', ['g-one', 'c'])];
@@ -91,7 +91,7 @@ test('reading a nested legacy member releases every ancestor and preserves its h
       state.entries[0]!.folded = 'entry folded';
       state.entries[0]!.version = { series: 'series', number: 1, kind: 'similar', automatic: true };
     });
-    const result = await call({ action: 'read', scope, id: 'a' });
+    const result = await call({ action: 'restore', scope, id: 'a' });
     assert.equal(result.error, undefined);
     const state = await load(store, scope);
     assert.equal(state.entries[0]?.folded, undefined);
@@ -125,7 +125,7 @@ test('group read/paste return only the manifest and forget protects folded group
     const outsideScope = await call({ action: 'read', scope: '0'.repeat(64), id });
     assert.match(outsideScope.error, /Unknown context scope/);
     assert.equal(outsideScope.text, undefined);
-    await call({ action: 'read', scope, id });
+    await call({ action: 'restore', scope, id });
     assert.equal((await call({ action: 'forget', scope })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
   });
@@ -240,9 +240,9 @@ test('runtime list bounds, read default and public schema stay explicit', async 
       assert.ok((await call({ action: 'list', scope, ...extra })).error);
     }
     const read = await call({ action: 'read', scope, id: 'a' });
-    assert.equal(read.text.length, 4000);
-    assert.equal(read.nextOffset, 4000);
+    assert.equal(read.text.length, 2000);
+    assert.equal(read.nextOffset, 2000);
     const plugin = await ContextFoldingPlugin();
-    assert.equal(plugin.tool.context_folding.args.oneOf.length, 6);
+    assert.equal(plugin.tool.context_folding.args.oneOf.length, 7);
   });
 });
