@@ -141,7 +141,6 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       // independent of parse order. Full hashes and original text stay in storage.
       const hashes = new Set([...byHash.keys(), ...snapshot.entries.map(entry => entry.id),
         ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256)]);
-      let newlyFolded = 0;
       let waiting = 0;
       let skipped = 0;
       for (const { region, occurrence, role } of found) {
@@ -194,10 +193,12 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         hasFolded = existingReferences.length > 0;
         projected = body;
         result = decorate(body, hasFolded ? scope : undefined);
-      } else for (const { entry, occurrence, reference: ref } of proposed) {
+      }
+      const newRegions = proposed.filter(({ entry, occurrence }) => !entry.occurrences![occurrence]!.folded);
+      const newlyFolded = newRegions.length;
+      for (const { entry, occurrence, reference: ref } of proposed) {
         entry.folded = ref;
-        const observed = entry.occurrences![occurrence]!;
-        if (!observed.folded) { newlyFolded++; observed.folded = true; }
+        entry.occurrences![occurrence]!.folded = true;
       }
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
@@ -207,13 +208,16 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         estimatedNetSavings: estimateTokens(body) - estimateTokens(result) };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
-        foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(projected))),
+        // A request can replay older folds alongside a newly completed region.
+        // Only first-time replacements contribute to cumulative gross savings.
+        foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(
+          replaceExtractedSpans(body, replaceRegions(spans, newRegions), ctx.protocol, spans)))),
       });
       pending = { scope, bodyHash: fingerprint(result), folded: hasFolded,
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
           guideOnlyRequests: hasFolded ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
-          estimatedTokenDelta: String(estimateTokens(body) - estimateTokens(result)),
+          estimatedTokenDelta: String(estimateTokens(input) - estimateTokens(result)),
         }) };
       return result;
     }, ctx.signal);
