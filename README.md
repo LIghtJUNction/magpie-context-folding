@@ -8,6 +8,20 @@
 
 0.5.0 自动把一条简短规则放进请求的系统指令。没有 MCP 服务、额外模型工具、每轮状态查询或“折叠后再读回验证”的流程。折叠由 Magpie 请求钩子完成，CLI 负责按需查阅。此源码版本尚未发布到 npm。
 
+## 在 Codex / Claude Code 中看到折叠效果
+
+折叠发生在 Magpie 发往模型的请求副本里。客户端已显示的聊天记录不会因此变成可点击的折叠块，原生 compaction 提示也不会被触发。要查看实际变化，使用本次源码修复新增的本地显示命令：
+
+```sh
+magpie-context-folding sessions                 # 找到已有会话的 scope 和最近记录
+magpie-context-folding statusline --scope S     # 最近请求：前后估算、段数、响应确认状态
+magpie-context-folding statusline               # 明确标记的全局累计
+```
+
+Claude Code 的 `statusLine.command` 可运行 `magpie-context-folding statusline --client`；Codex 的 `Stop` hook 可运行 `magpie-context-folding hook`，只输出界面消息。两者只在客户端 `session_id` 与 Magpie 观察到的会话标识唯一匹配时自动绑定，也支持明确指定 `--scope`。无法绑定时不会拿其他会话冒充当前会话。
+
+显示读取本地元数据，不增加模型输入。每次对比包含系统指导和恢复路径等开销；“待确认”“匹配成功”“失败”“未核实”分开显示。真实供应商 token 用量保持原样，插件的字节 / 4 估算单独标注。配置示例、同机状态目录要求与界面边界见 [客户端显示接入](docs/client-visibility.md)。
+
 ## 安装后直接工作
 
 ```sh

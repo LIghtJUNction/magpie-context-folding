@@ -83,6 +83,10 @@ export interface StatsReport {
   metrics: Metrics;
   storage: { activeSessions: number; blobs: number; databaseBytes: number };
 }
+export interface ObservationCompletion {
+  requestId: string;
+  status: 'confirmed' | 'failed' | 'unverified';
+}
 type StoredSnapshot = z.infer<typeof storedSnapshotSchema>;
 type SessionQuotaPolicy = 'configure' | 'preserve' | 'enforce';
 const defaultSessionLimitBytes = 64 * 1024 * 1024;
@@ -316,10 +320,13 @@ export class Store {
     // @context-fold end readStats-6c01d10458
   }
 
-  async recordMetrics(scope: string, delta: Partial<Metrics>, signal?: AbortSignal): Promise<void> {
+  async recordMetrics(scope: string, delta: Partial<Metrics>, signal?: AbortSignal, completion?: ObservationCompletion): Promise<void> {
     // @context-fold begin recordMetrics-8a08af355b
     signal?.throwIfAborted();
     hashSchema.parse(scope);
+    if (completion !== undefined) z.object({
+      requestId: z.string().uuid(), status: z.enum(['confirmed', 'failed', 'unverified']),
+    }).strict().parse(completion);
     const increment = addMetrics(emptyMetrics(), delta);
     try { await stat(join(this.directory, 'state.sqlite')); }
     catch (error) {
@@ -335,17 +342,26 @@ export class Store {
         const session = sessionRowSchema.parse(row);
         const stored = storedSnapshotSchema.parse(JSON.parse(session.snapshot));
         const metrics = addMetrics(stored.metrics, increment);
-        if (JSON.stringify(metrics) === JSON.stringify(stored.metrics)) {
+        let decision = stored.decision;
+        const observed = z.object({ requestId: z.string().uuid() }).safeParse(decision.observation);
+        // A delayed response belongs to its own request. It may contribute to
+        // lifetime counters, but must never confirm a newer projection.
+        if (completion && observed.success && observed.data.requestId === completion.requestId) {
+          decision = { ...decision, observation: { ...(decision.observation as Record<string, unknown>),
+            status: completion.status, completedAt: Date.now() } };
+        }
+        if (JSON.stringify(metrics) === JSON.stringify(stored.metrics) && JSON.stringify(decision) === JSON.stringify(stored.decision)) {
           database.exec('COMMIT');
           return;
         }
         const { payloadBytes, sessionLimitBytes, ...base } = stored;
         const previousBytes = payloadBytes ?? legacyPayloadBytes(database, JSON.stringify(base));
-        const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics));
+        const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics))
+          + Buffer.byteLength(JSON.stringify(decision)) - Buffer.byteLength(JSON.stringify(stored.decision));
         const limit = sessionLimitBytes ?? defaultSessionLimitBytes;
         if (nextBytes > limit) throw new Error('Session archive full; statistics not committed');
         database.query('UPDATE sessions SET revision = ?, snapshot = ? WHERE scope = ?')
-          .run(session.revision + 1, JSON.stringify({ ...base, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
+          .run(session.revision + 1, JSON.stringify({ ...base, decision, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
         const lifetime = addMetrics(readLifetimeMetrics(database), increment);
         database.query("INSERT INTO meta (key, value) VALUES ('lifetime-metrics', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
           .run(JSON.stringify(lifetime));
