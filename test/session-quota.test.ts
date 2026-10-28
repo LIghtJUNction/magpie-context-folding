@@ -38,7 +38,10 @@ async function fixture(run: (f: {
     const scope = await store.scopeFor(JSON.stringify([context.session, '', '', directory]));
     await run({
       directory, scope,
-      configure: (maxSessionBytes, input = body) => onRequest(input, { ...context, options: { maxSessionBytes, delayRequests: 0 } }),
+      // These small fixtures isolate quota behavior; the default savings guard
+      // is covered with complete-request measurements in utility.test.ts.
+      configure: (maxSessionBytes, input = body) => onRequest(input, { ...context,
+        options: { maxSessionBytes, delayRequests: 0, minSavingTokens: 0 } }),
       stored: () => {
         const database = new Database(join(directory, 'state.sqlite'), { readonly: true });
         try {
@@ -68,11 +71,11 @@ test('annotation archival honors the configured quota and preserves the whole re
   });
 });
 
-test('read, paste and inspection preserve the request quota instead of raising it to their recovery ceiling', async () => {
-  for (const action of ['read', 'paste', 'list', 'status', 'stats']) {
+test('read, restore, paste and inspection preserve the request quota instead of raising it to their recovery ceiling', async () => {
+  for (const action of ['read', 'restore', 'paste', 'list', 'status', 'stats']) {
     await fixture(async f => {
       await f.configure(4096);
-      const args = { action, scope: f.scope, ...(['read', 'paste'].includes(action) ? { id } : {}),
+      const args = { action, scope: f.scope, ...(['read', 'restore', 'paste'].includes(action) ? { id } : {}),
         ...(action === 'paste' ? { path: join(f.directory, 'recovered.txt') } : {}) };
       assert.equal((await call(args)).error, undefined, action);
       assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 4096, action);
@@ -127,7 +130,7 @@ test('lowering the quota keeps oversized snapshots recoverable while rejecting g
     const growth = { ...large, messages: [...large.messages, { role: 'assistant', content: region('additional', 'more '.repeat(1000)) }] };
     assert.deepEqual(await f.configure(2048, growth), growth);
     assert.deepEqual(f.stored(), before);
-    const recovered = await call({ action: 'read', scope: f.scope, id });
+    const recovered = await call({ action: 'restore', scope: f.scope, id });
     assert.equal(recovered.text, text);
     assert.equal(recovered.kept, true);
     assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 2048);

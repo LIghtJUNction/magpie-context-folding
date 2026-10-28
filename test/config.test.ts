@@ -28,10 +28,10 @@ async function fixture(run: (f: { root: string; project: string; global: string;
 test('annotation-only defaults and optional context budget', async () => {
   await fixture(async f => {
     const options = await loadOptions(undefined, f.project);
-    assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1,
+    assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1, minSavingTokens: 256,
       reserveOutputTokens: 0, contextWindowTokens: undefined, gatewayTimeoutMs: undefined, recoveryToolName: undefined });
     assert.deepEqual(parseOptions({ delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000 }), {
-      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000,
+      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, minSavingTokens: 256, contextWindowTokens: 128000, reserveOutputTokens: 8000,
     });
     const { config, sources } = await loadConfig(f.project);
     assert.deepEqual(config.annotations, { enabled: true, default_fold: true, keep: [] });
@@ -128,6 +128,7 @@ test('strict schema and numeric limits report safe source paths', async () => {
     for (const content of ['unknown=1', 'version=2', 'version=true', 'folding=false',
       '[folding]\nunknown=1', '[folding]\ndelay_requests=-1', '[folding]\ndelay_requests=0.5',
       '[folding]\ncontext_window_tokens=0', '[folding]\nreserve_output_tokens=-1',
+      '[folding]\nmin_saving_tokens=-1', '[folding]\nmin_saving_tokens=0.5',
       '[folding]\nmax_session_bytes=67108865', '[folding]\nenabled=1',
       '[annotations]\nkeep=[1]', '[annotations]\nkeep=[""]', '[gc]\nstrength="invalid"',
       '[gc]\nidle_seconds=315576001', '[gc]\nmax_uses=1.5', '[gc]\nauto_purge=1',

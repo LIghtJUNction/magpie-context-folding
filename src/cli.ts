@@ -9,32 +9,34 @@ import { writeReport } from './report.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
-read   --scope S --id ID [--layer ID] [--offset N] [--limit N] [--peek] [--json]
-paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
+read   --scope S --id ID [--layer ID] [--offset N] [--limit N] [--peek|--keep] [--json]
+restore --scope S --id ID [--layer ID] [--offset N] [--limit N] [--json]
+paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek|--keep]
 list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
        [--order asc|desc] [--offset N] [--limit N]
-status --scope S
+status --scope S [--detail]
 stats  [--scope S] [--json]
 report --output /absolute/new.html [--scope S]
 forget --scope S (requires restored entries and group manifests)
 config [--project-dir PATH]
 
-read writes the full exact text to stdout unless --limit selects a page; paste --path - does the same.
+read/restore write the full exact text to stdout unless --limit selects a page; paste --path - does the same.
 Other archive commands and config write JSON.
-read/paste persist keep and restore all ancestor groups; --peek leaves folding unchanged.
-Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
+read/paste leave folding unchanged by default. restore or --keep explicitly keeps originals expanded and restores ancestor groups.
+Recovery accepts exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
 Folding is requested with @context-fold begin/end annotations, not a CLI command.
 --json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
 
 const string = { type: 'string' } as const;
 const boolean = { type: 'boolean' } as const;
 const common = { json: boolean, help: boolean };
-const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean };
+const range = { scope: string, id: string, layer: string, offset: string, limit: string };
 const options: Record<string, ParseArgsConfig['options']> = {
-  read: { ...common, ...range },
-  paste: { ...common, ...range, path: string },
+  read: { ...common, ...range, peek: boolean, keep: boolean },
+  restore: { ...common, ...range },
+  paste: { ...common, ...range, peek: boolean, keep: boolean, path: string },
   list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
-  status: { ...common, scope: string },
+  status: { ...common, scope: string, detail: boolean },
   stats: { ...common, scope: string },
   report: { help: boolean, output: string, scope: string },
   forget: { ...common, scope: string },
@@ -94,6 +96,7 @@ async function main(): Promise<void> {
     return;
   }
   const args: Record<string, unknown> = { action: command };
+  if (values.peek && values.keep) throw new UsageError('Choose only one of --peek or --keep');
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined || key === 'json' || key === 'help') continue;
     if (['offset', 'limit', 'depth'].includes(key)) {
@@ -101,11 +104,12 @@ async function main(): Promise<void> {
         throw new UsageError('Expected a nonnegative integer for range/depth options');
       }
       args[key] = Number(value);
-    } else args[key] = value;
+    } else if (key === 'keep') { if (value) args.peek = false; }
+    else args[key] = value;
   }
-  const stdoutRead = command === 'read' || (command === 'paste' && values.path === '-');
+  const stdoutRead = command === 'read' || command === 'restore' || (command === 'paste' && values.path === '-');
   if (stdoutRead) {
-    const request: Record<string, unknown> = { ...args, action: 'read' };
+    const request: Record<string, unknown> = { ...args, action: command === 'restore' ? 'restore' : 'read' };
     delete request.path;
     const page = async (input: Record<string, unknown>) => {
       const result = JSON.parse(await execute(input)) as {
@@ -119,7 +123,7 @@ async function main(): Promise<void> {
     const chunks = [result.text];
     let nextOffset = result.nextOffset;
     while (args.limit === undefined && nextOffset !== null) {
-      const next = await page({ ...request, peek: true, offset: nextOffset, limit: 24000 });
+      const next = await page({ ...request, action: 'read', peek: true, offset: nextOffset, limit: 24000 });
       if (next.sha256 !== result.sha256 || next.totalChars !== result.totalChars) {
         throw new UsageError('Context archive changed during reading; retry request');
       }

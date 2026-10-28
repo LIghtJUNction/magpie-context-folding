@@ -11,7 +11,7 @@ const folded = (value: unknown) => JSON.stringify(value).includes('[[cf:v2:');
 const tool = async (args: unknown) => JSON.parse(await execute(args));
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
-  test(`${protocol}: markers fold after a distinct request, retries keep the grace period, and exact read keeps originals`, async () => {
+  test(`${protocol}: markers wait through retries, read preserves folding, and explicit restore keeps originals`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const input = bodyFor(protocol);
       const first = await onRequest(input, context) as Record<string, unknown>;
@@ -30,8 +30,11 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const recovered = await tool({ action: 'read', scope, id: digest(payload).slice(0, 12), limit: 24000 });
       assert.equal(recovered.text, payload);
       assert.equal(recovered.sha256, digest(payload));
-      assert.equal(recovered.kept, true);
-      assert.equal(folded(await onRequest(nextInput, context)), false, 'recovered content stays visible');
+      assert.equal(recovered.kept, false);
+      assert.equal(folded(await onRequest(nextInput, context)), true, 'looking up details does not undo folding');
+      const restored = await tool({ action: 'restore', scope, id: recovered.id });
+      assert.equal(restored.kept, true);
+      assert.equal(folded(await onRequest(nextInput, context)), false, 'explicitly restored content stays visible');
     }, protocol);
   });
 }
@@ -92,7 +95,7 @@ test('disabled, cancelled, oversized or ambiguous requests retain the exact inpu
   });
 });
 
-test('without a callable recovery entry point only budget metadata is emitted', async () => {
+test('without a callable recovery entry point requests remain unchanged unless a known budget is requested', async () => {
   await fixture(async ({ context, store }) => {
     const input = { ...bodyFor('chat'), tools: [] };
     const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
@@ -100,6 +103,10 @@ test('without a callable recovery entry point only budget metadata is emitted', 
     assert.equal(folded(output), false);
     assert.equal((await store.readStats()).storage.activeSessions, 0);
     assert.doesNotMatch(JSON.stringify(output), /scope=/);
+    assert.deepEqual(output, input);
+    const budget = await onRequest(input, { ...context, options: { contextWindowTokens: 128000 } }) as Record<string, unknown>;
+    assert.deepEqual(withoutBudget(budget, 'chat'), input);
+    assert.match(JSON.stringify(budget), /capacity=128000/);
   });
 });
 
