@@ -11,7 +11,7 @@ export const optionsSchema = z.object({
   contextWindowTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   reserveOutputTokens: nonnegativeInteger.default(0),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
-  recoveryToolName: z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/).optional(),
+  fileAccess: z.boolean().default(true),
 }).strict();
 export type Options = z.infer<typeof optionsSchema>;
 
@@ -37,14 +37,14 @@ const gcSchema = z.object({
   auto_purge: z.boolean().default(false),
 }).strict();
 const magpieSchema = z.object({
-  recovery_tool_name: optionsSchema.shape.recoveryToolName,
+  file_access: optionsSchema.shape.fileAccess,
   gateway_timeout_ms: optionsSchema.shape.gatewayTimeoutMs,
 }).strict();
 const configSchema = z.object({
   folding: foldingSchema.default(() => foldingSchema.parse({})),
   annotations: annotationsSchema.default(() => annotationsSchema.parse({})),
   gc: gcSchema.default(() => gcSchema.parse({})),
-  magpie: magpieSchema.default({}),
+  magpie: magpieSchema.default(() => magpieSchema.parse({})),
 }).strict();
 const layerSchema = z.object({
   version: z.literal(1).optional(),
@@ -72,6 +72,8 @@ const migrationReason = 'removed: folding now requires agent-authored @context-f
 function rejectLegacy(value: unknown, source: string, runtime = false): void {
   // @context-fold begin rejectLegacy-76c9704195
   if (!table(value)) return;
+  if (runtime && Object.hasOwn(value, 'recoveryToolName')) throw new ConfigError(source, 'recoveryToolName', 'removed: recovery uses local archive files; configure fileAccess for a shared filesystem');
+  if (table(value.magpie) && Object.hasOwn(value.magpie, 'recovery_tool_name')) throw new ConfigError(source, 'magpie.recovery_tool_name', 'removed: recovery uses local archive files; configure file_access for a shared filesystem');
   if (runtime) {
     for (const key of ['mode', 'thresholdTokens', 'keepRecentMessages', 'headChars', 'minimumSavingUsd', 'policy', 'accounting']) {
       if (Object.hasOwn(value, key)) throw new ConfigError(source, key, migrationReason);
@@ -191,12 +193,12 @@ function fromOptions(input: unknown): Table {
   // @context-fold begin fromOptions-1a94c69f7b
   const value = input ?? {};
   rejectLegacy(value, '<overrides>', true);
-  const { enabled, maxSessionBytes, delayRequests, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, recoveryToolName } =
+  const { enabled, maxSessionBytes, delayRequests, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, fileAccess } =
     explicitFields(validated(optionsSchema.partial(), value, '<overrides>'), value);
   return {
     folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests,
       context_window_tokens: contextWindowTokens, reserve_output_tokens: reserveOutputTokens },
-    magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs },
+    magpie: { file_access: fileAccess, gateway_timeout_ms: gatewayTimeoutMs },
   };
   // @context-fold end fromOptions-1a94c69f7b
 }
@@ -226,7 +228,7 @@ export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Opt
   return validated(optionsSchema, {
     enabled: f.enabled, maxSessionBytes: f.max_session_bytes, delayRequests: f.delay_requests,
     contextWindowTokens: f.context_window_tokens, reserveOutputTokens: f.reserve_output_tokens,
-    recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms,
+    fileAccess: m.file_access, gatewayTimeoutMs: m.gateway_timeout_ms,
   }, '<effective settings>');
   // @context-fold end loadOptions-69cb98dd63
 }

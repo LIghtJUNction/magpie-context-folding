@@ -10,7 +10,7 @@ uv sync
 
 Configure `Config.python` with the absolute path to `context-folding/.venv/bin/python` created by uv, or use another Python interpreter where the package is installed. The default `python3` must itself be able to import `context_folding`.
 
-This is the same engine used by `ctxf fold` and `ctxf mcp`. Point `Config.state` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+This is the same engine used by `ctxf fold` and the local `ctxf rpc` bridge. Point `Config.state` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
 
 Add the Rust crate as a path dependency, adjusting the path for your application:
 
@@ -73,3 +73,5 @@ cargo test --offline
 ```
 
 Set `CONTEXT_FOLDING_REAL_CORE_PATH` to the absolute `context-folding/python` directory to additionally exercise immediate `fold`, empty text, complete views and scoped recovery, plus source annotation delay and retry/fresh-occurrence handling against the actual core. Without it, those cases report an explicit skip.
+
+New folds return absolute archive paths. Read those ordinary files directly when appropriate; file reads do not require the Python process or change keep state. Generic calls also accept explicit text ranges and `fold-messages`. See [the core guide](../../README.md#any-text-or-conversation-range) for field names and code-point offsets. MCP transport has been removed.

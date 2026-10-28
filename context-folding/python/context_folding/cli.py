@@ -1,10 +1,9 @@
-"""Local CLI, JSON Lines RPC, and MCP stdio transport."""
+"""Local CLI and JSON Lines RPC; recovery uses ordinary immutable files."""
 from __future__ import annotations
 
 import argparse
 import fnmatch
 import json
-import math
 import os
 import stat
 import sys
@@ -17,51 +16,7 @@ from .annotations import annotate_python_functions
 from .core import Client, FoldingError
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
-PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-ACTIONS = ("fold", "put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
-TOOL_SCHEMA = {
-    "type": "object",
-    "required": ["action", "scope"],
-    "properties": {
-        "action": {"type": "string", "enum": list(ACTIONS)},
-        "scope": {"type": "string", "minLength": 1, "maxLength": 200},
-        "text": {"type": "string"},
-        "language": {"type": "string"},
-        "occurrence": {"type": "string", "minLength": 1, "maxLength": 200},
-        "requestCycle": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
-        "commentStyles": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["start"], "properties": {"start": {"type": "string", "minLength": 1, "maxLength": 64}, "end": {"type": "string", "maxLength": 64}}, "additionalProperties": False}},
-        "keep": {"type": "array", "items": {"type": "string"}},
-        "expand": {"type": "array", "items": {"type": "string"}},
-        "expandMode": {"type": "string", "enum": ["single", "recursive"]},
-        "files": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object"}},
-        "id": {"type": "string"},
-        "ids": {"type": "array", "items": {"type": "string"}},
-        "role": {"type": "string"},
-        "source": {"type": "object"},
-        "protected": {"type": "array", "items": {"type": "string"}},
-        "value": {},
-        "query": {"type": "string"},
-        "path": {"type": "string"},
-        "mode": {"type": "string"},
-        "config": {"type": "object"},
-        "body": {"type": "string"},
-        "description": {"type": "string"},
-        "limit": {"type": "integer", "minimum": 1},
-        "offset": {"type": "integer", "minimum": 0},
-        "depth": {"type": "integer", "minimum": 0, "maximum": 8},
-        "sort": {"type": "string", "enum": ["chronological", "size", "id", "version"]},
-        "order": {"type": "string", "enum": ["asc", "desc"]},
-        "name": {"type": "string"},
-        "pinned": {"type": "boolean"},
-        "peek": {"type": "boolean"},
-    },
-    "additionalProperties": True,
-}
-TOOL = {
-    "name": "context_folding",
-    "description": "fold immediately archives and replaces closed @context-fold begin/end regions in supplied text, returning the complete text and recoverable references. Existing references stay literal. read/resolve recover originals. Background read-source instead requires host occurrence/requestCycle for delayed projection; without a cycle the original stays visible. No automatic summaries or fold strategies.",
-    "inputSchema": TOOL_SCHEMA,
-}
+ACTIONS = ("fold", "fold-messages", "put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
 
 
 class InputError(Exception):
@@ -143,85 +98,6 @@ def serve_rpc(client: Client, stream: BinaryIO) -> int:
     return 0
 
 
-def _rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
-
-
-class MCPServer:
-    def __init__(self, client: Client):
-        self.client = client
-        self.initialized = False
-
-    def handle(self, request: Any) -> dict[str, Any] | None:
-        if not isinstance(request, dict):
-            return _rpc_error(None, -32600, "Invalid Request")
-        request_id = request.get("id")
-        valid_id = request_id is None or isinstance(request_id, str) or (
-            isinstance(request_id, (int, float)) and not isinstance(request_id, bool)
-            and (not isinstance(request_id, float) or math.isfinite(request_id))
-        )
-        if request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str) or not valid_id:
-            return _rpc_error(None, -32600, "Invalid Request")
-        # All notifications are silent, including unknown extensions. They may
-        # never invoke archive operations or consume a request/response slot.
-        if "id" not in request:
-            return None
-        method = request["method"]
-        params = request.get("params", {})
-        if not isinstance(params, dict):
-            return _rpc_error(request_id, -32602, "Params must be an object")
-        if method == "initialize":
-            if not isinstance(params.get("protocolVersion"), str) or not params["protocolVersion"]:
-                return _rpc_error(request_id, -32602, "protocolVersion must be a nonempty string")
-            if not isinstance(params.get("capabilities"), dict) or not isinstance(params.get("clientInfo"), dict):
-                return _rpc_error(request_id, -32602, "capabilities and clientInfo must be objects")
-            version = params["protocolVersion"]
-            result = {
-                "protocolVersion": version if version in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "context-folding", "version": "0.1.0"},
-                "instructions": "Use explicit @context-fold begin LABEL and @context-fold end LABEL comments. fold is an immediate explicit operation on supplied text; read-source is a delayed background projection requiring host occurrence/requestCycle. read recovers originals on demand. A host may call resolve only when final tool arguments actually contain fold references. This MCP server cannot intercept calls to other tools.",
-            }
-            self.initialized = True
-        elif method == "ping":
-            result = {}
-        elif not self.initialized:
-            return _rpc_error(request_id, -32000, "Initialize the server first")
-        elif method == "tools/list":
-            result = {"tools": [TOOL]}
-        elif method == "tools/call":
-            if params.get("name") != TOOL["name"]:
-                return _rpc_error(request_id, -32602, "Unknown tool")
-            arguments = params.get("arguments", {})
-            if not isinstance(arguments, dict):
-                return _rpc_error(request_id, -32602, "Tool arguments must be an object")
-            response = _call(self.client, arguments)
-            failed = "error" in response
-            result = {
-                "content": [{"type": "text", "text": _json(response if failed else response["result"])}],
-                "isError": failed,
-            }
-        else:
-            return _rpc_error(request_id, -32601, "Method not found")
-        return {"jsonrpc": "2.0", "id": request_id, "result": result}
-
-
-def serve_mcp(client: Client, stream: BinaryIO) -> int:
-    server = MCPServer(client)
-    for frame in _lines(stream):
-        try:
-            if isinstance(frame, InputError):
-                raise frame
-            response = server.handle(_loads(frame))
-        except InputError as exc:
-            response = _rpc_error(None, -32600 if exc.code == "input_too_large" else -32700, exc.message)
-        except Exception:
-            response = _rpc_error(None, -32603, "Internal error")
-        if response is not None:
-            _emit(response)
-    return 0
-
-
 def _read_stdin() -> bytes:
     data = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
     if len(data) > MAX_INPUT_BYTES:
@@ -262,7 +138,7 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
     if ctxf:
         parser.add_argument("--scope", default=argparse.SUPPRESS, help="Persistent archive namespace (default: default)")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
+    for command in ("rpc", "call", *ACTIONS, "annotate-functions"):
         sub = commands.add_parser(command)
         if command == "annotate-functions":
             sub.add_argument("path", help="Python/JavaScript/TypeScript source file or project directory")
@@ -274,12 +150,15 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
             continue
         sub.add_argument("--state", default=argparse.SUPPRESS, help="SQLite state file")
         sub.add_argument("--project-dir", default=argparse.SUPPRESS, help="Project settings discovery directory")
-        if command in ("rpc", "mcp"):
+        if command in ("rpc",):
             continue
         if command == "fold":
             sub.add_argument("--scope", required=not ctxf, default=argparse.SUPPRESS)
             sub.add_argument("--text", default=argparse.SUPPRESS, help="UTF-8 text; '-' or omission reads stdin")
             sub.add_argument("--language", default=argparse.SUPPRESS)
+            sub.add_argument("--range", default=argparse.SUPPRESS, help="JSON {start,end}, inclusive/exclusive Unicode code-point offsets")
+            sub.add_argument("--start", type=int, default=argparse.SUPPRESS, help="Inclusive Unicode code-point offset")
+            sub.add_argument("--end", type=int, default=argparse.SUPPRESS, help="Exclusive Unicode code-point offset")
             sub.add_argument("--comment-styles", default=argparse.SUPPRESS, help="Additional comment delimiters as JSON")
             sub.add_argument("--json", action="store_true", help="Output text and reference metadata as JSON")
             continue
@@ -298,7 +177,7 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
                          help="Expansion depth for read and read-source (default: recursive)")
         for name in ("ids", "protected", "keep", "expand"):
             sub.add_argument("--" + name, nargs="*", default=argparse.SUPPRESS)
-        for name in ("source", "value", "config", "files", "comment-styles"):
+        for name in ("source", "value", "config", "files", "comment-styles", "messages", "range"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS, help="JSON value; '-' reads JSON stdin")
         for name in ("limit", "offset", "depth"):
             sub.add_argument("--" + name, type=int, default=argparse.SUPPRESS)
@@ -313,7 +192,7 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
         if hasattr(args, "scope"):
             request["scope"] = args.scope
         return request
-    json_fields = ("source", "value", "config", "files", "comment_styles")
+    json_fields = ("source", "value", "config", "files", "comment_styles", "messages", "range")
     text_fields = ("text", "body")
     stdin_used = False
 
@@ -332,6 +211,12 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
         if hasattr(args, key):
             request["commentStyles" if key == "comment_styles" else key] = input_value(getattr(args, key), key in json_fields)
     request["action"] = args.command
+    if "start" in request or "end" in request:
+        if "range" in request:
+            raise InputError("invalid_request", "Use --range or --start/--end, not both")
+        if "start" not in request or "end" not in request:
+            raise InputError("invalid_request", "--start and --end must be supplied together")
+        request["range"] = {"start": request.pop("start"), "end": request.pop("end")}
     if "request_cycle" in request:
         request["requestCycle"] = request.pop("request_cycle")
     if "expand_mode" in request:
@@ -534,7 +419,7 @@ def _annotate_project(path: str, language: str, apply: bool,
 
 def _ctxf_arguments(argv: list[str]) -> list[str]:
     """Insert the default fold command after any leading shared options."""
-    commands = {"rpc", "mcp", "call", *ACTIONS, "annotate-functions"}
+    commands = {"rpc", "call", *ACTIONS, "annotate-functions"}
     index = 0
     while index < len(argv):
         option = argv[index]
@@ -587,8 +472,8 @@ def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
     if ctxf:
         argv = _ctxf_arguments(list(sys.argv[1:] if argv is None else argv))
     args = parser.parse_args(argv)
-    if ctxf and args.command in ("rpc", "mcp") and hasattr(args, "scope"):
-        parser.error("--scope belongs to each RPC/MCP request, not the server command")
+    if ctxf and args.command in ("rpc",) and hasattr(args, "scope"):
+        parser.error("--scope belongs to each RPC request, not the server command")
     if args.command == "annotate-functions":
         try:
             target = Path(args.path)
@@ -619,8 +504,6 @@ def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
         with Client(args.state, project_dir=args.project_dir) as client:
             if args.command == "rpc":
                 return serve_rpc(client, sys.stdin.buffer)
-            if args.command == "mcp":
-                return serve_mcp(client, sys.stdin.buffer)
             request = _request(args)
             if ctxf:
                 request.setdefault("scope", getattr(args, "scope", "default"))

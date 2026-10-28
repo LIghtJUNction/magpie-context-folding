@@ -183,7 +183,8 @@ class ClientIntegrationTests(unittest.TestCase):
         self.assertEqual(result["chars"], 2)
         self.assertEqual(result["bytes"], len("乙🙂".encode()))
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(seen_modes, [0o600])
+        self.assertTrue(seen_modes)
+        self.assertTrue(all(mode == 0o600 for mode in seen_modes))
         before = self.stored()
         with self.assertRaises(FoldingError):
             self.call("paste", id=item["id"], path=str(path))

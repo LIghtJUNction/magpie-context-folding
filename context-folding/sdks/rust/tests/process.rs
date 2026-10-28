@@ -279,7 +279,7 @@ fn installed_core_delays_annotations_and_recovers_exact_source() {
     assert_eq!(client.call(request(0, "read-1")).unwrap()["text"], text);
     let folded = client.call(request(1, "read-1")).unwrap();
     let view = folded["text"].as_str().unwrap();
-    assert!(view.contains("[[cf:v2:"));
+    assert!(view.contains("[[cf:v3:"));
     assert_eq!(client.call(request(2, "read-2")).unwrap()["text"], text);
     let resolved = client.resolve("real", json!({"content": view})).unwrap();
     assert_eq!(resolved["value"]["content"], text);
@@ -322,7 +322,7 @@ fn installed_core_folds_submitted_text_and_returns_recoverable_references() {
     let id = reference["id"].as_str().unwrap();
     assert_eq!(id.len(), 64);
     let literal = reference["reference"].as_str().unwrap();
-    assert!(literal.starts_with("[[cf:v2:"));
+    assert!(literal.starts_with("[[cf:v3:"));
     assert_eq!(folded["text"], format!("{prefix}{literal}{suffix}"));
     let resolved = client.resolve("fold-test", folded["text"].clone()).unwrap();
     assert_eq!(resolved["value"], text);

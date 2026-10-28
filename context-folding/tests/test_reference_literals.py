@@ -77,7 +77,7 @@ class ReferenceLiteralTests(unittest.TestCase):
         self.assertEqual(self.client.read("s", stored["id"], mode="original")["text"], source)
 
     def test_adapter_checks_visible_literals_and_rolls_back_all_writes(self):
-        region = "# @context-fold begin work\n" + "value = 123\n" * 10 + "# @context-fold end work\n"
+        region = "# @context-fold begin work\n" + "value = 123\n" * 50 + "# @context-fold end work\n"
         for literal in self.literals:
             for source in (f"literal = {literal!r}\n" + region, region + f"literal = {literal!r}\n"):
                 before = self.state()
@@ -90,7 +90,7 @@ class ReferenceLiteralTests(unittest.TestCase):
             for newline in ("\n", "\r\n", "\r"):
                 with self.subTest(literal=literal, newline=repr(newline)):
                     source = ("# @context-fold begin work\n" + f"literal = {literal!r}\n"
-                              + "value = 123\n" * 10 + "# @context-fold end work").replace("\n", newline)
+                              + "value = 123\n" * 50 + "# @context-fold end work").replace("\n", newline)
                     folded = fold_regions(self.client, "s", source, language="python")
                     if "[[cf:v1:" in literal:
                         self.assertEqual(folded["references"], [])

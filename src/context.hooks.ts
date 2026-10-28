@@ -1,11 +1,15 @@
 import { z } from 'zod';
+import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { ConfigError, loadOptions } from './config.js';
 import { appendBudget, estimateTokens, withoutBudget } from './budget.js';
 import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
-import { extractSpans, recoveryToolName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
+import { extractSpans, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
+import { conversationEntry, conversationId, conversationReference } from './fold.js';
+import { conversationRangesFromMarkers, projectConversationRanges, selectConversationRange, type ConversationSelection } from './ranges.js';
 
 type Body = Record<string, unknown>;
 const record = (value: unknown): value is Body => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -44,52 +48,23 @@ function occurrenceIdentity(body: Body, span: Span): unknown {
 
 interface Candidate { region: Region; occurrence: string; role: 'assistant' | 'tool' }
 
-function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] {
-  // @context-fold begin candidates-9c5f930e91
+function candidates(body: Body, spans: Span[], archiveDirectory: string, cwd: string): Candidate[] {
   const result: Candidate[] = [];
-  let conversation: Span[] = [];
-  const collect = (parts: Span[], role: 'assistant' | 'tool') => {
-    const byId = new Map(parts.map(part => [part.id, part]));
-    const texts = parts.map(part => {
-      const offsets = part.source ? sourceMarkerOffsets(part.text, part.source.path) : undefined;
-      return offsets === undefined ? part : { ...part, markerOffsets: offsets };
-    });
-    for (const region of parseRegions(texts)) {
-      const origin = byId.get(region.origin.id)!;
-      // Marker order survives earlier replacements in the same message; byte
-      // offsets and content-derived span IDs do not.
-      result.push({ region, role, occurrence: fingerprint([region.sha256, region.label,
-        occurrenceIdentity(body, origin), region.origin.ordinal, origin.source ?? null]) });
-    }
-  };
-  const history = protocol === 'responses' ? body.input : protocol === 'gemini' ? body.contents : body.messages;
-  const userBoundaries = new Set<number>();
-  if (Array.isArray(history)) history.forEach((item: unknown, index) => {
-    if (!record(item) || item.role !== 'user') return;
-    const parts = protocol === 'gemini' ? item.parts : item.content;
-    // Providers wrap tool results in user messages. Every other user message,
-    // including images and empty text, ends an open assistant annotation.
-    const onlyToolResults = Array.isArray(parts) && parts.length > 0 && parts.every(part => record(part)
-      && (protocol === 'anthropic' ? part.type === 'tool_result' : protocol === 'gemini' && record(part.functionResponse)));
-    if (!onlyToolResults) userBoundaries.add(index);
-  });
-  let previousIndex = -1;
   for (const span of spans) {
-    if ([...userBoundaries].some(index => index > previousIndex && index <= span.messageIndex)) {
-      collect(conversation, 'assistant');
-      conversation = [];
-    }
-    previousIndex = span.messageIndex;
-    if (span.role === 'assistant') conversation.push(span);
-    else if (span.role === 'tool' && span.source && span.activityReason !== 'plugin-control') {
-      // Only a verified single textual Read result is a source view. Generic
-      // tool output, call arguments, receipts and recovery results stay intact.
-      collect([span], 'tool');
+    if (span.role !== 'tool' || !span.source || span.activityReason === 'plugin-control') continue;
+    let sourcePath = resolve(cwd, span.source.path);
+    try { sourcePath = realpathSync(sourcePath); } catch { /* Remote source paths can be absent locally. */ }
+    const local = relative(archiveDirectory, sourcePath);
+    // A normal Read of a saved archive is recovery, even without a dedicated
+    // tool name. Historical markers inside it are data, never fresh directives.
+    if (!isAbsolute(local) && local !== '..' && !local.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) continue;
+    const offsets = sourceMarkerOffsets(span.text, span.source.path);
+    for (const region of parseRegions([{ ...span, ...(offsets === undefined ? {} : { markerOffsets: offsets }) }])) {
+      result.push({ region, role: 'tool', occurrence: fingerprint([region.sha256, region.label,
+        occurrenceIdentity(body, span), region.origin.ordinal, span.source]) });
     }
   }
-  collect(conversation, 'assistant');
   return result;
-  // @context-fold end candidates-9c5f930e91
 }
 
 export async function onRequest(input: unknown, context: unknown): Promise<unknown> {
@@ -110,7 +85,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       ...(options.contextWindowTokens === undefined ? {} : { contextWindowTokens: options.contextWindowTokens }),
     };
     // A visible budget is useful even when this host cannot recover originals.
-    if (!recoveryToolName(body, ctx.protocol, options.recoveryToolName)) return appendBudget(body, ctx.protocol, budgetOptions);
+    if (!options.fileAccess) return appendBudget(body, ctx.protocol, budgetOptions);
     const store = new Store();
     const scope = await store.scopeFor(JSON.stringify([ctx.session, ctx.origin ?? '', ctx.agent ?? '', ctx.cwd ?? '']));
     let pending: z.infer<typeof pendingSchema> | undefined;
@@ -124,15 +99,48 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
       const proposed: { region: Region; reference: string }[] = [];
-      const found = candidates(body, spans, ctx.protocol);
+      const conversationEdits: { selection: ConversationSelection; referenceText: string }[] = [];
+      const marked = conversationRangesFromMarkers(body, ctx.protocol).map(item => ({ ...item,
+        selection: selectConversationRange(body, ctx.protocol, item.range) }));
+      const found = candidates(body, spans, resolve(store.directory, 'archives'), ctx.cwd ?? process.cwd()).filter(candidate => {
+        const index = spans.find(span => span.id === candidate.region.origin.id)!.messageIndex;
+        return !marked.some(item => index >= item.range.start.message
+          && (index < item.range.end.message || index === item.range.end.message && (item.range.end.offset ?? 0) > 0));
+      });
       // Allocate references against the entire batch so collision handling is
       // independent of parse order. Full hashes and original text stay in storage.
       const hashes = new Set([...byHash.keys(), ...snapshot.entries.map(entry => entry.id),
-        ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256)]);
+        ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256), ...marked.map(item => conversationId(item.selection))]);
       let newlyFolded = 0;
       let waiting = 0;
+      const contentOccurrences = new Map<string, number>();
+      for (const { label, selection } of marked) {
+        const identity = conversationId(selection);
+        let entry = byHash.get(identity);
+        const candidate = entry ?? conversationEntry(selection, label);
+        const referenceText = conversationReference(store, scope, candidate, hashes);
+        const preview = projectConversationRanges(body, ctx.protocol, [{ selection, referenceText }]);
+        if (Buffer.byteLength(JSON.stringify(preview)) >= Buffer.byteLength(JSON.stringify(body))) continue;
+        if (!entry) { entry = candidate; snapshot.entries.push(entry); byHash.set(identity, entry); }
+        if (entry.transcript !== selection.transcript || entry.text !== selection.text) throw new Error('Archive content hash mismatch');
+        const ordinal = contentOccurrences.get(selection.contentIdentity) ?? 0;
+        contentOccurrences.set(selection.contentIdentity, ordinal + 1);
+        const occurrence = fingerprint(['conversation', label, selection.contentIdentity, ordinal]);
+        const occurrences = entry.occurrences ??= {};
+        const prior = snapshot.entries.find(item => item !== entry && item.contentIdentity === selection.contentIdentity
+          && item.occurrences?.[occurrence] && item.occurrences[occurrence]!.lastSeen >= previousCycle);
+        let observed = occurrences[occurrence] ?? (prior?.occurrences?.[occurrence]
+          ? occurrences[occurrence] = { ...prior.occurrences[occurrence]! } : undefined);
+        if (!observed || observed.lastSeen < previousCycle) observed = occurrences[occurrence] = { firstSeen: cycle, lastSeen: cycle };
+        observed.lastSeen = cycle;
+        if (entry.mark.disposition === 'keep' || prior?.mark.disposition === 'keep') continue;
+        if (cycle - observed.firstSeen < options.delayRequests) { waiting++; continue; }
+        conversationEdits.push({ selection, referenceText });
+        entry.folded = referenceText;
+        if (!observed.folded) { newlyFolded++; observed.folded = true; }
+      }
       for (const { region, occurrence, role } of found) {
-        const ref = reference(shortHash(region.sha256, hashes));
+        const ref = reference(shortHash(region.sha256, hashes), store.paths(scope, { text: region.text }).path);
         const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
           spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
         const after = region.slices.length * Buffer.byteLength(JSON.stringify(ref));
@@ -164,16 +172,17 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         }
       }
       const replacements = replaceRegions(spans, proposed);
-      const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
-        [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
+      const existingReferences = spans.flatMap(span =>
+        [...span.text.matchAll(/\[\[cf:v[23]:([a-f0-9]{12,64})(?:\]\]| path=)/g)].filter(match =>
           [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
-      const hasFolded = proposed.length > 0 || existingReferences.length > 0;
-      const projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
+      const hasFolded = proposed.length > 0 || conversationEdits.length > 0 || existingReferences.length > 0;
+      const sourceProjection = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
+      const projected = projectConversationRanges(sourceProjection, ctx.protocol, conversationEdits);
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
       const result = appendBudget(projected, ctx.protocol, { ...budgetOptions, scope });
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
-        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length };
+        cycle, waiting, foldedRegions: proposed.length + conversationEdits.length, replayedReferences: existingReferences.length };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
         foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(projected))),

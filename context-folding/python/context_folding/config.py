@@ -4,7 +4,6 @@ from __future__ import annotations
 from copy import deepcopy
 import math
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +20,11 @@ DEFAULTS = {
     "annotations": {"enabled": True, "default_fold": True, "keep": []},
     "gc": {"enabled": False, "strength": "conservative", "idle_seconds": 2592000,
            "max_uses": 2, "retention_seconds": 2592000, "auto_purge": False},
-    "magpie": {},
+    "magpie": {"file_access": True},
 }
 _KEYS = {**{section: set(values) for section, values in DEFAULTS.items()},
          "folding": set(DEFAULTS["folding"]) | {"context_window_tokens"},
-         "magpie": {"recovery_tool_name", "gateway_timeout_ms"}}
+         "magpie": {"file_access", "gateway_timeout_ms"}}
 _RANGES = {
     "folding.max_session_bytes": (1, 67108864, True),
     "folding.delay_requests": (0, SAFE_INTEGER, True),
@@ -132,9 +131,11 @@ def _validate(data: Any, source: str | Path) -> None:
             name = f"{section}.{key}"
             if (section == "folding" and key in _REMOVED) or name == "magpie.accounting":
                 _fail(source, name, "removed: delete strategy/automatic-folding settings; use explicit fold annotations")
+            if name == "magpie.recovery_tool_name":
+                _fail(source, name, "removed: delete recovery_tool_name; recovery uses files, with magpie.file_access controlling shared filesystem availability")
             if key not in _KEYS[section]:
                 _fail(source, name, "unknown key")
-            if key in {"enabled", "default_fold", "auto_purge"}:
+            if key in {"enabled", "default_fold", "auto_purge", "file_access"}:
                 valid, expected = type(value) is bool, "expected a boolean"
             elif name == "annotations.keep":
                 valid = isinstance(value, list) and all(isinstance(item, str) and item and "\0" not in item for item in value)
@@ -142,9 +143,6 @@ def _validate(data: Any, source: str | Path) -> None:
             elif name == "gc.strength":
                 valid = isinstance(value, str) and value in {"off", "conservative", "balanced", "aggressive"}
                 expected = "expected off, conservative, balanced, or aggressive"
-            elif name == "magpie.recovery_tool_name":
-                valid = isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", value) is not None
-                expected = "expected a recovery tool identifier"
             else:
                 low, high, integer = _RANGES[name]
                 valid = _number(value, low, high, integer=integer)

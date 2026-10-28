@@ -1,7 +1,7 @@
 {
   "name": "magpie-context-folding",
   "version": "0.4.0",
-  "description": "Reversible context folding from agent-authored comment markers for Magpie",
+  "description": "File-backed reversible context folding for arbitrary conversation ranges",
   "type": "module",
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
@@ -14,7 +14,7 @@
   "repository": { "type": "git", "url": "git+https://github.com/LIghtJUNction/magpie-context-folding.git" },
   "homepage": "https://github.com/LIghtJUNction/magpie-context-folding#readme",
   "bugs": { "url": "https://github.com/LIghtJUNction/magpie-context-folding/issues" },
-  "keywords": ["magpie-plugin", "magpie", "context", "folding", "mcp"],
+  "keywords": ["magpie-plugin", "magpie", "context", "folding"],
   "publishConfig": { "access": "public" },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

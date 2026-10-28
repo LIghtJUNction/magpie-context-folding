@@ -60,3 +60,7 @@ PI_PACKAGE_ROOT=/absolute/path/to/@earendil-works/pi-coding-agent \
 ```
 
 The earlier implementation was checked against Pi 0.85.1; that historical API check is not a new-version or interactive-model validation claim. Current tests exercise the Python core, full-text default, explicit annotations, exact recovery, failure passthrough and session/project/branch isolation. Actual tool checks remain conditional on an installed Pi package.
+
+## File references
+
+New core views include a v3 reference with an ordinary archive path. Use existing file-reading/search tools to inspect that path; a lightweight subagent can extract targeted facts with file and line references. Direct file reads do not change restore state. The adapter’s existing restore command remains a host-local operation, not an MCP server. Ensure the core archive path is accessible from the Pi process; delayed projection still requires the host lifecycle described above.

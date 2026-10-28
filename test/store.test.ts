@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -54,7 +54,7 @@ test('SQLite round trips arbitrary JSON strings without losing lone UTF-16 surro
   });
 });
 
-test('one private SQLite file retains stable scopes and isolated sessions across Store instances', async () => {
+test('private SQLite index and files retain stable scopes and isolated sessions across Store instances', async () => {
   await fixture(async (store, directory) => {
     const scope = await store.scopeFor('session one');
     const secondScope = await store.scopeFor('session two');
@@ -66,7 +66,7 @@ test('one private SQLite file retains stable scopes and isolated sessions across
     assert.equal(await reopened.scopeFor('session one'), scope);
     assert.equal((await read(reopened, scope)).entries[0]?.text, 'original');
     await assert.rejects(read(reopened, secondScope), /Unknown context scope/);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
     assert.equal((await stat(join(directory, 'state.sqlite'))).mode & 0o777, 0o600);
     assert.equal((await stat(directory)).mode & 0o777, 0o700);
     assert.deepEqual(inspect(directory, (database) => database.query('PRAGMA journal_mode').get()), { journal_mode: 'delete' });
@@ -93,7 +93,7 @@ test('originals, recursive layers and current folded text share content-addresse
     ]);
     await store.transaction(first, false, sessionLimit, (snapshot) => { snapshot.decision = { updated: true }; });
     assert.deepEqual(inspect(directory, (database) => database.query('SELECT COUNT(*) AS count FROM blobs').get()), { count: 3 });
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
   });
 });
 
@@ -121,7 +121,7 @@ test('read-only and unchanged callbacks do not add archive revisions or history'
     await store.transaction(scope, false, sessionLimit, () => {});
     const after = inspect(directory, (database) => database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope));
     assert.deepEqual(after, before);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
   });
 });
 
@@ -211,7 +211,7 @@ test('statistics reads are read-only, do not count again, and do not create a fr
   });
 });
 
-test('clearing a scope frees originals while lifetime totals survive and later sessions continue', async () => {
+test('clearing a scope frees indexed originals while exported files and lifetime totals survive', async () => {
   await fixture(async (store, directory) => {
     const scope = await store.scopeFor('stats lifetime');
     await store.transaction(scope, true, sessionLimit, snapshot => {
@@ -236,7 +236,7 @@ test('clearing a scope frees originals while lifetime totals survive and later s
     assert.equal((await store.readStats()).metrics.foldBatchesApproved, 2);
     assert.equal((await store.readStats()).metrics.savingNanoUsdLower, '3');
     assert.equal((await store.readStats(scope)).metrics.foldBatchesApproved, 1);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
   });
 });
 
@@ -372,7 +372,7 @@ test('metadata-only metrics updates do not need to decode archived blobs', async
     assert.equal((await store.readStats(scope)).metrics.originalReadCalls, 1);
     assert.equal((await store.readStats()).metrics.savingNanoUsdLower, '1');
     await assert.rejects(read(store, scope), /Archive content hash mismatch/);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
   });
 });
 
@@ -408,7 +408,7 @@ test('global physical quota rejects growth and rolls back without losing earlier
     }), /Global archive full/);
     assert.deepEqual(await read(store, scope), before);
     assert.ok((await stat(join(directory, 'state.sqlite'))).size <= 128 * 1024);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
   });
 });
 
@@ -480,6 +480,23 @@ test('full auto-vacuum releases pages after unreferenced archive content is remo
     await store.transaction(scope, false, sessionLimit, (snapshot) => { snapshot.entries = []; });
     const after = (await stat(join(directory, 'state.sqlite'))).size;
     assert.ok(after < before / 2, `${after} should be smaller than ${before / 2}`);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
+  });
+});
+
+test('unchanged legacy export cannot bypass the combined database and file quota', async () => {
+  await fixture(async (store, directory) => {
+    const scope = await store.scopeFor('legacy-file-quota');
+    const original = entry('content', 'archived evidence '.repeat(2000));
+    await store.transaction(scope, true, sessionLimit, snapshot => { snapshot.entries.push(original); });
+    const before = inspect(directory, database => database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope));
+    const path = store.paths(scope, original).path;
+    await unlink(path);
+    const databaseBytes = (await stat(join(directory, 'state.sqlite'))).size;
+    const limited = new Store(directory, { maxTotalBytes: databaseBytes + Buffer.byteLength(original.text) - 1 });
+    await assert.rejects(read(limited, scope), /Global archive full/);
+    await assert.rejects(stat(path), { code: 'ENOENT' });
+    assert.deepEqual(inspect(directory, database => database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope)), before);
+    assert.equal((await read(store, scope)).entries[0]!.text, original.text);
   });
 });

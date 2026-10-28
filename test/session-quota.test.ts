@@ -5,17 +5,19 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Database } from 'bun:sqlite';
 import { onRequest } from '../src/context.hooks.js';
-import { Store, digest } from '../src/store.js';
+import { Store } from '../src/store.js';
+import { conversationId } from '../src/fold.js';
+import { selectConversationRange } from '../src/ranges.js';
 import { execute } from '../src/tool.js';
 
-const text = 'Finished work. '.repeat(30);
+const text = 'Finished work. '.repeat(120);
 const region = (label: string, content: string) => `@context-fold begin ${label}\n${content}\n@context-fold end ${label}`;
 const body = {
   model: 'synthetic',
   tools: [{ type: 'function', function: { name: 'context_folding' } }],
   messages: [{ role: 'assistant', content: region('completed', text) }, { role: 'user', content: 'Continue.' }],
 };
-const id = digest(text);
+const id = conversationId(selectConversationRange(body, 'chat', { start: { message: 0 }, end: { message: 1 } }));
 const call = async (args: unknown) => JSON.parse(await execute(args));
 const largerBody = (label: string, content: string) => ({ ...body,
   messages: [...body.messages, { role: 'assistant', content: region(label, content) }],
@@ -59,11 +61,11 @@ async function fixture(run: (f: {
 
 test('annotation archival honors the configured quota and preserves the whole request on failure', async () => {
   await fixture(async f => {
-    assert.notDeepEqual(await f.configure(4096), body);
+    assert.notDeepEqual(await f.configure(12000), body);
     const before = f.stored();
-    assert.equal(JSON.parse(before.snapshot).sessionLimitBytes, 4096);
+    assert.equal(JSON.parse(before.snapshot).sessionLimitBytes, 12000);
     const large = largerBody('too-large', 'larger evidence '.repeat(1000));
-    assert.deepEqual(await f.configure(4096, large), large);
+    assert.deepEqual(await f.configure(12000, large), large);
     assert.deepEqual(f.stored(), before, 'an over-quota batch must not commit partial archives or references');
   });
 });
@@ -71,14 +73,14 @@ test('annotation archival honors the configured quota and preserves the whole re
 test('read, paste and inspection preserve the request quota instead of raising it to their recovery ceiling', async () => {
   for (const action of ['read', 'paste', 'list', 'status', 'stats']) {
     await fixture(async f => {
-      await f.configure(4096);
+      await f.configure(12000);
       const args = { action, scope: f.scope, ...(['read', 'paste'].includes(action) ? { id } : {}),
         ...(action === 'paste' ? { path: join(f.directory, 'recovered.txt') } : {}) };
       assert.equal((await call(args)).error, undefined, action);
-      assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 4096, action);
+      assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 12000, action);
       const before = f.stored();
       const large = largerBody('too-large', 'larger evidence '.repeat(1000));
-      assert.deepEqual(await f.configure(4096, large), large);
+      assert.deepEqual(await f.configure(12000, large), large);
       assert.deepEqual(f.stored(), before);
     });
   }
@@ -86,32 +88,32 @@ test('read, paste and inspection preserve the request quota instead of raising i
 
 test('request configuration can raise a quota without changing archived content', async () => {
   await fixture(async f => {
-    await f.configure(4096);
+    await f.configure(12000);
     const before = JSON.parse(f.stored().snapshot);
-    await f.configure(32768);
+    await f.configure(65536);
     const after = JSON.parse(f.stored().snapshot);
-    assert.equal(after.sessionLimitBytes, 32768);
-    assert.deepEqual({ ...after, sessionLimitBytes: 4096 }, before);
+    assert.equal(after.sessionLimitBytes, 65536);
+    assert.deepEqual({ ...after, sessionLimitBytes: 12000 }, before);
     const large = largerBody('new-content', 'larger evidence '.repeat(1000));
-    assert.notDeepEqual(await f.configure(32768, large), large);
+    assert.notDeepEqual(await f.configure(65536, large), large);
     const archived = JSON.parse(f.stored().snapshot);
-    assert.ok(archived.payloadBytes > 4096 && archived.payloadBytes <= 32768);
-    assert.equal(archived.sessionLimitBytes, 32768);
+    assert.ok(archived.payloadBytes > 12000 && archived.payloadBytes <= 65536);
+    assert.equal(archived.sessionLimitBytes, 65536);
   });
 });
 
 test('request configuration installs a missing quota on an unchanged legacy archive', async () => {
   await fixture(async f => {
-    await f.configure(4096);
+    await f.configure(12000);
     const database = new Database(join(f.directory, 'state.sqlite'));
     try {
       database.query("UPDATE sessions SET snapshot = json_remove(snapshot, '$.sessionLimitBytes') WHERE scope = ?").run(f.scope);
     } finally { database.close(); }
     const legacy = JSON.parse(f.stored().snapshot);
     assert.equal(legacy.sessionLimitBytes, undefined);
-    await f.configure(4096);
+    await f.configure(12000);
     const { sessionLimitBytes, ...payload } = JSON.parse(f.stored().snapshot);
-    assert.equal(sessionLimitBytes, 4096);
+    assert.equal(sessionLimitBytes, 12000);
     assert.deepEqual(payload, legacy, 'installing a quota must not invent a new folding request');
   });
 });
@@ -119,7 +121,7 @@ test('request configuration installs a missing quota on an unchanged legacy arch
 test('lowering the quota keeps oversized snapshots recoverable while rejecting growth', async () => {
   await fixture(async f => {
     const large = largerBody('large', 'larger evidence '.repeat(1000));
-    await f.configure(32768, large);
+    await f.configure(65536, large);
     await f.configure(2048, large);
     const before = f.stored();
     assert.equal(JSON.parse(before.snapshot).sessionLimitBytes, 2048);
@@ -128,7 +130,7 @@ test('lowering the quota keeps oversized snapshots recoverable while rejecting g
     assert.deepEqual(await f.configure(2048, growth), growth);
     assert.deepEqual(f.stored(), before);
     const recovered = await call({ action: 'read', scope: f.scope, id });
-    assert.equal(recovered.text, text);
+    assert.ok(recovered.text.includes(text));
     assert.equal(recovered.kept, true);
     assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 2048);
   });
@@ -136,12 +138,12 @@ test('lowering the quota keeps oversized snapshots recoverable while rejecting g
 
 test('legacy archives without a quota use the default rather than a recovery operation ceiling', async () => {
   await fixture(async f => {
-    await f.configure(4096);
+    await f.configure(12000);
     const database = new Database(join(f.directory, 'state.sqlite'));
     try {
       database.query("UPDATE sessions SET snapshot = json_remove(snapshot, '$.sessionLimitBytes') WHERE scope = ?").run(f.scope);
     } finally { database.close(); }
-    await new Store().transaction(f.scope, false, 4096, snapshot => {
+    await new Store().transaction(f.scope, false, 12000, snapshot => {
       snapshot.entries[0]!.mark = { disposition: 'keep' };
     }, undefined, 'preserve');
     assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 64 * 1024 * 1024);

@@ -4,7 +4,7 @@ This is an asynchronous .NET **bridge SDK**, not a native C# folding core. Insta
 
 Add a project reference to `ContextFolding/ContextFolding.csproj`. Each `Client` owns one persistent `python3 -m context_folding rpc --state PATH` subprocess, serializes requests over JSON Lines, drains stderr, and returns a detached `JsonElement` from the response `result`. Engine errors throw `ContextFoldingException` carrying `Code`; invalid responses and transport failures close the bridge.
 
-This is the same engine used by `ctxf fold` and `ctxf mcp`. Point `ClientOptions` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+This is the same engine used by `ctxf fold` and the local `ctxf rpc` bridge. Point `ClientOptions` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
 
 ```csharp
 using ContextFolding;
@@ -35,3 +35,5 @@ Cancellation while waiting in the queue leaves the process usable and throws `Op
 `ClientOptions` also exposes `WorkingDirectory`, environment overrides, `PythonArguments` (defaults to `-m context_folding rpc`; `--state PATH` is always appended), and `MaxResponseChars` (64 Mi characters default). stderr diagnostics retain at most 16 Ki characters. Requests and responses use UTF-8.
 
 Run `dotnet run --project Tests/Tests.csproj` for package-free subprocess integration tests using a temporary Python RPC process. They cover persistence/concurrent requests, wrapper forwarding, Unicode, stderr pressure, application/protocol errors, response limits, process exit, cancellation, disposal, and failed startup. Set `CONTEXT_FOLDING_REAL_CORE_PATH=/absolute/path/context-folding/python` when running the tests to additionally check immediate `fold`, empty input, complete views, exact UTF-8 hashes and scoped recovery, plus source annotation delay, retries and fresh occurrences against the actual Python core; otherwise that portion prints an explicit skip. After installing the Python core, run `dotnet run --project Example/Example.csproj` for an actual-engine example; source checkout execution can instead set `PYTHONPATH=/absolute/path/context-folding/python`.
+
+New folds return absolute archive paths. Read those ordinary files directly when appropriate; file reads do not require the Python process or change keep state. Generic calls also accept explicit text ranges and `fold-messages`. See [the core guide](../../README.md#any-text-or-conversation-range) for field names and code-point offsets. MCP transport has been removed.
