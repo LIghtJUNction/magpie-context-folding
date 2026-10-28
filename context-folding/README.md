@@ -8,6 +8,8 @@ The root plugin is published on npm as [magpie-context-folding](https://www.npmj
 
 Claude Code's `SessionStart` hook adds a short folding reminder after `source=compact`. It does not read the archive or write state, and it stays silent for startup, resume and clear events.
 
+Other hosts can run `ctxf post-compact` after compaction and inject its stdout into the next model context. This prints guidance only; it does not read the archive or recover lost text.
+
 ## Install and run
 
 Python 3.10+ is required. Python 3.11+ uses the standard library; Python 3.10 additionally requires `tomli`. Install the command from the repository root:
