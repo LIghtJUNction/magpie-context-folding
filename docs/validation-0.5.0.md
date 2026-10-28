@@ -37,7 +37,9 @@
 | --- | --- |
 | `npm run check` | TypeScript 类型检查、196 项 Bun 测试及构建全部通过。 |
 | 独立 Python 核心 | 141 项全部通过，无跳过；使用声明范围内的 Tree-sitter 可选依赖。 |
-| Harbor `test_agent.py` | 13 项通过，包含两题 baseline/folding 脚本组件检查。 |
+| Harbor 组件测试 | 本地 `test_agent.py` 13 项通过；GitHub CI 全部 31 项通过。 |
+| 真实 Harbor Docker | 两题 × 四种控制，共 8 个 trial 全部符合预期，执行异常为 0。 |
+| 真实 Magpie HTTP 宿主 | Magpie 0.1.1774 + Bun：18 个本地 HTTP 请求通过，响应钩子验证成功 18 次，未知/失败为 0。 |
 | Harbor TypeScript bridge | 4 项通过，已包含在 196 项 Bun 测试中。 |
 | 系统提示独立复验 | 74 组原文保留、LF/CRLF、合并与重复注入案例通过。 |
 | 真实 CLI | 跨进程、不同环境的显式归档定位、短哈希读取、分页、Unicode、查看/恢复差异通过。 |
@@ -45,9 +47,19 @@
 
 Bun 1.4.4 的异步管道在默认执行沙箱中触发 `EPERM`；最小独立例子同样触发。在自动审批允许的正常子进程环境中，完整测试通过。没有为绕过这一环境限制修改产品逻辑。
 
-## 尚未验证的范围
+## GitHub CI 补齐真实宿主验证
 
-官方 Magpie v0.1.1774 Linux amd64 CLI 已下载并校验：55,136,418 字节，SHA-256 为 `6290e485744109d9cec8385d947bbb66423adfc4885bc0ca3e6c2a4d020670e9`。但真实 HTTP 宿主 smoke 在启动隔离进程时遭遇 `bwrap: Creating new namespace failed: Operation not permitted`，因此 Magpie 进程与 provider 请求没有运行，不能记为宿主通过。测试没有移除 home 隔离；临时二进制已清理。
+本地容器最初因 `bwrap: Creating new namespace failed: Operation not permitted` 无法启动真实宿主测试。随后增加独立 GitHub CI job，使用相同的隔离脚本，已成功启动真实 Magpie 0.1.1774 与 Bun，路由到本地假模型 HTTP 服务。[宿主运行记录](https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/40620173616/job/122592025514) 对应实现代码未变、增加 CI 接线的提交 `9b3f84a02042e99a2b9ffaf5658c488521512b7a`。
+
+官方二进制为 55,136,418 字节，固定 SHA-256：`6290e485744109d9cec8385d947bbb66423adfc4885bc0ca3e6c2a4d020670e9`。测试保留 home 隔离、独立 XDG 状态与账号发现禁用，没有调用外部模型。
+
+实际通过的 18 个 HTTP 请求覆盖：无 MCP 时插件钩子加载、简短系统指导、预算默认关闭、默认等待及重试、原指令与工具结构保留、投影重放、Unicode/CRLF 精确分页恢复、显式 --restore、会话隔离、源码新版本和原文件不变。`onResponse` 统计为 18 次成功、0 次未知、0 次失败。
+
+[Harbor CI 运行](https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/40619609457) 已通过完整组件测试及真实 Docker 控制：两题的 oracle 均为 1，nop 均为 0，baseline/folding 脚本均为 1；8 个 trial 全部符合预期、执行异常为 0。这里的脚本知道参考实现，不代表模型解题能力。
+
+机器回执提取自实际 CI 日志，见 [ci-validation-0.5.0.json](ci-validation-0.5.0.json)。日志归档按工作流保留 7 天，关键结果已随源码保存。
+
+## 剩余边界
 
 未在用户已经安装的桌面会话中替换插件，未调用真实模型做质量、延迟或账单 A/B。这里的数字只证明本组固定请求的序列化开销和恢复行为变化；缓存效果、真实 tokenizer 和模型是否会正确选择长期可折叠内容仍需实际使用验证。
 
