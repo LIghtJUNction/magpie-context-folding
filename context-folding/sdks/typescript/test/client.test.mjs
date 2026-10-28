@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,15 +46,17 @@ test('persistent process serializes concurrent calls and forwards wrappers and U
       client.call({ action: 'read-source', scope: 'scope', text: '# source', occurrence: 'read-1', requestCycle: 0 }),
       client.render('scope', ['entry'], { protected: [] }),
       client.resolve('scope', { content: '[[cf:v1:entry]]' }),
+      client.fold('scope', '', { action: 'wrong', scope: 'wrong', text: 'wrong', language: 'explicit', commentStyles: [{ start: ';;' }] }),
     ];
     const values = await Promise.all(requests);
     assert.equal(new Set(values.map(value => value.pid)).size, 1);
-    assert.deepEqual(values.map(value => value.request.action), ['put', 'list', 'read', 'read-source', 'render', 'resolve']);
+    assert.deepEqual(values.map(value => value.request.action), ['put', 'list', 'read', 'read-source', 'render', 'resolve', 'fold']);
     assert.equal(values[0].request.text, '原文🙂');
     assert.equal(values[0].request.scope, 'scope');
     assert.equal(values[0].argv[0], '--state');
     assert.ok(values[0].argv[1].endsWith('state with spaces.sqlite'));
     assert.deepEqual(values[5].request.value, { content: '[[cf:v1:entry]]' });
+    assert.deepEqual(values[6].request, { action: 'fold', scope: 'scope', text: '', language: 'explicit', commentStyles: [{ start: ';;' }] });
   });
 });
 
@@ -121,6 +124,39 @@ test('installed Python core delays explicit annotations and recovers exact origi
     await assert.rejects(client.call({ action: 'mark', scope: 'real', id: first.id,
       disposition: 'foldable', summary: 'obsolete' }), error => error instanceof ContextFoldingError);
     assert.ok(await client.list('real'));
+  } finally { await client.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('installed Python core folds submitted text immediately and returns recoverable references', { skip: !process.env.CONTEXT_FOLDING_REAL_CORE_PATH }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cf-ts-fold-'));
+  const client = new ContextFoldingClient({ statePath: join(directory, 'archive.sqlite'),
+    env: { PYTHONPATH: process.env.CONTEXT_FOLDING_REAL_CORE_PATH } });
+  try {
+    const empty = await client.fold('fold-test', '');
+    assert.equal(empty.scope, 'fold-test');
+    assert.equal(empty.text, '');
+    assert.deepEqual(empty.references, []);
+    const body = 'completed 中文🙂\n'.repeat(80).slice(0, -1);
+    const prefix = 'visible\n'.repeat(800) + '<!-- @context-fold begin evidence -->\r\n';
+    const suffix = '\r\n<!-- @context-fold end evidence -->\r\nlast line without newline';
+    const text = prefix + body + suffix;
+    const folded = await client.fold('fold-test', text);
+    assert.equal(folded.scope, 'fold-test');
+    assert.equal(folded.references.length, 1);
+    const reference = folded.references[0];
+    const sha256 = createHash('sha256').update(body, 'utf8').digest('hex');
+    assert.equal(reference.id, sha256);
+    assert.equal(reference.sha256, sha256);
+    assert.equal(reference.label, 'evidence');
+    assert.match(reference.reference, /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/);
+    assert.equal(folded.text, prefix + reference.reference + suffix, 'full text must not be paginated or gain a newline');
+    assert.equal((await client.resolve('fold-test', { content: folded.text })).value.content, text);
+    assert.equal((await client.read('fold-test', reference.id)).text, body);
+    await assert.rejects(client.read('another-scope', reference.id), error => error instanceof ContextFoldingError);
+    const custom = ';; @context-fold begin custom\n' + 'archived detail '.repeat(20) + '\n;; @context-fold end custom';
+    const customFold = await client.fold('custom', custom, { commentStyles: [{ start: ';;' }] });
+    assert.equal(customFold.references.length, 1);
+    assert.equal((await client.resolve('custom', customFold.text)).value, custom);
   } finally { await client.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 

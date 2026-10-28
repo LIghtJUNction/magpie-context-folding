@@ -1,6 +1,6 @@
 # CLI, RPC and MCP transport contract
 
-All three interfaces call the same local Python `Client` and SQLite archive. They do not run a model, select historical text, or create a network listener. **Only paired source comments select new folding regions.** `mark` and `group` have been removed.
+All three interfaces call the same local Python `Client` and SQLite archive. They do not run a model, select historical text, or create a network listener. **Only explicit paired folding comments select new regions**, in submitted text or source. `mark` and `group` have been removed.
 
 Python 3.10+ is required; Python 3.10 also needs `tomli`. Runtime setup and source-language dependencies are described in the [subproject README](../README.md).
 
@@ -10,40 +10,84 @@ From the repository root:
 
 ```sh
 uv sync --project context-folding
-uv run --project context-folding python -m context_folding status \
+uv run --project context-folding ctxf status \
   --state /absolute/private/archive.sqlite --scope example
-uv run --project context-folding python -m context_folding rpc --state /absolute/private/archive.sqlite
-uv run --project context-folding python -m context_folding mcp --state /absolute/private/archive.sqlite
+uv run --project context-folding ctxf rpc --state /absolute/private/archive.sqlite
+uv run --project context-folding ctxf mcp --state /absolute/private/archive.sqlite
 ```
 
-The installed `context-folding` command is equivalent to `python -m context_folding`. `--state` selects a SQLite file and may appear before or after the command. It is not a request field. Keep that file and its parent directory private and persistent.
+Install `ctxf` on PATH with `uv tool install ./context-folding`. The old `context-folding` command and `python -m context_folding` retain their explicit command/state arguments and JSON management behavior. All three use the Python implementation; only `ctxf` adds the pipe-friendly defaults, and the root Bun plugin does not install another `ctxf`.
 
-Each core request requires a nonempty `scope` of at most 200 characters. Scopes separate local archive namespaces; they are not authentication. A reference is resolved only against the selected state file and scope. Configure process and file access at the host boundary.
+`--state` selects a SQLite file and may appear before or after the command. It is not a request field. `ctxf` uses `CTXF_STATE` when no flag is given; otherwise it defaults to `$XDG_DATA_HOME/context-folding/archive.sqlite3`, or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. Keep that file and its parent directory private and persistent. RPC/MCP processes and SDK clients must point to the same state file to share references.
+
+Each core/API/RPC/MCP request requires a nonempty `scope` of at most 200 characters. CLI action commands default to `default`; `--scope` overrides that value before or after the command. Scopes separate local archive namespaces; they are not authentication. A reference is resolved only against the selected state file and scope. Configure process and file access at the host boundary.
+
+## Raw text folding
+
+With no subcommand, `ctxf` performs `fold`. Both forms read raw UTF-8 text from stdin:
+
+```sh
+cat notes.txt | ctxf
+ctxf fold < notes.txt > notes.folded.txt
+ctxf fold --scope investigation --json < notes.txt
+```
+
+Raw output is the **complete** folded text, without JSON framing, pagination or an added newline. Empty input is valid. `fold --json` is a boolean output switch and emits the bare core result object, not a `{"result":...}` envelope.
+
+`fold` and `read --raw` report operation errors on stderr with a nonzero exit status. They collect a successful result before writing it, so failed recovery or folding does not write a JSON error into the text pipeline.
+
+The API/RPC/MCP operation is:
+
+```json
+{"action":"fold","scope":"investigation","text":"<!-- @context-fold begin evidence -->\nCompleted observations and comparisons that remain recoverable after folding.\n<!-- @context-fold end evidence -->"}
+```
+
+`text` is required, including for an empty string. Optional `language` and `commentStyles` use the same parser contract as source annotations. The returned object contains:
+
+| Field | Meaning |
+| --- | --- |
+| `scope` | The archive namespace used for this call. |
+| `text` | The complete projected input. Unmarked text and unsafe marker regions stay visible. |
+| `references` | Bodies actually folded by this call. Existing reference literals are not new entries in this list. |
+| `references[].id` / `sha256` | The complete SHA-256 of the marked body. |
+| `references[].label` | The marker's label. |
+| `references[].reference` | The `[[cf:v2:…]]` string inserted into the returned text. |
+| `references[].archiveId` | The backing archive entry identifier. |
+
+`fold` is an explicit immediate conversion. It does not require or manufacture an `occurrence` or `requestCycle`, and does not change `read-source`'s default delay. Automatic-projection `enabled`, `default_fold`, `keep` and delay settings do not suppress this explicitly requested conversion; archive quotas and safety checks still apply. Only bodies whose references reduce UTF-8 byte length are replaced, after their originals have been committed. Existing references remain literal rather than being recursively folded.
+
+Recover one marked body using the same state and scope:
+
+```sh
+ctxf read --scope investigation --id ACTUAL_RETURNED_HASH --raw > original-body.txt
+```
+
+Without `--raw`, `read` retains the existing JSON envelope and page metadata. With `--raw` and no range options, the CLI follows pagination and writes the complete original without adding a newline. An explicit `--offset` starts later; `--limit` intentionally returns only the selected page. `resolve` can reconstruct the complete submitted text by replacing references in a folded view; a single `read` returns only its referenced body.
 
 ## Single-call CLI
 
 `call --json JSON` accepts a complete request. Omitting `--json`, or passing `--json -`, reads one JSON document from stdin; this single-call document may span multiple lines.
 
 ```sh
-uv run --project context-folding python -m context_folding call \
+ctxf call \
   --state /absolute/private/archive.sqlite --json '{"action":"status","scope":"example"}'
 ```
 
-Supported actions also have subcommands with `--scope`. Explicit flags override corresponding `--json` fields, and the subcommand determines the action:
+Existing actions also have subcommands with `--scope`. Explicit flags override corresponding `--json` fields, and the subcommand determines the action:
 
 ```sh
-uv run --project context-folding python -m context_folding read-source \
+ctxf read-source \
   --state /absolute/private/archive.sqlite --scope example \
   --path /project/module.py --occurrence read-1 --request-cycle 0
 
-uv run --project context-folding python -m context_folding read \
+ctxf read \
   --state /absolute/private/archive.sqlite --scope example \
   --id ACTUAL_RETURNED_ID --offset 0 --limit 4000
 ```
 
-`--request-cycle` maps to `requestCycle`; `--expand-mode` maps to `expandMode`; `--comment-styles` maps to `commentStyles`. `--text -` and `--body -` read raw UTF-8 stdin. JSON options such as `--value`, `--source`, `--config` and `--files` also accept `-`. Only one input can consume stdin per invocation. `put` reads raw stdin when no text is supplied. Use `--json` for core options without dedicated flags, for example `{"peek":true}`.
+`--request-cycle` maps to `requestCycle`; `--expand-mode` maps to `expandMode`; `--comment-styles` maps to `commentStyles`. `--text -` and `--body -` read raw UTF-8 stdin. JSON options such as `--value`, `--source`, `--config` and `--files` also accept `-`. Only one input can consume stdin per invocation. `put` reads raw stdin when no text is supplied. Existing commands retain `--json JSON` as request input, for example `{"peek":true}`; this is distinct from the new `fold --json` output switch.
 
-The CLI emits one JSON envelope, with no successful-operation banner:
+These existing commands emit one JSON envelope unless an explicit raw output option is used, with no successful-operation banner:
 
 ```json
 {"result":{"entries":0,"groups":0,"roots":0,"folded":0,"trashed":0,"offsetUnit":"unicode-code-points"}}
@@ -112,6 +156,7 @@ Offsets and limits always count **Python Unicode code points**, including throug
 
 | Action | Purpose |
 | --- | --- |
+| `fold` | Immediately transform submitted text's explicit comments and return a complete view with recovery references. |
 | `annotate` | Save original source and discover explicit comment regions; no source-file edits. |
 | `read-source` | Project an annotated source observation with host cycle information. |
 | `read`, `resolve`, `paste` | Recover or export exact stored content. |
@@ -144,23 +189,26 @@ MCP uses newline-delimited JSON-RPC 2.0, without `Content-Length` headers. Stdou
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"context_folding","arguments":{"action":"status","scope":"example"}}}
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"context_folding","arguments":{"action":"fold","scope":"example","text":"<!-- @context-fold begin evidence -->\nCompleted observations and comparisons that remain recoverable after folding.\n<!-- @context-fold end evidence -->"}}}
 ```
 
 Supported protocol versions are `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`. A supported requested version is echoed; otherwise the server proposes `2025-11-25`. Capabilities advertise tools only. `ping` returns an empty object. Valid notifications are silent and cannot perform archive operations.
 
-`tools/list` returns one `context_folding` tool. Its schema requires action/scope and advertises the source occurrence/cycle fields. Core validation remains authoritative. A successful `tools/call` contains the raw core result serialized into `content[0].text`, with `isError: false`. An application failure uses `isError: true` and an ordinary `{"error":...}` envelope in that text.
+`tools/list` returns one `context_folding` tool. Its schema requires action/scope and advertises `fold`, its text/parser fields, and the separate source occurrence/cycle fields. Core validation remains authoritative. A successful `tools/call` contains the raw core result serialized into `content[0].text`, with `isError: false`. An application failure uses `isError: true` and an ordinary `{"error":...}` envelope in that text.
+
+The caller consumes the returned folded text. MCP does not replace earlier messages, rewrite a host's history or display the result in a particular history slot. That requires an explicit host integration; an immediate `fold` call alone does not install one.
 
 Malformed JSON/UTF-8 produces `-32700`; invalid envelopes or oversized frames produce `-32600`; invalid parameters or unknown tool names produce `-32602`; unknown methods produce `-32601`; missing initialization produces `-32000`; unexpected server failures produce `-32603`. Errors use `id: null` where no usable request ID exists. Individual errors leave the stream open.
 
 ## Framing and resource limits
 
-Requests are limited to 8 MiB per frame or single-call input. Oversized lines are drained through their newline in bounded chunks, yielding one error before accepting the next frame. LF, CRLF and a final frame without newline are accepted. Embedded newlines inside strings must be JSON escaped.
+JSON requests are limited to 8 MiB per frame or single-call input. Oversized lines are drained through their newline in bounded chunks, yielding one error before accepting the next frame. LF, CRLF and a final frame without newline are accepted. Embedded newlines inside strings must be JSON escaped.
 
 Empty lines, batch arrays, malformed UTF-8 and `NaN`/`Infinity` literals are rejected. Core text, archive and operation limits may be smaller than the transport frame limit. Output is compact JSON plus LF, flushed immediately; non-ASCII escaping preserves decoded Unicode values.
 
 ## SDK and host responsibilities
 
-Rust, TypeScript and C# clients each keep one Python subprocess alive and transport this protocol. Generic `call` / `CallAsync` forwards `read-source`, including occurrence/cycle fields; wrappers for archive reads do not infer request progress. A bridge knows its RPC calls, not the host's model requests.
+Rust, TypeScript and C# clients each keep one Python subprocess alive and transport this protocol. Their `fold(scope, text, fields)` / `FoldAsync` wrappers forward the immediate action without implementing another folding engine. Generic `call` / `CallAsync` forwards `read-source`, including occurrence/cycle fields; wrappers for archive reads do not infer request progress. A bridge knows its RPC calls, not the host's model requests.
 
 A host must retain the original source observation, choose its occurrence identity, update request cycles, and apply returned views to the correct editable history slots. Installing MCP or a skill provides none of those hooks. The server does not replace the host's default compaction.
 

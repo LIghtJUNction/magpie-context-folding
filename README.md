@@ -10,6 +10,41 @@
 
 这是正在开发的 **0.4.0 源码版本，未发布到 npm**。本页只描述当前源码；旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
 
+## 文本管道与独立 MCP：ctxf
+
+独立 Python 核心提供 `ctxf`，CLI 和 MCP 共用同一个折叠操作及持久归档：
+
+```sh
+uv tool install ./context-folding
+
+# 默认从 stdin 读 UTF-8 文本，只向 stdout 写折叠后的完整文本。
+cat notes.txt | ctxf > notes.folded.txt
+
+# 显式子命令等价；源码可指定语言，以识别真正的注释。
+ctxf fold --language python < module.py > module.folded.txt
+
+# 启动同一核心的 MCP stdio 服务。
+ctxf mcp
+```
+
+`ctxf fold` 是一次明确的文本转换：立即处理已经闭合的合法注释，不等待后续请求，也不修改宿主延迟配置。无标记、未闭合区域和已有折叠引用保持原样。它先持久保存正文，再输出短引用；标准输出不附加日志、JSON 外壳或换行，错误写到标准错误。`ctxf fold --json` 可查看文本、scope 和引用元数据。
+
+默认归档位于 `$XDG_DATA_HOME/context-folding/archive.sqlite3`，未设置 XDG 时使用 `~/.local/share/context-folding/archive.sqlite3`；`CTXF_STATE` 或 `--state` 可覆盖。默认 scope 为 `default`，可用 `--scope` 分开保存任务。使用同一归档和 scope，`ctxf read --id HASH --raw` 返回实际哈希对应的完整原文；把 `HASH` 替换为生成的短哈希。默认读取保护原文，`--peek` 只查看。
+
+MCP 客户端可配置：
+
+```json
+{
+  "mcpServers": {
+    "ctxf": {"command": "ctxf", "args": ["mcp"]}
+  }
+}
+```
+
+调用 `context_folding` 的 `fold` action，传入 `scope` 和 `text`，返回 `{scope, text, references}`。宿主消费返回的 `text`；MCP 服务本身不能修改其他工具或既有对话历史。自动处理历史的 Magpie 请求钩子仍使用前文的默认延迟。
+
+`ctxf` 由独立 Python 包提供；根 npm 包的 `magpie-context-folding` 继续管理 Magpie 自己的归档。两个后端的归档和 scope 不互通，恢复引用时使用生成它的后端。详细命令、恢复与传输合同见[独立核心说明](context-folding/README.md)和[传输协议](context-folding/docs/TRANSPORT.md)。
+
 ## 怎么用
 
 ### 1. 安装 Magpie 插件

@@ -60,3 +60,22 @@ Node 的测试启动器在本次环境中只显示文件级计数，因此直接
 单次 PostToolUse 适配器无法自行重写未来历史：默认延迟为 1 且宿主未提供出现身份、请求进展和重投影能力时，保留原文。完整的跨请求延迟由能观察和投影历史的 Magpie 请求钩子实现。
 
 根网关的源码过滤是保守词法扫描，独立 Python 核心使用 Python tokenizer 和可选 JS/TS Tree-sitter。复杂或不确定的网关源码保留原样；其他语言的多行字符串仍有字面标记误识别限制，详见[注释协议](annotation-protocol.md)。
+
+## ctxf 管道与 MCP 追加验证
+
+同日追加独立 Python 命令 `ctxf` 与共享 `fold` action。此次未修改根 Magpie 插件实现；上表的根 TypeScript/Bun 结果来自首次重构验证。Python 与 SDK 的最新计数如下：
+
+| 检查 | 结果 |
+| --- | --- |
+| Python 完整套件 | **142 通过，0 失败，0 跳过**；新增 19 项 fold/ctxf 测试 |
+| TypeScript SDK | 编译通过，**7 通过，0 失败，0 跳过**，包含实际核心 fold |
+| Pi 适配器 | **6 通过，0 失败，1 项真实宿主测试跳过** |
+| 安装后的 ctxf | 在隔离 Python 环境实际安装成功，8 组命令和协议验收通过 |
+
+安装使用 `uv pip install --python /tmp/ctxf-smoke-venv/bin/python --no-deps --editable ./context-folding`，随后直接运行安装生成的 `ctxf` console script。验证了真实 `ctxf | ctxf` 子进程串管、UTF-8/CRLF/无末尾换行、超过 24,000 字符的跨进程完整恢复、原文读取后的显式再次折叠、无标记与空输入、已有引用旁的新区段，以及无效 UTF-8 和存档失败时 stdout 为空。
+
+实际 MCP stdio 验收完成 initialize、tools/list、fold、read，再由另一个 CLI 进程从同一归档和 scope 恢复全文；RPC fold 返回相同投影。这证明独立服务与 CLI 的接线，不能替代前述真实 Magpie/Pi 宿主验收。
+
+独立复核发现并修复了 call 的 scope 覆盖、短输出遇到关闭管道时退出阶段再次 flush，以及后续 roots 替换后的引用保活边界。定向复跑全部通过。测试还使用真实 SQLite 触发器模拟提交失败，确认不会输出未成功存档的引用。空输入、无标记及无法缩短的文本不写入 scope，也不会因新写入配额失败。
+
+Rust/C# 的 fold 薄包装和示例已同步，仍未获得相应工具链执行结果。

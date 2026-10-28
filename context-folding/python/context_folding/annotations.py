@@ -346,7 +346,7 @@ def _check_literal_references(text: str) -> None:
 
 
 def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bool = False,
-                   *, expand_mode: str = "recursive") -> dict:
+                   *, expand_mode: str = "recursive", allow_reference_literals: bool = False) -> dict:
     if expand_mode not in {"single", "recursive"}:
         raise ValueError("Invalid source expansion mode")
     regions = annotation["regions"]
@@ -371,13 +371,15 @@ def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bo
             preserve = preserve or parent in kept or (expand_mode == "recursive" and parent in expanded)
             parent = by_id[parent]["parentId"]
         payload = text[region["start"]:region["end"]]
-        if preserve or region["id"] in protected or len(region["reference"]) >= len(payload):
+        if preserve or region["id"] in protected or len(region["reference"].encode("utf-8")) >= len(payload.encode("utf-8")):
             continue
-        _check_literal_references(text[cursor:region["start"]])
+        if not allow_reference_literals:
+            _check_literal_references(text[cursor:region["start"]])
         chunks.extend((text[cursor:region["start"]], region["reference"]))
         cursor = region["end"]
         visible.append({key: region[key] for key in ("id", "name", "header", "reference", "startLine", "endLine")})
-    _check_literal_references(text[cursor:])
+    if not allow_reference_literals:
+        _check_literal_references(text[cursor:])
     chunks.append(text[cursor:])
     return {"text": "".join(chunks), "foldedRegions": visible}
 

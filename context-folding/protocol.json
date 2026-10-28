@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Context Folding RPC v2",
-  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run python -m context_folding rpc --state /absolute/private/archive.sqlite. State is a SQLite file selected outside the request. Core validation defines action-specific constraints. No network listener or model calls.",
+  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI, MCP and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls.",
   "type": "object",
   "required": [
     "action",
@@ -11,6 +11,7 @@
     "action": {
       "type": "string",
       "enum": [
+        "fold",
         "put",
         "list",
         "read",
@@ -33,7 +34,8 @@
       "maxLength": 200
     },
     "text": {
-      "type": "string"
+      "type": "string",
+      "description": "Required for fold, including the empty string. Fold returns the complete immediate projection of explicitly marked text; read-source independently retains its host-cycle delay."
     },
     "language": {
       "type": "string"
@@ -177,7 +179,70 @@
     }
   },
   "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": { "const": "fold" }
+        },
+        "required": ["action"]
+      },
+      "then": {
+        "required": ["text"]
+      }
+    }
+  ],
   "$defs": {
+    "foldReference": {
+      "type": "object",
+      "required": ["id", "label", "sha256", "reference", "archiveId"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Complete body SHA-256; usable with read in the same state and scope."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^\\[\\[cf:v2:[a-f0-9]{12,64}\\]\\]$"
+        },
+        "archiveId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The backing archive entry identifier."
+        }
+      },
+      "additionalProperties": true
+    },
+    "foldResult": {
+      "type": "object",
+      "required": ["scope", "text", "references"],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "description": "Complete projected text, without pagination or an added trailing newline."
+        },
+        "references": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/foldReference" },
+          "description": "Only bodies folded by this call; existing literal references are left intact."
+        }
+      },
+      "additionalProperties": true
+    },
     "response": {
       "oneOf": [
         {
@@ -218,6 +283,16 @@
     }
   },
   "examples": [
+    {
+      "action": "fold",
+      "scope": "example",
+      "text": "<!-- @context-fold begin result -->\nCompleted evidence that can be recovered through its content hash.\n<!-- @context-fold end result -->"
+    },
+    {
+      "action": "fold",
+      "scope": "example",
+      "text": ""
+    },
     {
       "action": "read-source",
       "scope": "example",
