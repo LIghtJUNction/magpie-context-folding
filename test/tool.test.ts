@@ -34,11 +34,12 @@ async function fixture(run: (store: Store, scope: string, directory: string) => 
 }
 const load = (store: Store, scope: string) => store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
 
-for (const action of ['read', 'paste']) for (const layer of ['original', 'layer']) {
-  test(`${action} ${layer} keeps recovered content expanded and restores legacy ancestors`, async () => {
+for (const action of ['read', 'paste', 'restore']) for (const layer of ['original', 'layer']) {
+  test(`${action} ${layer} explicitly keeps recovered content expanded and restores legacy ancestors`, async () => {
     await fixture(async (store, scope, directory) => {
       const path = join(directory, 'out');
-      const result = await call({ action, scope, id: 'a', layer, ...(action === 'paste' ? { path } : {}) });
+      const result = await call({ action, scope, id: 'a', layer,
+        ...(action === 'restore' ? {} : { peek: false }), ...(action === 'paste' ? { path } : {}) });
       assert.equal(result.error, undefined);
       assert.equal(result.kept, true);
       if (action === 'paste') assert.equal(await readFile(path, 'utf8'), layer === 'original' ? 'a🙂 original\n' : 'short');
@@ -56,16 +57,60 @@ for (const action of ['read', 'paste']) for (const layer of ['original', 'layer'
   });
 }
 
-test('peek read and paste leave annotations, marks, occurrences and folded groups unchanged', async () => {
+test('read and paste leave annotations, marks, occurrences and folded groups unchanged by default or with peek', async () => {
   await fixture(async (store, scope, directory) => {
     const before = await load(store, scope);
+    assert.equal((await call({ action: 'read', scope, id: 'a', layer: 'layer' })).kept, false);
+    assert.equal((await call({ action: 'paste', scope, id: 'a', path: join(directory, 'default') })).kept, false);
     assert.equal((await call({ action: 'read', scope, id: 'a', layer: 'layer', peek: true })).kept, false);
     assert.equal((await call({ action: 'paste', scope, id: 'a', path: join(directory, 'peek'), peek: true })).kept, false);
     const after = await load(store, scope);
     assert.deepEqual(after.entries, before.entries);
     assert.deepEqual(after.groups, before.groups);
     assert.equal(after.metrics.itemsRestored, 0);
-    assert.equal(after.metrics.layerReadCalls, 1);
+    assert.equal(after.metrics.layerReadCalls, 2);
+  });
+});
+
+test('read returns bounded pages and never silently restores a long folded entry', async () => {
+  await fixture(async (store, scope) => {
+    const original = 'Exact archive line.\n'.repeat(240);
+    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+      state.entries[0]!.text = original;
+      state.entries[0]!.annotation = { sha256: digest(original), label: 'long-source' };
+    });
+    const first = await call({ action: 'read', scope, id: 'a' });
+    assert.equal(first.text, original.slice(0, 2000));
+    assert.equal(first.nextOffset, 2000);
+    assert.equal(first.totalChars, original.length);
+    assert.equal(first.kept, false);
+    const second = await call({ action: 'read', scope, id: 'a', offset: first.nextOffset, limit: 23 });
+    assert.equal(second.text, original.slice(2000, 2023));
+    assert.equal(second.nextOffset, 2023);
+    const state = await load(store, scope);
+    assert.equal(state.entries[0]!.folded, 'short');
+    assert.equal(state.entries[0]!.mark.disposition, 'foldable');
+    assert.equal(state.metrics.itemsRestored, 0);
+  });
+});
+
+test('status reports a brief decision and net estimate; detail opts into metrics without changing state', async () => {
+  await fixture(async (store, scope) => {
+    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+      state.decision = { reason: 'insufficient-savings', netTokensEstimated: 0 };
+      state.metrics.estimatedTokenDelta = '1234';
+    });
+    const before = await load(store, scope);
+    const brief = await call({ action: 'status', scope });
+    assert.equal(brief.entries, 3);
+    assert.equal(brief.folded, 5);
+    assert.deepEqual(brief.decision, before.decision);
+    assert.equal(brief.cumulativeNetTokensEstimated, '1234');
+    assert.equal(brief.metrics, undefined);
+    const detailed = await call({ action: 'status', scope, detail: true });
+    assert.deepEqual(detailed.metrics, before.metrics);
+    assert.deepEqual(await load(store, scope), before);
+    assert.ok(JSON.stringify(brief).length < JSON.stringify(detailed).length / 2);
   });
 });
 
@@ -119,7 +164,7 @@ test('identical hash/content aliases resolve together and remain expanded after 
       state.entries.push(alias);
     });
     const hash = (await load(store, scope)).entries[0]!.annotation!.sha256;
-    assert.equal((await call({ action: 'read', scope, id: hash.slice(0, 12) })).text, 'a🙂 original\n');
+    assert.equal((await call({ action: 'restore', scope, id: hash.slice(0, 12) })).text, 'a🙂 original\n');
     const state = await load(store, scope);
     for (const entry of state.entries.filter(entry => entry.annotation?.sha256 === hash)) {
       assert.equal(entry.mark.disposition, 'keep');
@@ -130,7 +175,7 @@ test('identical hash/content aliases resolve together and remain expanded after 
 
 test('legacy group manifests and previous layers remain available', async () => {
   await fixture(async (store, scope) => {
-    const manifest = await call({ action: 'read', scope, id: 'inner' });
+    const manifest = await call({ action: 'restore', scope, id: 'inner' });
     assert.deepEqual(JSON.parse(manifest.text).children, ['a', 'b']);
     const state = await load(store, scope);
     assert.ok(state.groups!.every(group => !group.enabled && group.folded === undefined));
@@ -144,8 +189,8 @@ test('legacy group manifests and previous layers remain available', async () => 
 
 test('forget requires restored entries and groups, then removes recovery data', async () => {
   await fixture(async (store, scope) => {
-    assert.match((await call({ action: 'forget', scope })).error, /without peek/);
-    for (const id of ['a', 'b', 'c']) await call({ action: 'read', scope, id });
+    assert.match((await call({ action: 'forget', scope })).error, /Restore/);
+    for (const id of ['a', 'b', 'c']) await call({ action: 'restore', scope, id });
     const status = await call({ action: 'status', scope });
     assert.equal(status.folded, 0);
     assert.equal(status.operations, undefined);
@@ -181,13 +226,15 @@ test('invalid reads do not mutate archives; bounds and filesystem failures keep 
 
 test('tool exposes recovery/inspection only and rejects removed mode/mark actions', async () => {
   const { args } = (await ContextFoldingPlugin()).tool.context_folding;
-  assert.deepEqual(args.oneOf.map(schema => schema.properties.action.const).sort(), ['forget', 'list', 'paste', 'read', 'stats', 'status']);
+  assert.deepEqual(args.oneOf.map(schema => schema.properties.action.const).sort(), ['forget', 'list', 'paste', 'read', 'restore', 'stats', 'status']);
   for (const action of ['read', 'paste']) {
     const schema = args.oneOf.find(schema => schema.properties.action.const === action)!;
     const peek = (schema.properties as Record<string, { default?: unknown }>).peek!;
-    assert.equal(peek.default, false);
+    assert.equal(peek.default, true);
     assert.equal(schema.additionalProperties, false);
   }
+  const restore = args.oneOf.find(schema => schema.properties.action.const === 'restore')!;
+  assert.equal(Object.hasOwn(restore.properties, 'peek'), false);
   await fixture(async (store, scope) => {
     const before = await load(store, scope);
     for (const action of ['mode', 'mark']) assert.ok((await call({ action, scope })).error);

@@ -1,4 +1,4 @@
-"""Shared, explicit-annotation settings. No compression strategies or cost gate."""
+"""Shared annotation settings; only the Magpie hook evaluates request savings."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -17,6 +17,8 @@ MAX_CONFIG_BYTES = 1024 * 1024
 SAFE_INTEGER = 9007199254740991
 DEFAULTS = {
     "folding": {"enabled": True, "max_session_bytes": 67108864, "delay_requests": 1,
+                # Shared TOML compatibility; explicit Python fold does not use this gate.
+                "min_saving_tokens": 256,
                 "reserve_output_tokens": 0},
     "annotations": {"enabled": True, "default_fold": True, "keep": []},
     "gc": {"enabled": False, "strength": "conservative", "idle_seconds": 2592000,
@@ -29,6 +31,7 @@ _KEYS = {**{section: set(values) for section, values in DEFAULTS.items()},
 _RANGES = {
     "folding.max_session_bytes": (1, 67108864, True),
     "folding.delay_requests": (0, SAFE_INTEGER, True),
+    "folding.min_saving_tokens": (0, SAFE_INTEGER, True),
     "folding.context_window_tokens": (1, SAFE_INTEGER, True),
     "folding.reserve_output_tokens": (0, SAFE_INTEGER, True),
     "gc.idle_seconds": (0, 315576000, False),

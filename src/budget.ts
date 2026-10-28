@@ -7,7 +7,8 @@ export function estimateTokens(body: unknown): number {
 type Body = Record<string, unknown>;
 const record = (value: unknown): value is Body => !!value && typeof value === 'object' && !Array.isArray(value);
 const budget = /^<context-budget used_estimate=\d+ capacity=(?:\d+|unknown) output_reserved=\d+ available_estimate=(?:\d+|unknown) basis=json-utf8-bytes\/4(?: scope=[a-f0-9]{64})?\s*\/>$/;
-const isBudget = (value: unknown): boolean => typeof value === 'string' && budget.test(value);
+const recovery = /^<context-folding scope=[a-f0-9]{64}\s*\/>$/;
+const isBudget = (value: unknown): boolean => typeof value === 'string' && (budget.test(value) || recovery.test(value));
 function stripBudgetText(text: string): string {
   // Hosts may join text blocks or append instructions after our metadata.
   const paragraphs = text.split('\n\n').filter(part => !isBudget(part));
@@ -19,7 +20,11 @@ export function withoutBudget(body: Body, protocol: Protocol): Body {
   // @context-fold begin withoutBudget-7b4cee3f11
   const result = structuredClone(body);
   if (protocol === 'chat' && Array.isArray(result.messages)) {
-    result.messages = result.messages.filter(item => !(record(item) && item.role === 'system' && isBudget(item.content)));
+    result.messages = result.messages.flatMap(item => {
+      if (!record(item) || item.role !== 'system' || typeof item.content !== 'string') return [item];
+      const content = stripBudgetText(item.content);
+      return !content && item.content ? [] : [{ ...item, content }];
+    });
   } else if (protocol === 'responses' && typeof result.instructions === 'string') {
     const instructions = stripBudgetText(result.instructions);
     if (instructions) result.instructions = instructions;
@@ -72,6 +77,12 @@ function addSystemBudget(body: Body, text: string, protocol: Protocol): Body {
 }
 
 export interface BudgetOptions { contextWindowTokens?: number; reserveOutputTokens?: number; scope?: string }
+
+/** Stable recovery routing only: unknown capacity does not need a changing budget. */
+export function appendRecovery(body: Body, protocol: Protocol, scope: string): Body {
+  if (!/^[a-f0-9]{64}$/.test(scope)) throw new Error('Invalid context scope');
+  return addSystemBudget(withoutBudget(body, protocol), `<context-folding scope=${scope} />`, protocol);
+}
 
 /** Unknown model capacity stays unknown. This estimate is never a billing claim. */
 export function appendBudget(body: Body, protocol: Protocol, options: BudgetOptions = {}): Body {

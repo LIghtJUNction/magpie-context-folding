@@ -162,7 +162,8 @@ class ConfigTests(unittest.TestCase):
     def test_annotation_only_defaults_and_input_isolation(self):
         settings = self.load()
         self.assertEqual(settings["folding"], {"enabled": True, "delay_requests": 1,
-                         "max_session_bytes": 67108864, "reserve_output_tokens": 0})
+                         "max_session_bytes": 67108864, "min_saving_tokens": 256,
+                         "reserve_output_tokens": 0})
         self.assertEqual(set(settings), {"folding", "annotations", "gc", "magpie"})
         self.assertNotIn("context_window_tokens", settings["folding"])
         settings["annotations"]["keep"].append("changed")
@@ -182,6 +183,21 @@ class ConfigTests(unittest.TestCase):
         settings["annotations"]["keep"].append("other")
         self.assertEqual(overrides, original)
 
+    def test_shared_magpie_saving_gate_merges_without_changing_python_fold(self):
+        from context_folding import Client
+
+        self.write(self.global_path, "[folding]\nmin_saving_tokens=512\n")
+        self.assertEqual(self.load()["folding"]["min_saving_tokens"], 512)
+        self.write(self.project_path, "[folding]\nmin_saving_tokens=9007199254740991\n")
+        self.assertEqual(self.load()["folding"]["min_saving_tokens"], 9007199254740991)
+        self.assertEqual(self.load({"folding": {"min_saving_tokens": 0}})["folding"]["min_saving_tokens"], 0)
+        payload = "Exact task evidence. " * 8
+        text = "<!-- @context-fold begin task -->\n" + payload + "\n<!-- @context-fold end task -->"
+        with Client(self.root / "archive.sqlite3", project_dir=self.project) as client:
+            folded = client.fold("task", text)
+            self.assertEqual(len(folded["references"]), 1)
+            self.assertEqual(client.read("task", folded["references"][0]["id"])["text"], payload)
+
     def test_removed_strategies_and_policy_report_migration(self):
         for field in ("mode", "threshold_tokens", "head_chars", "keep_recent_messages", "minimum_saving_usd"):
             with self.subTest(field=field), self.assertRaisesRegex(ConfigError, "removed"):
@@ -193,6 +209,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_strict_types_unknown_fields_and_safe_ranges(self):
         invalid = {"folding.delay_requests": [True, -1, 0.5, 9007199254740992],
+                   "folding.min_saving_tokens": [True, -1, 0.5, "256", 9007199254740992],
                    "folding.context_window_tokens": [False, 0, -1, 1.5],
                    "folding.reserve_output_tokens": [True, -1, 1.5],
                    "folding.max_session_bytes": [False, 0, 67108865],

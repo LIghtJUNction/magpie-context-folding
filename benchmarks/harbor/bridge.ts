@@ -94,8 +94,8 @@ export class FoldingBridge {
     if (input.op === 'recover') {
       requireCondition(!this.pending, 'request_pending', 'Complete the previous request first');
       requireCondition(record(input.args), 'invalid_request', 'Recovery requires an args object');
-      requireCondition(['read', 'list', 'status'].includes(String(input.args.action)),
-        'unsupported_action', 'Only read, list and status are available in benchmarks');
+      requireCondition(['read', 'restore', 'list', 'status'].includes(String(input.args.action)),
+        'unsupported_action', 'Only read, restore, list and status are available in benchmarks');
       requireCondition(this.scope !== null && this.mode === 'folding',
         'archive_unavailable', 'This trial has no recovery archive');
       requireCondition(input.args.scope === undefined || input.args.scope === this.scope,

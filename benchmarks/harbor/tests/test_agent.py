@@ -281,6 +281,13 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                                                                              "limit": 24000}, "recover-source")])
                 self.test.assertEqual(json.loads(request["messages"][-1]["content"])["text"], payload.rstrip("\n"))
                 restored = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
+                if step == 3:
+                    self.test.assertFalse(json.loads(request["messages"][-1]["content"])["kept"])
+                    self.test.assertIn("[[cf:v2:", restored)
+                    reference = restored.split("[[cf:v2:", 1)[1].split("]]", 1)[0]
+                    return assistant(calls=[tool_call("context_folding", {"action": "restore", "id": reference,
+                                                                             "limit": 24000}, "restore-source")])
+                self.test.assertTrue(json.loads(request["messages"][-1]["content"])["kept"])
                 self.test.assertEqual(restored, source)
                 return assistant()
 
@@ -291,7 +298,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.setup(environment)
         await agent.run("Read and recover source component fixture", environment, context)
         self.assertEqual(len(environment.commands), 2)
-        self.assertEqual(context.metadata["magpie_harbor"]["recovery_calls"], 1)
+        self.assertEqual(context.metadata["magpie_harbor"]["recovery_calls"], 2)
 
     async def test_subprocess_start_failure_closes_open_stderr_and_records_failure(self):
         bridges = []

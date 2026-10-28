@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ConfigError, loadOptions } from './config.js';
-import { appendBudget, estimateTokens, withoutBudget } from './budget.js';
+import { appendBudget, appendRecovery, estimateTokens, withoutBudget } from './budget.js';
 import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
 import { extractSpans, recoveryToolName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
@@ -109,8 +109,16 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       reserveOutputTokens: options.reserveOutputTokens,
       ...(options.contextWindowTokens === undefined ? {} : { contextWindowTokens: options.contextWindowTokens }),
     };
-    // A visible budget is useful even when this host cannot recover originals.
-    if (!recoveryToolName(body, ctx.protocol, options.recoveryToolName)) return appendBudget(body, ctx.protocol, budgetOptions);
+    // An unknown window tells the agent nothing useful. Stay silent unless the
+    // user requested a real budget or a folded reference needs recovery routing.
+    const showBudget = options.contextWindowTokens !== undefined;
+    if (!recoveryToolName(body, ctx.protocol, options.recoveryToolName)) {
+      // A caller may replay our projected history while temporarily disabling
+      // tools. Do not orphan its references by removing their existing scope.
+      if (spans.some(span => (span.role === 'assistant' || span.source)
+        && /\[\[cf:v2:[a-f0-9]{12,64}\]\]/.test(span.text))) return input;
+      return showBudget ? appendBudget(body, ctx.protocol, budgetOptions) : body;
+    }
     const store = new Store();
     const scope = await store.scopeFor(JSON.stringify([ctx.session, ctx.origin ?? '', ctx.agent ?? '', ctx.cwd ?? '']));
     let pending: z.infer<typeof pendingSchema> | undefined;
@@ -123,20 +131,45 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       snapshot.cycle = cycle;
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
-      const proposed: { region: Region; reference: string }[] = [];
       const found = candidates(body, spans, ctx.protocol);
       // Allocate references against the entire batch so collision handling is
       // independent of parse order. Full hashes and original text stay in storage.
       const hashes = new Set([...byHash.keys(), ...snapshot.entries.map(entry => entry.id),
         ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256)]);
-      let newlyFolded = 0;
-      let waiting = 0;
-      for (const { region, occurrence, role } of found) {
+      const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
+        [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
+          [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
+      const metadata = (projected: Body, hasFolded: boolean): Body => showBudget
+        ? appendBudget(projected, ctx.protocol, { ...budgetOptions, ...(hasFolded ? { scope } : {}) })
+        : hasFolded ? appendRecovery(projected, ctx.protocol, scope) : projected;
+      const project = (regions: { region: Region; reference: string }[]): Body =>
+        replaceExtractedSpans(body, replaceRegions(spans, regions), ctx.protocol, spans);
+      const inputTokensEstimated = estimateTokens(input);
+      const baselineTokens = estimateTokens(body);
+      // A zero setting still refuses a non-positive complete-request saving.
+      const requiredSaving = Math.max(1, options.minSavingTokens);
+      let skippedRegions = 0;
+      const eligible = found.flatMap(candidate => {
+        const { region } = candidate;
+        if (byHash.get(region.sha256)?.mark.disposition === 'keep') return [];
         const ref = reference(shortHash(region.sha256, hashes));
         const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
           spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
         const after = region.slices.length * Buffer.byteLength(JSON.stringify(ref));
-        if (after >= before) continue;
+        if (after >= before) { skippedRegions++; return []; }
+        return [{ ...candidate, reference: ref }];
+      });
+      // Preview the whole batch before allocating archive entries or starting
+      // grace periods. Explicit markers permit folding; they do not require a
+      // losing transformation. All references and protocol metadata are priced.
+      const potentialSavingTokensEstimated = eligible.length
+        ? baselineTokens - estimateTokens(metadata(project(eligible), true)) : 0;
+      const worthwhile = eligible.length > 0 && potentialSavingTokensEstimated >= requiredSaving;
+      if (!worthwhile) skippedRegions += eligible.length;
+      let proposed: { region: Region; reference: string; entry: Entry;
+        observed: NonNullable<Entry['occurrences']>[string] }[] = [];
+      let waiting = 0;
+      for (const { region, occurrence, role, reference: ref } of worthwhile ? eligible : []) {
         let entry = byHash.get(region.sha256);
         if (!entry) {
           entry = { id: region.sha256, role, text: region.text, annotation: { sha256: region.sha256, label: region.label },
@@ -150,11 +183,27 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         // can never make a freshly read occurrence immediately disappear.
         if (!observed || observed.lastSeen < previousCycle) observed = occurrences[occurrence] = { firstSeen: cycle, lastSeen: cycle };
         observed.lastSeen = cycle;
-        if (entry.mark.disposition === 'keep') continue;
         if (cycle - observed.firstSeen < options.delayRequests) { waiting++; continue; }
-        proposed.push({ region, reference: ref });
+        proposed.push({ region, reference: ref, entry, observed });
+      }
+      // Only mature regions count this turn. A large still-waiting region must
+      // not subsidize a small mature one, nor may a rejected projection mark
+      // its entries as folded or increase the successful fold counters.
+      let projected = project(proposed);
+      let hasFolded = proposed.length > 0 || existingReferences.length > 0;
+      let result = metadata(projected, hasFolded);
+      if (proposed.length && baselineTokens - estimateTokens(result) < requiredSaving) {
+        skippedRegions += proposed.length;
+        proposed = [];
+        projected = body;
+        hasFolded = existingReferences.length > 0;
+        result = metadata(projected, hasFolded);
+      }
+      const newRegions = proposed.filter(candidate => !candidate.observed.folded);
+      const newlyFolded = newRegions.length;
+      for (const { entry, observed, reference: ref } of proposed) {
         entry.folded = ref;
-        if (!observed.folded) { newlyFolded++; observed.folded = true; }
+        observed.folded = true;
       }
       // Occurrence metadata is a short-lived cursor; originals and old references
       // are durable until explicitly forgotten, never evicted to meet a budget.
@@ -163,25 +212,22 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           if (occurrence.lastSeen < previousCycle) delete entry.occurrences[key];
         }
       }
-      const replacements = replaceRegions(spans, proposed);
-      const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
-        [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
-          [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
-      const hasFolded = proposed.length > 0 || existingReferences.length > 0;
-      const projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
-      const result = appendBudget(projected, ctx.protocol, { ...budgetOptions, scope });
-      snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
-        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length };
+      const outputTokensEstimated = estimateTokens(result);
+      snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : skippedRegions ? 'insufficient-savings'
+        : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
+        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length,
+        skippedRegions, minSavingTokens: options.minSavingTokens, potentialSavingTokensEstimated,
+        inputTokensEstimated, outputTokensEstimated, netTokensEstimated: inputTokensEstimated - outputTokensEstimated };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
-        foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(projected))),
+        foldedTokensEstimated: String(Math.max(0, baselineTokens - estimateTokens(project(newRegions)))),
       });
       pending = { scope, bodyHash: fingerprint(result), folded: hasFolded,
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
-          guideOnlyRequests: hasFolded ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
+          guideOnlyRequests: !hasFolded && showBudget ? 1 : 0, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
           estimatedTokenDelta: String(estimateTokens(input) - estimateTokens(result)),
         }) };
       return result;

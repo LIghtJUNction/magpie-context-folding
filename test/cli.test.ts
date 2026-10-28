@@ -35,7 +35,7 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     assert.equal(read.err, '');
     assert.equal(read.out, '原文🙂\n```ts\nexact();\n```\n');
     const list = await invoke(['list', '--scope', scope, '--json']);
-    assert.equal(JSON.parse(list.out).entries[0].disposition, 'keep');
+    assert.equal(JSON.parse(list.out).entries[0].disposition, 'foldable');
     const hashed = await invoke(['read', '--scope', scope, '--id', digest(read.out).slice(0, 12), '--json']);
     assert.equal(hashed.code, 0);
     assert.equal(JSON.parse(hashed.out).id, 'a');
@@ -51,13 +51,33 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     assert.equal(JSON.parse(layer.out).text, 'short');
     assert.equal(JSON.parse(layer.out).kept, false);
     const status = await invoke(['status', '--scope', scope]);
-    assert.equal(JSON.parse(status.out).folded, 0);
+    assert.equal(JSON.parse(status.out).folded, 1);
+    assert.equal(JSON.parse(status.out).metrics, undefined);
+    const detailed = await invoke(['status', '--scope', scope, '--detail']);
+    assert.equal(JSON.parse(detailed.out).metrics.originalReadCalls, 2);
     const stats = await invoke(['stats', '--scope', scope, '--json']);
     assert.equal(stats.code, 0);
     assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 2);
     assert.equal((await invoke(['stats'])).code, 0);
+    assert.equal((await invoke(['forget', '--scope', scope])).code, 1);
+    const restore = await invoke(['restore', '--scope', scope, '--id', 'a', '--json']);
+    assert.equal(restore.code, 0, restore.err);
+    assert.equal(JSON.parse(restore.out).kept, true);
+    assert.equal(JSON.parse(restore.out).text, read.out);
     assert.equal(JSON.parse((await invoke(['forget', '--scope', scope])).out).forgotten, true);
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 1);
+  });
+});
+
+test('CLI --keep explicitly protects reads and rejects conflicting --peek', async () => {
+  await fixture(async (scope, _directory, invoke) => {
+    const conflict = await invoke(['read', '--scope', scope, '--id', 'a', '--peek', '--keep']);
+    assert.equal(conflict.code, 1);
+    assert.equal(JSON.parse((await invoke(['status', '--scope', scope])).out).folded, 1);
+    const kept = await invoke(['read', '--scope', scope, '--id', 'a', '--keep', '--json']);
+    assert.equal(kept.code, 0, kept.err);
+    assert.equal(JSON.parse(kept.out).kept, true);
+    assert.equal(JSON.parse((await invoke(['status', '--scope', scope])).out).folded, 0);
   });
 });
 

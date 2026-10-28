@@ -7,7 +7,7 @@ import { addMetrics } from './metrics.js';
 import { statistics } from './statistics.js';
 import { browse, latestVersions, restoreAncestors } from './tree.js';
 
-const peek = z.boolean().default(false);
+const peek = z.boolean().default(true);
 const serialize = (value: object): string => JSON.stringify({ ...value, _contextFolding: 'control-result' });
 
 const scope = z.string().regex(/^[a-f0-9]{64}$/);
@@ -18,11 +18,12 @@ const argsSchema = z.discriminatedUnion('action', [
     query: z.string().max(200).optional(), sort: z.enum(['chronological', 'size', 'id', 'version']).default('chronological'),
     order: z.enum(['asc', 'desc']).default('asc'), offset: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(100).default(20) }).strict(),
-  z.object({ action: z.literal('read'), scope, id, layer: z.string().default('original'), peek, offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(4000) }).strict(),
+  z.object({ action: z.literal('read'), scope, id, layer: z.string().default('original'), peek, offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(2000) }).strict(),
+  z.object({ action: z.literal('restore'), scope, id, layer: z.string().default('original'), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(2000) }).strict(),
   z.object({ action: z.literal('paste'), scope, id, layer: z.string().default('original'), peek,
     path: z.string().refine(isAbsolute, 'Use an absolute destination path'),
     offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).optional() }).strict(),
-  z.object({ action: z.literal('status'), scope }).strict(),
+  z.object({ action: z.literal('status'), scope, detail: z.boolean().default(false) }).strict(),
   z.object({ action: z.literal('forget'), scope }).strict(),
 ]);
 
@@ -139,7 +140,8 @@ export async function execute(input: unknown): Promise<string> {
   try {
     if (args.action === 'stats') return serialize(await statistics(args.scope));
     const store = new Store();
-    if (args.action === 'read' || args.action === 'paste') {
+    if (args.action === 'read' || args.action === 'restore' || args.action === 'paste') {
+      const keep = args.action === 'restore' || !args.peek;
       const recover = () => store.transaction(args.scope, false, 64 * 1024 * 1024, snapshot => {
         const resolved = resolveEntry(snapshot, args.id);
         const entry = snapshot.entries.find(entry => entry.id === resolved.id);
@@ -155,13 +157,13 @@ export async function execute(input: unknown): Promise<string> {
           throw new ToolError('Paste range splits a Unicode character');
         }
         // Protect the source itself and every enclosing group, including historical-layer reads.
-        if (!args.peek) {
+        if (keep) {
           if (resolved.aliases.length) for (const alias of resolved.aliases) keepExpanded(snapshot, alias.id);
           else keepExpanded(snapshot, resolved.id);
         }
         return {
-          id: resolved.id, layer: args.layer, previousId: layer?.previousId ?? null, kept: !args.peek,
-          currentLayer: args.peek ? entry?.layers.find(layer => layer.text === entry.folded)?.id ?? 'original' : 'original',
+          id: resolved.id, layer: args.layer, previousId: layer?.previousId ?? null, kept: keep,
+          currentLayer: keep ? 'original' : entry?.layers.find(layer => layer.text === entry.folded)?.id ?? 'original',
           ...(entry?.version ? { version: entry.version, latestVersion: latestVersions(snapshot).has(entry.id) } : {}),
           text: text.slice(args.offset, end), offset: args.offset,
           nextOffset: end < text.length ? end : null, totalChars: text.length, sha256: digest(text),
@@ -190,10 +192,11 @@ export async function execute(input: unknown): Promise<string> {
         case 'list': return browse(snapshot, args);
         case 'status': return { entries: snapshot.entries.length, groups: snapshot.groups?.length ?? 0,
           folded: snapshot.entries.filter(entry => entry.folded !== undefined).length + (snapshot.groups ?? []).filter(group => group.folded !== undefined).length,
-          decision: snapshot.decision, metrics: snapshot.metrics };
+          decision: snapshot.decision, cumulativeNetTokensEstimated: snapshot.metrics.estimatedTokenDelta,
+          ...(args.detail ? { metrics: snapshot.metrics } : {}) };
         case 'forget': {
           if (snapshot.entries.some(entry => entry.folded !== undefined) || snapshot.groups?.some(group => group.folded !== undefined)) {
-            throw new ToolError('Read folded entries and group manifests without peek before forgetting recovery data');
+            throw new ToolError('Restore folded entries and group manifests before forgetting recovery data');
           }
           // Explicit scope disposal; future requests may archive the client's original history again.
           snapshot.entries = [];
