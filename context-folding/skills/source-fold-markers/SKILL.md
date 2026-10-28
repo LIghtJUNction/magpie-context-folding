@@ -7,7 +7,7 @@ description: Add explicit, optionally nested source-folding comments while keepi
 
 Use whole-line comments in the source language:
 
-Author the markers proactively when a completed region may need later retrieval. The same directive syntax works in conversation text using whole-line HTML comments and in source using valid language comments. No marker means no folding.
+Use markers proactively; do not wait for context pressure. After a substantial stage is complete, first write a concise summary outside the markers, then put lengthy supporting process and evidence in a closed block immediately below it. Keep conclusions, constraints, failures, decisions and next steps visible above/outside; the summary must make sense after the details fold. A task-wide outer block is optional; benchmark replay showed little extra byte reduction over milestone-only folding. If used, keep the live summary outside it and close it at the task boundary before writing the final conclusion. Repeat the summary-then-details pattern for later stages. Small or active work stays outside. An unclosed pair cannot fold. The same directive syntax works in conversation text using whole-line HTML comments and in source using valid language comments. No marker means no folding.
 
 ```rust
 // Decode the validated frame.

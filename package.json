@@ -49,6 +49,7 @@
     "bench:iterate": "uv run --project benchmarks/harbor --frozen python scripts/self-iterate.py",
     "bench:quality": "uv run --project benchmarks/harbor --frozen python scripts/cost-quality-benchmark.py",
     "bench:tree": "bun scripts/tree-benchmark.ts",
+    "bench:fold-strategies": "bun run scripts/fold-strategy-benchmark.ts",
     "test:controller": "python3 -I scripts/test_self_iterate.py",
     "stats": "bun src/cli.ts stats",
     "check": "npm run typecheck && npm test && npm run build",

@@ -302,7 +302,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     await agent.run((task / "instruction.md").read_text(), environment, context)
                     self.assertEqual(len(agent.received), 5)
                     all_text = lambda request: "\n".join(m.get("content") or "" for m in request["messages"] if m["role"] == "assistant")
-                    original = "Synthetic recoverable note. " * 80
+                    original = "Synthetic recoverable note. " * 240
                     self.assertIn(original, all_text(agent.received[1]))
                     if mode == "folding":
                         self.assertIn("[[cf:v2:", all_text(agent.received[2]))
