@@ -395,8 +395,12 @@ class ScriptedSmokeAgent(MagpieAgent):
         elif step == 3:
             if self.options.mode == "folding":
                 recovered = json.loads(payload["messages"][-1]["content"])
-                if recovered.get("text") != "Synthetic recoverable note. " * 80:
+                original = "Synthetic recoverable note. " * 80
+                if recovered.get("text") != original:
                     raise RuntimeError("Smoke recovery did not return exact original text")
+                history = "\n".join(m.get("content") or "" for m in payload["messages"] if m["role"] == "assistant")
+                if recovered.get("kept") is not False or original in history or not re.search(r"\[\[cf:v2:([0-9a-f]+)\]\]", history):
+                    raise RuntimeError("Smoke read unexpectedly restored or lost the folded history")
             args = {"command": self._solution}
         elif step >= 4:
             return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Scripted smoke complete."}}]}

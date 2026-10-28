@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -222,9 +223,22 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     if mode == "folding":
                         self.assertIn("[[cf:v2:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
-                        self.assertIn(original, all_text(agent.received[3]))
+                        # A lookup returns exact evidence as a tool result; it
+                        # must not undo the folding of the original history.
+                        result_message = agent.received[3]["messages"][-1]
+                        self.assertEqual(result_message["role"], "tool")
+                        self.assertEqual(result_message["tool_call_id"], "smoke-2")
+                        recovered = json.loads(result_message["content"])
+                        self.assertEqual(recovered["text"], original)
+                        self.assertEqual(recovered["sha256"], hashlib.sha256(original.encode()).hexdigest())
+                        self.assertIs(recovered["kept"], False)
+                        self.assertIsNone(recovered["nextOffset"])
+                        for request in agent.received[3:]:
+                            self.assertIn("[[cf:v2:", all_text(request))
+                            self.assertNotIn(original, all_text(request))
                     else:
-                        self.assertIn(original, all_text(agent.received[2]))
+                        for request in agent.received[2:]:
+                            self.assertIn(original, all_text(request))
                     metrics = context.metadata["magpie_harbor"]
                     self.assertEqual(metrics["measurement"], "scripted-smoke")
                     self.assertEqual(metrics["completion"], "final")
