@@ -2,6 +2,7 @@ import { Store } from './store.js';
 import { formatNanoUsd, formatTokenCount } from './metrics.js';
 
 export async function statistics(scope?: string) {
+  // @context-fold begin statistics-2abc6ff4f9
   const result = await new Store().readStats(scope);
   return {
     scope: scope === undefined ? 'global-lifetime' : 'session',
@@ -31,4 +32,5 @@ export async function statistics(scope?: string) {
       'Missing or failed responses are not successful. Lifetime aggregates survive archive disposal; missing historical counters are not reconstructed.',
     ],
   };
+  // @context-fold end statistics-2abc6ff4f9
 }

@@ -32,6 +32,7 @@ function comparison(session: ReportSession): string {
 }
 
 export function renderReport(report: EffectsReport): string {
+  // @context-fold begin renderReport-4add410a10
   const { sessions, statistics: stats } = report;
   const m = stats.metrics;
   const sum = (key: 'entries' | 'foldedEntries' | 'keptEntries' | 'layers' | 'groups' | 'foldedGroups') => sessions.reduce((total, session) => total + session[key], 0);
@@ -66,4 +67,5 @@ ${sessions.length ? sessions.map(session => `<article class="session"><h3>${esca
 <section aria-labelledby="money"><h2 id="money">费用证据</h2><p class="secondary">证书假设下的节省下界累计 · USD</p><p class="money">${m.certifiedComparisons === 0 ? '无费用证明' : escapeHtml(stats.money.certifiedInputSavingLowerUsd)}</p><p class="note">覆盖 ${text(m.certifiedComparisons)} 次已核实比较。金额依赖证书中的 token、价格、缓存和费用边界假设；没有新证书的复用请求不重复计入。当前证书必须覆盖同一任务全部新增工具调用、模型往返、输入输出及直接费用；历史累计保留原证据限制，不能升级为完整任务收益证明。</p><p><strong>实际账单节省：未知</strong> <code>actualBillSavingUsd = null</code></p><p class="note">实际耗时改善与额外操作费用：未知，不按零计算。读取、恢复次数单独列在统计中；次数不能换算成实际费用。没有账单对照与完整任务计时，不能把字节减少或条件下界解释为实际省钱、提速。</p></section>
 <section aria-labelledby="counters"><h2 id="counters">${stats.scope === 'session' ? '所选会话累计' : '全局累计'}统计</h2><p class="note">累计计数不是当前折叠数量。全局累计在归档清除后仍可保留，因此可能高于当前快照。</p><div class="table-wrap"><table><thead><tr><th>指标</th><th class="numeric">记录值</th><th>含义</th></tr></thead><tbody>${metrics.map(([label, value, detail]) => `<tr><td>${label}</td><td class="numeric">${text(value)}</td><td>${detail}</td></tr>`).join('')}</tbody></table></div><p class="note">全局存储：${text(stats.storage.activeSessions)} 个活跃会话 · ${text(stats.storage.blobs)} 个去重内容块 · 数据库 ${text(stats.storage.databaseBytes)} B（不是发送体积）。</p></section>
 <footer><p class="note">范围与限制：只展示匿名计数和固定原因名称，不输出原文、摘要、路径、会话能力值、模型名或证书自由文本。会话编号仅供本文件阅读，不能跨报告追踪。统计与归档元数据分别以只读快照读取，并发请求可能使两者略有差异。未保存历史请求日志，无法补画时间趋势；响应回调丢失也不能推断为成功。</p></footer></main><script>${script}</script></body></html>`;
+  // @context-fold end renderReport-4add410a10
 }

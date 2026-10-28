@@ -23,6 +23,7 @@ export function parentIndex(snapshot: Snapshot): Map<string, string> {
 
 /** Explicit restoration must also release every enclosing fold. */
 export function restoreAncestors(snapshot: Snapshot, id: string): number {
+  // @context-fold begin restoreAncestors-f4581f349a
   const parents = parentIndex(snapshot);
   const groups = new Map((snapshot.groups ?? []).map(group => [group.id, group]));
   let restored = 0;
@@ -35,9 +36,11 @@ export function restoreAncestors(snapshot: Snapshot, id: string): number {
     parent = parents.get(parent);
   }
   return restored;
+  // @context-fold end restoreAncestors-f4581f349a
 }
 
 export function latestVersions(snapshot: Snapshot): Set<string> {
+  // @context-fold begin latestVersions-b4b7f5c895
   const latest = new Map<string, number>();
   const observed = new Map<string, string>();
   for (const entry of snapshot.entries) {
@@ -48,6 +51,7 @@ export function latestVersions(snapshot: Snapshot): Set<string> {
   // Legacy archives have no observation markers; retain their numeric fallback.
   return new Set(snapshot.entries.filter(entry => entry.version && (observed.has(entry.version.series)
     ? observed.get(entry.version.series) === entry.id : latest.get(entry.version.series) === entry.version.number)).map(entry => entry.id));
+  // @context-fold end latestVersions-b4b7f5c895
 }
 
 interface SearchMatch {
@@ -60,6 +64,7 @@ interface SearchMatch {
 
 /** Literal matching keeps offsets in the original UTF-16 text, even with Unicode case folding. */
 function searchMatch(node: Node, pattern: RegExp): SearchMatch | undefined {
+  // @context-fold begin searchMatch-3804e5aec6
   const fields: [SearchMatch['source'], string][] = 'children' in node
     ? [['summary', node.summary], ['id', node.id]]
     : [['original', node.text], ['summary', node.mark.disposition === 'foldable' ? node.mark.summary : ''],
@@ -75,10 +80,12 @@ function searchMatch(node: Node, pattern: RegExp): SearchMatch | undefined {
       excerptOffset: start, excerpt: text.slice(start, end) };
   }
   return undefined;
+  // @context-fold end searchMatch-3804e5aec6
 }
 
 /** A bounded, flat preorder traversal; pagination counts groups and entries alike. */
 export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
+  // @context-fold begin browse-c3d5e9701b
   const nodes = new Map<string, Node>([...snapshot.entries, ...(snapshot.groups ?? [])].map(node => [node.id, node]));
   if (options.id !== undefined && !nodes.has(options.id)) throw new Error(`Unknown entry or group ${options.id}`);
   const parents = parentIndex(snapshot);
@@ -155,4 +162,5 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
     }
   }
   return { entries, total, nextOffset: offset + entries.length < total ? offset + entries.length : null };
+  // @context-fold end browse-c3d5e9701b
 }

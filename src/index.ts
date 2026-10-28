@@ -11,6 +11,7 @@ const actionSchema = (action: string, properties: Record<string, unknown> = {}, 
 });
 
 export async function ContextFoldingPlugin() {
+  // @context-fold begin ContextFoldingPlugin-181e15f5a4
   return {
     tool: {
       context_folding: {
@@ -38,6 +39,7 @@ export async function ContextFoldingPlugin() {
       },
     },
   };
+  // @context-fold end ContextFoldingPlugin-181e15f5a4
 }
 
 export default ContextFoldingPlugin;
