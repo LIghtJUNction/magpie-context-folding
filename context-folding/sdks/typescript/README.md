@@ -4,7 +4,7 @@ This is an asynchronous Node.js **bridge SDK**, not a native TypeScript folding 
 
 The client keeps one `python3 -m context_folding rpc --state PATH` subprocess alive, sends JSON Lines requests serially, drains stderr, and returns the `result` value. Application errors throw `ContextFoldingError` with the engine's `code`; malformed output and process failures close the bridge. Caller-owned archive state persists after disposal.
 
-This is the same engine used by `ctxf fold` and `ctxf mcp`. Set `statePath` to the CLI/server's archive file and use the same scope to recover their references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+This is the same engine used by `ctxf fold` and the local `ctxf rpc` bridge. Set `statePath` to the CLI's archive file and use the same scope to recover their references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
 
 ```ts
 import { ContextFoldingClient } from '@context-folding/python-bridge';
@@ -33,3 +33,5 @@ Use `AbortSignal.timeout(ms)` or an `AbortController` for cancellation. Cancelli
 Options also include `cwd`, `env` (merged with the parent environment), `pythonArguments` (defaults to `['-m','context_folding','rpc']`), and `maxResponseBytes` (64 MiB default). Overriding arguments is useful for virtual environments and process integration tests. `--state PATH` is always appended. The client retains at most 16 KiB of stderr diagnostics.
 
 Build and test with `npm install` then `npm test`; runtime code uses only Node standard modules. Tests run a temporary Python RPC process and cover persistence, concurrent requests, wrapper forwarding, Unicode, stderr pressure, application/protocol errors, response limits, process exit, cancellation, disposal, and failed startup. Set `CONTEXT_FOLDING_REAL_CORE_PATH=/absolute/path/context-folding/python` when running `npm test` to additionally test immediate `fold`, empty text, complete views, exact UTF-8 hashes and scoped recovery, plus `read-source` delay and retry/fresh-occurrence behavior against the actual Python core; otherwise those cases are explicitly skipped. Run the installed-engine example with `node dist/examples/basic.js` after `npm run build`; source checkout execution can instead set `PYTHONPATH=/absolute/path/context-folding/python`.
+
+New folds return absolute archive paths. Read those ordinary files directly when appropriate; file reads do not require the Python process or change keep state. Generic calls also accept explicit text ranges and `fold-messages`. See [the core guide](../../README.md#any-text-or-conversation-range) for field names and code-point offsets. MCP transport has been removed.

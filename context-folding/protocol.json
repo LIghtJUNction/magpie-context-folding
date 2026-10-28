@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Context Folding RPC v2",
-  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI, MCP and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls.",
+  "title": "Context Folding RPC v3",
+  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI and SDKs share the Python engine. Originals are immutable ordinary files; SQLite tracks indices and legacy recovery. No MCP service, network listener or model calls. API calls require scope; ctxf defaults its command scope to default. Offsets count Unicode code points.",
   "type": "object",
   "required": [
     "action",
@@ -12,6 +12,7 @@
       "type": "string",
       "enum": [
         "fold",
+        "fold-messages",
         "put",
         "list",
         "read",
@@ -35,7 +36,7 @@
     },
     "text": {
       "type": "string",
-      "description": "Required for fold, including the empty string. Fold returns the complete immediate projection of explicitly marked text; read-source independently retains its host-cycle delay."
+      "description": "Required for fold. Without range, folds closed explicit annotations that save UTF-8 bytes. With range, folds precisely the selected [start,end) Unicode code points, even when the pointer is longer."
     },
     "language": {
       "type": "string"
@@ -176,6 +177,84 @@
     },
     "peek": {
       "type": "boolean"
+    },
+    "range": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "object",
+              "required": [
+                "message"
+              ],
+              "properties": {
+                "message": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "end": {
+              "type": "object",
+              "required": [
+                "message"
+              ],
+              "properties": {
+                "message": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "description": "Half-open selection. fold uses code-point offsets; fold-messages uses zero-based message positions and optional code-point offsets. End message may equal the message count. Structured/tool-bearing messages are atomic and complete tool pairs must remain together."
+    },
+    "messages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": {
+        "type": "object"
+      },
+      "description": "Conversation messages with role and content. Boundary text slices retain their original role; the selected span becomes one user archive notice."
     }
   },
   "additionalProperties": true,
@@ -183,19 +262,50 @@
     {
       "if": {
         "properties": {
-          "action": { "const": "fold" }
+          "action": {
+            "const": "fold"
+          }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       },
       "then": {
-        "required": ["text"]
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "fold-messages"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "messages",
+          "range"
+        ]
       }
     }
   ],
   "$defs": {
     "foldReference": {
       "type": "object",
-      "required": ["id", "label", "sha256", "reference", "archiveId"],
+      "required": [
+        "id",
+        "label",
+        "sha256",
+        "reference",
+        "archiveId",
+        "path"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -212,19 +322,32 @@
         },
         "reference": {
           "type": "string",
-          "pattern": "^\\[\\[cf:v2:[a-f0-9]{12,64}\\]\\]$"
+          "pattern": "^\\[\\[cf:v3:[a-f0-9]{12,64} path=\".*\"\\]\\]$",
+          "description": "Path is a JSON-quoted absolute filename. Legacy v1/v2 references remain resolvable. resolve looks up this scope/hash, never opens the supplied path."
         },
         "archiveId": {
           "type": "string",
           "minLength": 1,
           "description": "The backing archive entry identifier."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute UTF-8 original file, or readable transcript for fold-messages."
+        },
+        "messagesPath": {
+          "type": "string",
+          "description": "fold-messages JSONL manifest with original roles, source message indices, and exact selected content slices."
         }
       },
       "additionalProperties": true
     },
     "foldResult": {
       "type": "object",
-      "required": ["scope", "text", "references"],
+      "required": [
+        "scope",
+        "text",
+        "references"
+      ],
       "properties": {
         "scope": {
           "type": "string",
@@ -237,7 +360,9 @@
         },
         "references": {
           "type": "array",
-          "items": { "$ref": "#/$defs/foldReference" },
+          "items": {
+            "$ref": "#/$defs/foldReference"
+          },
           "description": "Only bodies folded by this call; existing literal references are left intact."
         }
       },
@@ -280,9 +405,69 @@
           "additionalProperties": false
         }
       ]
+    },
+    "messageFoldResult": {
+      "type": "object",
+      "required": [
+        "scope",
+        "messages",
+        "references"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/foldReference"
+          }
+        }
+      }
     }
   },
   "examples": [
+    {
+      "action": "fold",
+      "scope": "example",
+      "text": "before 中文🙂 after",
+      "range": {
+        "start": 7,
+        "end": 10
+      }
+    },
+    {
+      "action": "fold-messages",
+      "scope": "example",
+      "messages": [
+        {
+          "role": "user",
+          "content": "initial request"
+        },
+        {
+          "role": "assistant",
+          "content": "completed work"
+        },
+        {
+          "role": "user",
+          "content": "next request"
+        }
+      ],
+      "range": {
+        "start": {
+          "message": 0
+        },
+        "end": {
+          "message": 2
+        }
+      }
+    },
     {
       "action": "fold",
       "scope": "example",

@@ -140,6 +140,7 @@ export async function execute(input: unknown): Promise<string> {
     if (args.action === 'stats') return serialize(await statistics(args.scope));
     const store = new Store();
     if (args.action === 'read' || args.action === 'paste') {
+      let filesAvailable = true;
       const recover = () => store.transaction(args.scope, false, 64 * 1024 * 1024, snapshot => {
         const resolved = resolveEntry(snapshot, args.id);
         const entry = snapshot.entries.find(entry => entry.id === resolved.id);
@@ -161,14 +162,17 @@ export async function execute(input: unknown): Promise<string> {
         }
         return {
           id: resolved.id, layer: args.layer, previousId: layer?.previousId ?? null, kept: !args.peek,
+          ...(entry && args.layer === 'original' && Buffer.from(entry.text, 'utf8').toString('utf8') === entry.text
+            ? store.paths(args.scope, entry) : {}),
           currentLayer: args.peek ? entry?.layers.find(layer => layer.text === entry.folded)?.id ?? 'original' : 'original',
           ...(entry?.version ? { version: entry.version, latestVersion: latestVersions(snapshot).has(entry.id) } : {}),
           text: text.slice(args.offset, end), offset: args.offset,
           nextOffset: end < text.length ? end : null, totalChars: text.length, sha256: digest(text),
         };
-      }, undefined, 'preserve');
+      }, undefined, 'preserve', () => { filesAvailable = false; });
       // Re-read current state and reapply keep; file creation stays outside retries.
       const source = await retryArchiveRead(recover);
+      if (!filesAvailable) { delete source.path; delete source.transcriptPath; }
       if (args.action === 'paste') {
         // Exclusive creation also refuses symlinks and never truncates an existing destination.
         await writeFile(args.path, source.text, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
@@ -183,7 +187,7 @@ export async function execute(input: unknown): Promise<string> {
       } catch {
         // Recovery must remain available even when statistics cannot grow or commit.
       }
-      return serialize(source);
+      return serialize({ ...source, ...(!filesAvailable ? { fileStatus: 'unavailable' } : {}) });
     }
     const operation = () => store.transaction(args.scope, false, 64 * 1024 * 1024, (snapshot) => {
       switch (args.action) {
@@ -202,7 +206,7 @@ export async function execute(input: unknown): Promise<string> {
           return { forgotten: true };
         }
       }
-    }, undefined, 'preserve');
+    }, undefined, 'preserve', () => { /* Index inspection/disposal does not publish a new folded view. */ });
     const result = args.action === 'list' || args.action === 'status'
       ? await retryArchiveRead(operation) : await operation();
     return serialize(result);

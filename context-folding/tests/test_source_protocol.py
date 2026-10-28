@@ -106,7 +106,7 @@ class SourceProtocolTests(unittest.TestCase):
         reference = folded["foldedRegions"][0]["reference"]
         payload = original.split("\n", 1)[1].rsplit("\n# @context-fold end", 1)[0]
         digest = hashlib.sha256(payload.encode()).hexdigest()
-        self.assertEqual(reference, f"[[cf:v2:{digest[:12]}]]")
+        self.assertTrue(reference.startswith(f"[[cf:v3:{digest[:12]} path="))
         changed = original.replace("value_59 = 59", "value_59 = 60")
         self.project(changed, occurrence="b", requestCycle=2)
         changed_view = self.project(changed, occurrence="b", requestCycle=3)
@@ -223,7 +223,7 @@ class SourceProtocolTests(unittest.TestCase):
         source = region(label="left") + region(body="other = 2\n" * 60, label="right")
         self.project(source, occurrence="x", requestCycle=0)
         folded = self.project(source, occurrence="x", requestCycle=1)
-        left = folded["foldedRegions"][0]["reference"][8:-2]
+        left = folded["foldedRegions"][0]["id"]
         self.client.read("s", left)
         view = self.project(source, occurrence="x", requestCycle=2)
         self.assertEqual([item["name"] for item in view["foldedRegions"]], ["right"])

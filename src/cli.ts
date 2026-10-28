@@ -6,9 +6,14 @@ import { diagnostic, execute } from './tool.js';
 import { statistics } from './statistics.js';
 import { formatTokenCount } from './metrics.js';
 import { writeReport } from './report.js';
+import { foldConversation } from './fold.js';
+import { Store } from './store.js';
+import { RangeSelectionError, type ConversationRange } from './ranges.js';
+import type { Protocol } from './protocol.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
+fold-messages --range JSON [--protocol chat|responses|anthropic|gemini] [--scope S] [--json]
 read   --scope S --id ID [--layer ID] [--offset N] [--limit N] [--peek] [--json]
 paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
 list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
@@ -23,7 +28,11 @@ read writes the full exact text to stdout unless --limit selects a page; paste -
 Other archive commands and config write JSON.
 read/paste persist keep and restore all ancestor groups; --peek leaves folding unchanged.
 Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
-Folding is requested with @context-fold begin/end annotations, not a CLI command.
+fold-messages reads a complete request JSON from stdin and replaces the selected range with one user reference.
+Range: {"start":{"message":0,"offset":0},"end":{"message":4}}. Indices are zero-based; end is exclusive.
+Offsets count Unicode code points. Omit an offset for the boundary before that message.
+Originals are ordinary files; read/search directly or delegate a focused question to a lightweight subagent.
+Automatic hook folding also accepts @context-fold begin/end annotations across messages.
 --json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
 
 const string = { type: 'string' } as const;
@@ -31,6 +40,7 @@ const boolean = { type: 'boolean' } as const;
 const common = { json: boolean, help: boolean };
 const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean };
 const options: Record<string, ParseArgsConfig['options']> = {
+  'fold-messages': { ...common, scope: string, protocol: string, range: string },
   read: { ...common, ...range },
   paste: { ...common, ...range, path: string },
   list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
@@ -55,6 +65,27 @@ async function main(): Promise<void> {
   try { values = parseArgs({ args: argv, options: options[command], strict: true, allowPositionals: false }).values; }
   catch { throw new UsageError('Invalid command options; use --help'); }
   if (values.help) { console.log(usage); return; }
+  if (command === 'fold-messages') {
+    if (typeof values.range !== 'string') throw new UsageError('Provide --range JSON with start and end message positions');
+    const protocol = values.protocol ?? 'chat';
+    if (!['chat', 'responses', 'anthropic', 'gemini'].includes(String(protocol))) throw new UsageError('Invalid protocol');
+    let body: unknown;
+    let selection: unknown;
+    try { body = JSON.parse(await Bun.stdin.text()); selection = JSON.parse(values.range); }
+    catch { throw new UsageError('Input and --range must be valid JSON'); }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new UsageError('Expected a complete request JSON object');
+    if (values.scope !== undefined && (typeof values.scope !== 'string' || !/^[a-f0-9]{64}$/.test(values.scope))) throw new UsageError('Invalid scope');
+    const store = new Store();
+    const scope = values.scope as string | undefined ?? await store.scopeFor(JSON.stringify(['cli', process.cwd()]));
+    try {
+      const result = await foldConversation(body as Record<string, unknown>, protocol as Protocol, selection as ConversationRange, scope, store);
+      console.log(JSON.stringify(values.json ? result : result.body));
+    } catch (error) {
+      if (error instanceof RangeSelectionError) throw new UsageError(error.message);
+      throw error;
+    }
+    return;
+  }
   if (command === 'report') {
     if (typeof values.output !== 'string') throw new UsageError('Provide --output /absolute/new.html');
     if (values.scope !== undefined && !/^[a-f0-9]{64}$/.test(String(values.scope))) throw new UsageError('Invalid scope');

@@ -11,6 +11,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -59,6 +60,10 @@ class FakeEnvironment:
 
     async def exec(self, *, command, timeout_sec):
         self.commands.append(command)
+        if command == module.SMOKE_PREPARE:
+            return ExecResult(stdout="", stderr="", return_code=0)
+        if command.startswith("python3 -c ") and shlex.split(command)[-1] == module.SMOKE_SOURCE_PATH:
+            return ExecResult(stdout=module.SMOKE_SOURCE, stderr="", return_code=0)
         if self.solution is None:
             return self.result
         if command == "printf 'smoke checkpoint\\n'":
@@ -106,6 +111,33 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
         self.agent = MagpieAgent(logs_dir=Path(self.temp.name), model_name="fixture/model",
                                  extra_env={"HARBOR_MODEL_BASE_URL": "http://localhost:23456/v1"})
         await self.agent.setup(FakeEnvironment())
+
+    async def test_archive_reads_use_only_this_trials_generated_scope_paths(self):
+        bridge = Bridge(Path(self.temp.name) / "trial")
+        bridge.scope = "a" * 64
+        directory = bridge.directory / "archives" / bridge.scope
+        directory.mkdir(parents=True)
+        archive = directory / ("b" * 64 + ".messages.txt")
+        archive.write_text("Historical evidence 中文😀\n", encoding="utf-8")
+        environment = FakeEnvironment()
+        result = await self.agent._tool("read_file", {"path": str(archive)}, environment, bridge)
+        self.assertEqual(result, "Historical evidence 中文😀\n")
+        self.assertEqual(environment.commands, [])
+        wrong_scope = bridge.directory / "archives" / ("c" * 64) / archive.name
+        wrong_scope.parent.mkdir()
+        wrong_scope.write_text("another scope", encoding="utf-8")
+        denied = await self.agent._tool("read_file", {"path": str(wrong_scope)}, environment, bridge)
+        self.assertIn("error", json.loads(denied))
+        self.assertEqual(environment.commands, [])
+        archive.unlink()
+        archive.symlink_to(wrong_scope)
+        denied = await self.agent._tool("read_file", {"path": str(archive)}, environment, bridge)
+        self.assertIn("error", json.loads(denied))
+
+    async def test_file_tool_has_no_special_recovery_service(self):
+        self.assertEqual([entry["function"]["name"] for entry in module.TOOLS], ["terminal", "read_file"])
+        result = await self.agent._tool("context_folding", {"action": "read"}, FakeEnvironment(), None)
+        self.assertEqual(json.loads(result), {"error": "Unknown tool"})
 
     async def test_http_failure_is_one_attempt_and_does_not_echo_provider_body(self):
         requests = []
@@ -216,11 +248,11 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     await agent.setup(environment)
                     await agent.run((task / "instruction.md").read_text(), environment, context)
                     self.assertEqual(len(agent.received), 5)
-                    all_text = lambda request: "\n".join(m.get("content") or "" for m in request["messages"] if m["role"] == "assistant")
-                    original = "Synthetic recoverable note. " * 80
+                    all_text = lambda request: "\n".join(m.get("content") or "" for m in request["messages"])
+                    original = module.SMOKE_ARCHIVE_TEXT
                     self.assertIn(original, all_text(agent.received[1]))
                     if mode == "folding":
-                        self.assertIn("[[cf:v2:", all_text(agent.received[2]))
+                        self.assertIn("[[cf:v3:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
                         self.assertIn(original, all_text(agent.received[3]))
                     else:
@@ -233,7 +265,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(context.n_input_tokens)
                     self.assertIsNone(context.cost_usd)
                     transcript = [json.loads(line) for line in (case / "logs" / "transcript.jsonl").read_text().splitlines()]
-                    self.assertIn(original, transcript[0]["message"]["content"])
+                    self.assertTrue(any(original in item["message"].get("content", "") for item in transcript))
                     check = subprocess.run([sys.executable, str(task / "tests" / "verify.py"),
                                             "--app-dir", str(app), "--log-dir", str(case / "verification")],
                                            capture_output=True, text=True, timeout=30)
@@ -275,13 +307,13 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     return assistant(calls=[tool_call(call_id="advance")])
                 if step == 2:
                     text = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
-                    self.test.assertIn("[[cf:v2:", text)
-                    reference = text.split("[[cf:v2:", 1)[1].split("]]", 1)[0]
-                    return assistant(calls=[tool_call("context_folding", {"action": "read", "id": reference,
-                                                                             "limit": 24000}, "recover-source")])
-                self.test.assertEqual(json.loads(request["messages"][-1]["content"])["text"], payload.rstrip("\n"))
+                    self.test.assertIn("[[cf:v3:", text)
+                    match = re.search(r'\[\[cf:v3:[0-9a-f]+ path=("(?:\\.|[^"\\])*")\]\]', text)
+                    self.test.assertIsNotNone(match)
+                    return assistant(calls=[tool_call("read_file", {"path": json.loads(match[1])}, "recover-source")])
+                self.test.assertEqual(request["messages"][-1]["content"], payload.rstrip("\n"))
                 restored = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
-                self.test.assertEqual(restored, source)
+                self.test.assertIn("[[cf:v3:", restored)  # File retrieval has no implicit keep side effect.
                 return assistant()
 
         agent = SourceAgent(logs_dir=self.directory / "logs", model_name="fixture/model",
@@ -314,7 +346,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.metadata["magpie_harbor"]["completion"], "error")
         self.assertIsNone(context.n_input_tokens)
 
-    async def test_baseline_archive_query_is_a_tool_error_and_agent_can_continue(self):
+    async def test_removed_recovery_tool_is_an_unknown_tool_and_agent_can_continue(self):
         agent = MagpieAgent(logs_dir=self.directory / "logs", model_name="fixture/model", mode="baseline",
                             extra_env={"HARBOR_MODEL_BASE_URL": "http://localhost:23456/v1"})
         environment, context = FakeEnvironment(), AgentContext()

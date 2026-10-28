@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
 import type { Metrics } from './metrics.js';
+import { archiveFileBytes, archivePaths, publishArchiveFiles, type ArchiveFile } from './archive-files.js';
 
 const markSchema = z.discriminatedUnion('disposition', [
   z.object({ disposition: z.literal('unmarked') }),
@@ -33,6 +34,8 @@ const entrySchema = z.object({
   protectionReason: z.string().optional(),
   foldedMark: z.string().optional(),
   annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string() }).optional(),
+  transcript: z.string().optional(),
+  contentIdentity: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   occurrences: z.record(z.string(), z.object({
     firstSeen: z.number().int().nonnegative(), lastSeen: z.number().int().nonnegative(), folded: z.boolean().optional(),
   })).optional(),
@@ -47,8 +50,8 @@ const snapshotSchema = z.object({
 });
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const storedLayerSchema = layerSchema.omit({ text: true }).extend({ textHash: hashSchema });
-const storedEntrySchema = entrySchema.omit({ text: true, folded: true, layers: true }).extend({
-  textHash: hashSchema, foldedHash: hashSchema.optional(), layers: z.array(storedLayerSchema),
+const storedEntrySchema = entrySchema.omit({ text: true, folded: true, layers: true, transcript: true }).extend({
+  textHash: hashSchema, foldedHash: hashSchema.optional(), transcriptHash: hashSchema.optional(), layers: z.array(storedLayerSchema),
 });
 const storedSnapshotSchema = snapshotSchema.omit({ entries: true }).extend({
   entries: z.array(storedEntrySchema),
@@ -115,7 +118,7 @@ function legacyPayloadBytes(database: Database, metadata: string): number {
       COALESCE(SUM(CASE WHEN blobs.hash IS NULL THEN 1 ELSE 0 END), 0) AS missing
     FROM json_tree(?) AS value
     LEFT JOIN blobs ON blobs.hash = value.value
-    WHERE value.key IN ('textHash', 'foldedHash') AND value.path LIKE '$.entries[%'
+    WHERE value.key IN ('textHash', 'foldedHash', 'transcriptHash') AND value.path LIKE '$.entries[%'
   `).get(metadata));
   if (sizes.missing > 0) throw new Error('Archive content is missing');
   // Each stored hash replaces a JSON string (66 bytes) and adds four bytes to its key.
@@ -184,10 +187,11 @@ function encode(snapshot: Snapshot): { stored: StoredSnapshot; blobs: Map<string
     blobs.set(hash, encoded);
     return hash;
   };
-  const entries = snapshot.entries.map(({ text, folded, layers, ...entry }) => ({
+  const entries = snapshot.entries.map(({ text, folded, transcript, layers, ...entry }) => ({
     ...entry,
     textHash: archive(text),
     ...(folded === undefined ? {} : { foldedHash: archive(folded) }),
+    ...(transcript === undefined ? {} : { transcriptHash: archive(transcript) }),
     layers: layers.map(({ text: layerText, ...layer }) => ({ ...layer, textHash: archive(layerText) })),
   }));
   return { stored: { ...snapshot, entries }, blobs };
@@ -206,10 +210,11 @@ function decode(database: Database, stored: StoredSnapshot): Snapshot {
     texts.set(hash, text);
     return text;
   };
-  const entries = stored.entries.map(({ textHash, foldedHash, layers, ...entry }) => ({
+  const entries = stored.entries.map(({ textHash, foldedHash, transcriptHash, layers, ...entry }) => ({
     ...entry,
     text: load(textHash),
     ...(foldedHash === undefined ? {} : { folded: load(foldedHash) }),
+    ...(transcriptHash === undefined ? {} : { transcript: load(transcriptHash) }),
     layers: layers.map(({ textHash: layerHash, ...layer }) => ({ ...layer, text: load(layerHash) })),
   }));
   const snapshot = snapshotSchema.parse({ ...stored, entries });
@@ -228,6 +233,39 @@ export class Store {
     if (!Number.isSafeInteger(this.maxTotalBytes) || this.maxTotalBytes <= 0) {
       throw new Error('Invalid global archive size limit');
     }
+  }
+
+  paths(scope: string, entry: Pick<Entry, 'text' | 'transcript'>): { path: string; transcriptPath?: string } {
+    return archivePaths(this.directory, scope, entry);
+  }
+
+  private files(scope: string, snapshot: Snapshot): ArchiveFile[] {
+    return snapshot.entries.flatMap(entry => {
+      // Old snapshots can contain lone UTF-16 surrogates. Keep their existing
+      // database recovery usable; only valid UTF-8 can be exposed as a file.
+      if (Buffer.from(entry.text, 'utf8').toString('utf8') !== entry.text) return [];
+      const paths = this.paths(scope, entry);
+      return [{ path: paths.path, text: entry.text },
+        ...(entry.transcript === undefined ? [] : [{ path: paths.transcriptPath!, text: entry.transcript }])];
+    });
+  }
+
+  /** The caller holds the SQLite writer lock, including for legacy exports. */
+  private publishFiles(database: Database, scope: string, snapshot: Snapshot, enforceQuota: boolean): void {
+    const files = this.files(scope, snapshot);
+    const paths = new Set<string>();
+    let additionalBytes = 0;
+    for (const file of files) {
+      if (paths.has(file.path)) continue;
+      paths.add(file.path);
+      if (!Bun.file(file.path).size) additionalBytes += Buffer.byteLength(file.text);
+    }
+    const databaseBytes = numberRowSchema.parse(database.query('SELECT page_count * page_size AS value FROM pragma_page_count, pragma_page_size').get()).value;
+    if ((enforceQuota || additionalBytes > 0)
+      && databaseBytes + archiveFileBytes(this.directory) + additionalBytes > this.maxTotalBytes) {
+      throw new Error('Global archive full; original request retained');
+    }
+    publishArchiveFiles(this.directory, scope, files);
   }
 
   private async database<T>(run: (database: Database) => T): Promise<T> {
@@ -349,6 +387,8 @@ export class Store {
         const lifetime = addMetrics(readLifetimeMetrics(database), increment);
         database.query("INSERT INTO meta (key, value) VALUES ('lifetime-metrics', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
           .run(JSON.stringify(lifetime));
+        const databaseBytes = numberRowSchema.parse(database.query('SELECT page_count * page_size AS value FROM pragma_page_count, pragma_page_size').get()).value;
+        if (databaseBytes + archiveFileBytes(this.directory) > this.maxTotalBytes) throw new Error('Global archive full; statistics not committed');
         // SQLite's per-connection max_page_count also bounds metadata-only writes.
         signal?.throwIfAborted();
         database.exec('COMMIT');
@@ -367,6 +407,7 @@ export class Store {
     run: (snapshot: Snapshot) => Promise<T> | T,
     signal?: AbortSignal,
     quotaPolicy: SessionQuotaPolicy = 'configure',
+    onArchiveFileError?: (error: unknown) => void,
   ): Promise<T> {
     // @context-fold begin transaction-52062fd795
     signal?.throwIfAborted();
@@ -416,8 +457,18 @@ export class Store {
     const quotaChanged = quotaPolicy === 'configure' && original.sessionLimitBytes !== sessionLimitBytes;
     if (original.revision > 0 && before === after && !quotaChanged) {
       await this.database(database => {
-        signal?.throwIfAborted();
-        assertSameSession(database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope), original);
+        database.exec('BEGIN IMMEDIATE');
+        try {
+          signal?.throwIfAborted();
+          assertSameSession(database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope), original);
+          try { this.publishFiles(database, scope, snapshot, false); }
+          catch (error) { if (!onArchiveFileError) throw error; onArchiveFileError(error); }
+          signal?.throwIfAborted();
+          database.exec('COMMIT');
+        } catch (error) {
+          if (database.inTransaction) database.exec('ROLLBACK');
+          throw error;
+        }
       });
       return result;
     }
@@ -456,6 +507,8 @@ export class Store {
           + COALESCE((SELECT SUM(length(CAST(snapshot AS BLOB))) FROM sessions), 0)
           + COALESCE((SELECT SUM(length(CAST(value AS BLOB))) FROM meta), 0) AS value`).get()).value;
         if (total > this.maxTotalBytes) throw new Error('Global archive full; original request retained');
+        try { this.publishFiles(database, scope, snapshot, true); }
+        catch (error) { if (!onArchiveFileError) throw error; onArchiveFileError(error); }
         signal?.throwIfAborted();
         database.exec('COMMIT');
       } catch (error) {

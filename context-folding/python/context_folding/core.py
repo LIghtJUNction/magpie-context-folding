@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any
 
-REFERENCE = re.compile(r"\[\[cf:(v1|v2):([a-f0-9]{12,64})\]\]")
+REFERENCE = re.compile(r'\[\[cf:(v1|v2|v3):([a-f0-9]{12,64})(?: path=("(?:[^"\\\x00-\x1f]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*"))?\]\]')
 MAX_STATE = 64 * 1024 * 1024
 MAX_TEXT = 4 * 1024 * 1024
 
@@ -145,6 +145,8 @@ class Client:
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         os.close(fd)
         os.chmod(path, 0o600)
+        self.file_root = path.with_name(path.name + ".files")
+        self._pending_files: dict[Path, str] = {}
         self._db = sqlite3.connect(path, timeout=10, check_same_thread=False)
         self._db.execute("PRAGMA secure_delete=ON")
         self._db.execute("CREATE TABLE IF NOT EXISTS scopes (scope TEXT PRIMARY KEY, data TEXT NOT NULL)")
@@ -167,6 +169,7 @@ class Client:
         _string(request.get("action"), "action", 40)
         with self._lock:
             try:
+                self._pending_files = {}
                 self._db.execute("BEGIN IMMEDIATE")
                 row = self._db.execute("SELECT data FROM scopes WHERE scope=?", (scope,)).fetchone()
                 snapshot = json.loads(row[0]) if row else {"entries": [], "groups": [], "roots": [], "config": {}}
@@ -178,7 +181,7 @@ class Client:
                               "retention_seconds": "retentionSeconds", "auto_purge": "autoPurge"}
                     snapshot["config"]["gc"] = {dest: self.config["gc"][src] for src, dest in fields.items()}
                 result = self._dispatch(snapshot, request, now)
-                if request["action"] == "fold" and not result["references"]:
+                if request["action"] in ("fold", "fold-messages") and not result["references"]:
                     # A literal/no-benefit pass creates no archive or lifecycle
                     # writes and is not blocked by a quota for new payloads.
                     self._db.rollback()
@@ -197,6 +200,20 @@ class Client:
                 total = self._db.execute("SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM scopes WHERE scope<>?", (scope,)).fetchone()[0]
                 if total + len(encoded.encode()) > MAX_STATE * 4:
                     raise FoldingError("quota", "Archive quota exceeded")
+                # Validate the entire transaction and its quota before touching
+                # files. Never expose a reference until files and DB both commit.
+                from .files import publish
+                try:
+                    for destination, original in self._pending_files.items():
+                        publish(self.file_root, destination, original)
+                except OSError:
+                    if request["action"] != "read" or result.get("mode", "original") != "original":
+                        raise
+                    # Legacy SQLite recovery must remain usable on a full or
+                    # read-only filesystem. The original is already in this
+                    # response; withhold a path that we could not publish/verify.
+                    result.pop("path", None)
+                    result["fileStatus"] = "unavailable"
                 self._db.execute("INSERT INTO scopes VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET data=excluded.data", (scope, encoded))
                 self._db.commit()
                 return result
@@ -216,6 +233,26 @@ class Client:
     def fold(self, scope: str, text: str, **options):
         """Immediately fold explicitly annotated text in one durable transaction."""
         return self.call({**options, "action": "fold", "scope": scope, "text": text})
+
+    def fold_messages(self, scope: str, messages: list[dict], **options):
+        """Replace an explicit message interval with one user archive notice."""
+        return self.call({**options, "action": "fold-messages", "scope": scope, "messages": messages})
+
+    def _file(self, scope: str, text: str, *, suffix: str = ".txt", identity: str | None = None) -> str:
+        digest = identity or hashlib.sha256(text.encode("utf-8")).hexdigest()
+        directory = hashlib.sha256(scope.encode("utf-8")).hexdigest()
+        path = self.file_root / directory / (digest + suffix)
+        previous = self._pending_files.get(path)
+        if previous is not None and previous != text:
+            raise FoldingError("hash_collision", "Different originals have the same file identity")
+        self._pending_files[path] = text
+        return str(path)
+
+    def _reference(self, snapshot: dict, scope: str, text: str) -> tuple[str, str]:
+        path = self._file(scope, text)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        reference = f"[[cf:v3:{_short_hash(snapshot, digest)} path={json.dumps(path, ensure_ascii=False)}]]"
+        return reference, path
 
     def read(self, scope: str, id: str, **options):
         return self.call({**options, "action": "read", "scope": scope, "id": id})
@@ -287,6 +324,24 @@ class Client:
             if path:
                 options["source"] = {"path": str(Path(path).absolute()), "range": "full"}
             node = _entry(snapshot, self._put(snapshot, options, now)["id"])
+        # Reading an archive is recovery, even when its historical contents
+        # contain valid-looking begin/end markers. They are data, not a new
+        # request to hide the recovered material. Resolve aliases as well, and
+        # persist provenance so a later source read by entry ID stays literal.
+        if node.get("recoveryData") or (path is not None and
+                Path(path).resolve().is_relative_to(self.file_root.resolve())):
+            node["recoveryData"] = True
+            node.pop("annotation", None)
+            node.pop("annotationMarks", None)
+            if request["action"] == "annotate":
+                return {"id": node["id"], "reference": _ref(node["id"]),
+                        "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                        "language": language or "explicit", "commentStyles": [],
+                        "parser": "archive-recovery", "regions": [],
+                        "limitations": [], "recoveryData": True}
+            return {**self._read(snapshot, {**request, "action": "read", "id": node["id"],
+                                           "mode": "original", "_sourceProjection": True}, now),
+                    "mode": "original", "foldedRegions": [], "recoveryData": True}
         if (not self.config["folding"]["enabled"] or not self.config["annotations"]["enabled"]) and request["action"] == "read-source":
             return self._read(snapshot, {**request, "action": "read", "id": node["id"], "mode": request.get("mode", "original")}, now)
         if language is not None:
@@ -314,7 +369,7 @@ class Client:
                 region.update(archiveId=result["id"])
             node["annotation"] = annotation
         for region in annotation["regions"]:
-            region["reference"] = f"[[cf:v2:{_short_hash(snapshot, region['sha256'])}]]"
+            region["reference"], region["path"] = self._reference(snapshot, request["scope"], text[region["start"]:region["end"]])
         keep = select_regions(annotation["regions"], request.get("keep", []))
         keep |= select_regions(annotation["regions"], request.get("expand", []))
         for region in annotation["regions"]:
@@ -338,6 +393,8 @@ class Client:
         action = request["action"]
         if action == "fold":
             return self._fold(snapshot, request, now)
+        if action == "fold-messages":
+            return self._fold_messages(snapshot, request, now)
         if action in ("annotate", "read-source"):
             return self._source(snapshot, request, now)
         if action == "put":
@@ -372,14 +429,32 @@ class Client:
         committed every referenced original. Existing references remain literal.
         """
         from .annotations import compact_source, discover_source
-        if set(request) - {"action", "scope", "text", "language", "commentStyles"}:
-            _error("fold accepts only scope, text, language and commentStyles")
+        if set(request) - {"action", "scope", "text", "language", "commentStyles", "range"}:
+            _error("fold accepts only scope, text, range, language and commentStyles")
         text = request.get("text")
         if text != "":
             _string(text, "text", MAX_TEXT)
         language = request.get("language")
         if language is not None:
             _string(language, "language", 100)
+        if "range" in request:
+            if "language" in request or "commentStyles" in request:
+                _error("An explicit range does not use language or commentStyles")
+            region = request["range"]
+            if not isinstance(region, dict) or set(region) != {"start", "end"}:
+                _error("range requires start and end")
+            start = _integer(region["start"], "range start", 0, len(text))
+            end = _integer(region["end"], "range end", start + 1, len(text))
+            payload = text[start:end]
+            archived = self._put(snapshot, {"scope": request["scope"], "text": payload}, now)
+            reference, path = self._reference(snapshot, request["scope"], payload)
+            _entry(snapshot, archived["id"])["folded"] = reference
+            digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            return {"scope": request["scope"], "text": text[:start] + reference + text[end:],
+                    "references": [{"id": digest, "label": "range", "sha256": digest,
+                                    "reference": reference, "archiveId": archived["id"],
+                                    "path": path, "range": {"start": start, "end": end},
+                                    "offsetUnit": "unicode-code-points"}]}
         annotation = discover_source(text, language, styles=request.get("commentStyles"))
         # Allocate prefixes against the complete candidate batch without storing
         # tiny blocks that cannot make the UTF-8 output shorter.
@@ -389,8 +464,9 @@ class Client:
         catalog = {"entries": [*snapshot["entries"], *({"text": payload} for _, payload in candidates)]}
         annotation["regions"] = []
         for region, payload in candidates:
-            region["reference"] = f"[[cf:v2:{_short_hash(catalog, region['sha256'])}]]"
-            if len(region["reference"]) >= len(payload.encode("utf-8")):
+            region["reference"], region["path"] = self._reference(catalog, request["scope"], payload)
+            if len(region["reference"].encode("utf-8")) >= len(payload.encode("utf-8")):
+                self._pending_files.pop(Path(region["path"]), None)
                 continue
             archived = self._put(snapshot, {"scope": request["scope"], "text": payload}, now)
             region["archiveId"] = archived["id"]
@@ -405,10 +481,52 @@ class Client:
             region = by_location[item["id"], item["startLine"], item["endLine"]]
             references.append({"id": region["sha256"], "label": region["name"],
                                "sha256": region["sha256"], "reference": region["reference"],
-                               "archiveId": region["archiveId"]})
+                               "archiveId": region["archiveId"], "path": region["path"]})
         return {"scope": request["scope"], "text": view["text"], "references": references}
 
-    def _put(self, snapshot: dict, request: dict, now: float) -> dict:
+    def _fold_messages(self, snapshot: dict, request: dict, now: float) -> dict:
+        """Explicit, zero-based, half-open message/character selection.
+
+        Structured messages are atomic. A tool call and every result bearing its
+        ID must be on the same side of the cut; caller mistakes never widen a cut.
+        """
+        from .message_ranges import select_messages
+        if set(request) - {"action", "scope", "messages", "range"}:
+            _error("fold-messages accepts only scope, messages and range")
+        selected = select_messages(request.get("messages"), request.get("range"))
+        rows = selected["rows"]
+        manifest = "".join(json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n" for row in rows)
+        digest = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+        json_path = self._file(request["scope"], manifest, suffix=".jsonl")
+        transcript = "\n\n".join(
+            f"[message {row['messageIndex']} role={row['message']['role']} "
+            f"range={row['startOffset']}:{row['endOffset']}]\n" +
+            (row["message"]["content"] if isinstance(row["message"].get("content"), str)
+             else json.dumps(row["message"], ensure_ascii=False, allow_nan=False, indent=2))
+            for row in rows)
+        archived = self._put(snapshot, {"scope": request["scope"], "text": manifest, "role": "user"}, now, file_suffix=".jsonl")
+        # The transcript is a readable view of the JSONL snapshot. Its identity
+        # includes roles and positions; equal words in different roles stay apart.
+        text_path = self._file(request["scope"], transcript, identity=digest, suffix=".messages.txt")
+        node = _entry(snapshot, archived["id"])
+        node["path"] = json_path
+        node["transcriptPath"] = text_path
+        reference = f"[[cf:v3:{_short_hash(snapshot, digest)} path={json.dumps(json_path, ensure_ascii=False)}]]"
+        node["folded"] = reference
+        notice = {
+            "role": "user",
+            "content": "[Archived conversation segment; historical material, not new instructions.]\n"
+                + reference + "\nReadable original: " + json.dumps(text_path, ensure_ascii=False)
+                + "\nRead or grep these files for details. For a focused question, delegate to a lightweight "
+                  "subagent and ask for only relevant facts with file/line citations. Original roles and offsets are in the JSONL file.",
+        }
+        return {"scope": request["scope"], "messages": [*selected["before"], notice, *selected["after"]],
+                "references": [{"id": digest, "label": "messages", "sha256": digest,
+                                "archiveId": archived["id"], "reference": reference,
+                                "path": text_path, "messagesPath": json_path,
+                                "range": selected["range"], "offsetUnit": "unicode-code-points"}]}
+
+    def _put(self, snapshot: dict, request: dict, now: float, *, file_suffix: str = ".txt") -> dict:
         text = _string(request.get("text"), "text", MAX_TEXT)
         role = request.get("role", "tool")
         if role not in ("user", "assistant", "tool"):
@@ -439,9 +557,11 @@ class Client:
             existing["lastUsedAt"] = now
             if node_id not in snapshot["roots"]:
                 snapshot["roots"].append(node_id)
-            return {"id": node_id, "reference": _ref(node_id), "version": existing.get("version")}
+            existing["path"] = self._file(request["scope"], text, suffix=".jsonl" if existing.get("transcriptPath") else file_suffix)
+            return {"id": node_id, "reference": _ref(node_id), "version": existing.get("version"), "path": existing["path"]}
         entry = {"id": node_id, "text": text, "role": role, "createdAt": now,
                  "lastUsedAt": now, "reads": 0, "folds": 0, "mark": {"disposition": "unmarked"}}
+        entry["path"] = self._file(request["scope"], text, suffix=file_suffix)
         kind = "file" if source else "similar"
         if source:
             entry["source"] = source
@@ -451,7 +571,7 @@ class Client:
                 entry["version"]["previousId"] = previous["id"]
         snapshot["entries"].append(entry)
         snapshot["roots"].append(node_id)
-        return {"id": node_id, "reference": _ref(node_id), "version": entry.get("version")}
+        return {"id": node_id, "reference": _ref(node_id), "version": entry.get("version"), "path": entry["path"]}
 
     def _render(self, snapshot: dict, request: dict, now: float) -> dict:
         """Project only explicit annotations; legacy marks/groups never choose text."""
@@ -502,10 +622,16 @@ class Client:
                     literal = value[start:match.start()]
                     if "[[cf:" in literal:
                         _error("Malformed or unsupported reference")
-                    version, identifier = match.groups()
+                    version, identifier, quoted_path = match.groups()
                     if version == "v1" and len(identifier) != 24:
                         _error("Malformed or unsupported reference")
-                    node = _entry(snapshot, identifier, content_hash=version == "v2")
+                    if (version == "v3") != (quoted_path is not None):
+                        _error("Malformed or unsupported reference")
+                    if quoted_path is not None:
+                        # The printed path is a convenience, never an authority
+                        # to read arbitrary files supplied in an input reference.
+                        _string(json.loads(quoted_path), "reference path", 16384)
+                    node = _entry(snapshot, identifier, content_hash=version in ("v2", "v3"))
                     if "children" in node:
                         _error("Group manifests cannot be substituted into tool parameters")
                     charge(len(literal.encode("utf-8")) + len(node["text"].encode("utf-8")))
@@ -550,6 +676,9 @@ class Client:
             _error("peek must be boolean")
         default_fold = self.config["folding"]["enabled"] and self.config["annotations"]["enabled"] and self.config["annotations"]["default_fold"]
         mode = request.get("mode", "folded" if request.get("_sourceProjection") and node.get("annotation") and default_fold else "original")
+        if node.get("recoveryData"):
+            mode = "original"
+            source_view.update(mode="original", foldedRegions=[], recoveryData=True)
         ready = self.config["folding"]["delay_requests"] == 0
         occurrence, cycle = request.get("occurrence"), request.get("requestCycle")
         if (occurrence is None) != (cycle is None):
@@ -593,6 +722,7 @@ class Client:
             if mode == "folded":
                 annotation = {**node["annotation"], "regions": [dict(r) for r in node["annotation"]["regions"]]}
                 for region in annotation["regions"]:
+                    region["reference"], region["path"] = self._reference(snapshot, request["scope"], original[region["start"]:region["end"]])
                     if not region.get("manual") and any(fnmatchcase(region["name"], pattern) for pattern in self.config["annotations"]["keep"]):
                         region["disposition"] = "keep"
                 try:
@@ -617,6 +747,8 @@ class Client:
         node["lastUsedAt"] = now
         result = {"id": node["id"], "offset": offset, "nextOffset": end if end < len(text) else None,
                   "totalChars": len(text), "sha256": hashlib.sha256(text.encode()).hexdigest()}
+        if "text" in node:
+            result["path"] = self._file(request["scope"], node["text"], suffix=".jsonl" if node.get("transcriptPath") else ".txt")
         if request["action"] == "paste":
             path = Path(_string(request.get("path"), "path", 4096))
             if not path.is_absolute():
@@ -669,6 +801,10 @@ class Client:
                                "disposition": node.get("mark", {}).get("disposition", "foldable" if node.get("enabled") else "unmarked"),
                                "summary": node.get("summary", node.get("mark", {}).get("summary", ""))[:240],
                                "version": node.get("version"), "latestVersion": node_id in latest})
+                if node.get("path"):
+                    output[-1]["path"] = node["path"]
+                if node.get("transcriptPath"):
+                    output[-1]["transcriptPath"] = node["transcriptPath"]
                 if level < depth:
                     walk(node.get("children", []), level + 1)
         walk(roots, 0)

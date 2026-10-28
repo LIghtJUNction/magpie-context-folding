@@ -59,7 +59,7 @@ test('report CLI is private, offline and read-only with faithful counts and cand
     assert.equal((await stat(output)).mode & 0o777, 0o600);
     assert.deepEqual(await readFile(database), before);
     assert.equal((await stat(database)).mtimeMs, beforeStat.mtimeMs);
-    assert.deepEqual(await readdir(join(directory, 'state')), ['state.sqlite']);
+    assert.deepEqual((await readdir(join(directory, 'state'))).sort(), ['archives', 'state.sqlite']);
     for (const secret of ['PRIVATE_SECRET', '/secret/', 'private-layer', scope, 'private-group']) {
       assert.ok(!html.includes(secret), secret);
       assert.ok(!result.out.includes(secret));

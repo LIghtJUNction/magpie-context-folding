@@ -202,7 +202,7 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         newline = "\r\n" if payload.endswith("\r\n") else payload[-1:] if payload.endswith(("\r", "\n")) else ""
         end -= len(newline)
         payload = text[start:end]
-        if not payload or re.search(r"\[\[cf:v[12]:", payload):
+        if not payload or re.search(r"\[\[cf:v[123]:", payload):
             continue
         sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         regions.append({"id": sha256[:12], "sha256": sha256, "name": name, "kind": "explicit",
@@ -378,6 +378,8 @@ def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bo
         chunks.extend((text[cursor:region["start"]], region["reference"]))
         cursor = region["end"]
         visible.append({key: region[key] for key in ("id", "name", "header", "reference", "startLine", "endLine")})
+        if "path" in region:
+            visible[-1]["path"] = region["path"]
     if not allow_reference_literals:
         _check_literal_references(text[cursor:])
     chunks.append(text[cursor:])

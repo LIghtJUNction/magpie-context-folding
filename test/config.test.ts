@@ -29,15 +29,15 @@ test('annotation-only defaults and optional context budget', async () => {
   await fixture(async f => {
     const options = await loadOptions(undefined, f.project);
     assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1,
-      reserveOutputTokens: 0, contextWindowTokens: undefined, gatewayTimeoutMs: undefined, recoveryToolName: undefined });
+      reserveOutputTokens: 0, contextWindowTokens: undefined, gatewayTimeoutMs: undefined, fileAccess: true });
     assert.deepEqual(parseOptions({ delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000 }), {
-      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000,
+      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000, fileAccess: true,
     });
     const { config, sources } = await loadConfig(f.project);
     assert.deepEqual(config.annotations, { enabled: true, default_fold: true, keep: [] });
     assert.deepEqual(config.gc, { enabled: false, strength: 'conservative', idle_seconds: 2_592_000,
       max_uses: 2, retention_seconds: 2_592_000, auto_purge: false });
-    assert.deepEqual(config.magpie, {});
+    assert.deepEqual(config.magpie, { file_access: true });
     assert.deepEqual(sources, { global: f.global, project: null });
   });
 });
@@ -45,7 +45,7 @@ test('annotation-only defaults and optional context budget', async () => {
 test('global/project/explicit fields merge without injecting defaults into partial layers', async () => {
   await fixture(async f => {
     await f.file(f.global, 'version=1\n[folding]\ndelay_requests=3\ncontext_window_tokens=128000\nreserve_output_tokens=8000\n[magpie]\ngateway_timeout_ms=700\n');
-    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n[magpie]\nrecovery_tool_name="archive.recall"\n');
+    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n[magpie]\nfile_access=false\n');
     const explicit = { enabled: false, delayRequests: 0 };
     const before = structuredClone(explicit);
     const options = await loadOptions(explicit, f.project);
@@ -53,7 +53,7 @@ test('global/project/explicit fields merge without injecting defaults into parti
     assert.equal(options.contextWindowTokens, 128000);
     assert.equal(options.reserveOutputTokens, 8000);
     assert.equal(options.gatewayTimeoutMs, 700);
-    assert.equal(options.recoveryToolName, 'archive.recall');
+    assert.equal(options.fileAccess, false);
     assert.equal(options.enabled, false);
     assert.deepEqual(explicit, before);
     assert.equal((await loadOptions({}, f.project)).delayRequests, 2);

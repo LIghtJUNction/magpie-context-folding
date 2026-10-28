@@ -8,7 +8,9 @@ import { test } from 'node:test';
 import { onRequest, onResponse } from '../src/context.hooks.js';
 import { estimateTokens, withoutBudget } from '../src/budget.js';
 import { execute } from '../src/tool.js';
-import { Store, digest } from '../src/store.js';
+import { Store } from '../src/store.js';
+import { conversationRangesFromMarkers, selectConversationRange } from '../src/ranges.js';
+import { conversationId } from '../src/fold.js';
 
 async function fixture(run: (directory: string, cwd: string) => Promise<void>) {
   const cwd = await mkdtemp(join(tmpdir(), 'folding-statistics-'));
@@ -41,7 +43,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     const base = { protocol: 'chat', model: 'synthetic', session: 'stats-test', cwd, options: { delayRequests: 0 } };
     const store = new Store(directory);
     const scope = await store.scopeFor(JSON.stringify(['stats-test', '', '', cwd]));
-    const ids = originals.map(digest);
+    const ids = conversationRangesFromMarkers(body, 'chat').map(item => conversationId(selectConversationRange(body, 'chat', item.range)));
     const firstContext = { ...base, state: {} };
     const first = await onRequest(body, firstContext) as Record<string, unknown>;
     let metrics = (await store.readStats()).metrics;
@@ -112,7 +114,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.deepEqual(lifetime.summary, session.summary);
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archives', 'state.sqlite']);
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'stats', '--json'], {
       encoding: 'utf8', env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: directory },
     });

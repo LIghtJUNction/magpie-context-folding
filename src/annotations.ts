@@ -66,7 +66,7 @@ export function parseRegions(parts: readonly TextPart[]): Region[] {
           const text = selected.map(slice => byId.get(slice.id)!.text.slice(slice.start, slice.end)).join('');
           // References are literal recovery data, never a request to fold again.
           // UTF-8 hashing must not conflate distinct lone UTF-16 surrogates.
-          if (text && !/\[\[cf:v[12]:/.test(text) && Buffer.from(text, 'utf8').toString('utf8') === text) {
+          if (text && !/\[\[cf:v[123]:/.test(text) && Buffer.from(text, 'utf8').toString('utf8') === text) {
             regions.push({ label: opened.label, text, sha256: createHash('sha256').update(text, 'utf8').digest('hex'), slices: selected,
               origin: opened.origin });
           }
@@ -92,7 +92,8 @@ export function shortHash(sha256: string, hashes: Iterable<string>): string {
   return sha256.slice(0, length);
 }
 
-export const reference = (hash: string): string => `[[cf:v2:${hash}]]`;
+export const reference = (hash: string, path?: string): string => path === undefined
+  ? `[[cf:v2:${hash}]]` : `[[cf:v3:${hash} path=${JSON.stringify(path)}]]`;
 
 /** Apply disjoint text ranges from the end so original offsets stay valid. */
 export function replaceRegions(parts: readonly TextPart[], selected: readonly { region: Region; reference: string }[]): Map<string, string> {

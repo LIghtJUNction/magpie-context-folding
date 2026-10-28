@@ -9,12 +9,12 @@
 | 组成 | 实际工作 |
 | --- | --- |
 | Harbor | 建立任务容器，执行一个 trial，收集产物，在另一容器运行评分器。 |
-| `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；工具是容器里的 `terminal`、完整 `read_file` 和当前 trial 的原文恢复。 |
-| `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse` 和 `src/tool.ts` 的 `execute`。没有另写压缩算法。 |
+| `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；工具只有 `terminal` 和 `read_file`；后者也能读取当前 trial 明确给出的原文文件。 |
+| `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse`；内部管理操作复用 CLI 核心。没有另写压缩算法或 MCP 服务。 |
 | baseline | 完整历史；仍有相同的标记教学与工具定义，用来隔离请求投影的影响。 |
 | folding | 同一教学、工具与模型参数；启用实际折叠钩子，延迟一个请求，预算提示及恢复开销全部计入请求。 |
 
-Agent 始终保留原始 transcript。每轮只将发送给模型的副本交给 bridge。普通 Assistant 标记和明确识别的源码完整读取可折叠；普通 shell 输出不伪装成源码读取。模型必须自己决定写哪些注释，没有额外总结模型，也没有自动挑选历史。
+Agent 始终保留原始 transcript。每轮只将发送给模型的副本交给 bridge。合法的跨消息标记范围和明确识别的源码完整读取可折叠；普通 shell 输出不伪装成源码读取。模型必须自己决定写哪些注释，没有额外总结模型，也没有自动挑选历史。
 
 这是**真实插件钩子 + 一个基准用 Agent**的集成。它不启动 Magpie 网关进程，不代表 Claude Code、Codex CLI 或 Magpie 宿主完整端到端行为。仅支持显式完整历史的 Chat Completions 文本和 function tools；不声明支持 Responses、供应商隐藏历史、多模态或跨任务会话恢复。外部数据集如果要求这些能力，需要另写对应适配器。
 
@@ -45,9 +45,9 @@ npm run bench:harbor -- smoke
 | `oracle` | 参考实现通过，reward = 1。 |
 | `nop` | 不做任务，应失败，reward = 0；这是评分器的负向控制。 |
 | `ScriptedSmokeAgent` + baseline | 确定性脚本通过，历史不折叠。 |
-| `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实延迟折叠、精确恢复、原文保持可见。 |
+| `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实源码读取、延迟折叠、普通文件逐字恢复；读取不改变原折叠状态。 |
 
-脚本 Agent 直接使用仓库中公开的 oracle，并不测模型解题能力。它不会连接模型服务，token/费用保持未知，不伪造为零。命令会检查所有预期 trial 的实际结果，不能只因 Harbor 进程退出码为 0 就判通过。
+脚本 Agent 先在容器中写入一份固定注释源码，通过实际 `read_file` 流程验证折叠和文件恢复，再使用仓库中公开的 oracle；这不测模型解题能力。它不会连接模型服务，token/费用保持未知，不伪造为零。命令会检查所有预期 trial 的实际结果，不能只因 Harbor 进程退出码为 0 就判通过。
 
 两个任务是小型合成接线题，**不是已发表的能力排行榜**：`ledger-reconciliation` 验证账本去重与整数分计算，15 个独立断言；`config-precedence` 验证配置递归覆盖、删除及边界条件，20 个断言。评分器在独立容器中运行，仅接收提交脚本和输出目录；原始题目数据、隐藏测试不随 Agent 文件系统转移。任务内禁用网络，Agent 使用 UID 10001。Docker 镜像固定为 `python:3.12.12-slim-bookworm` 标签，Harbor 日志保留构建信息；标签仍可重新发布，严格复现实验时应再固定审核过的镜像 digest。
 
@@ -100,6 +100,8 @@ npm run bench:harbor -- report \
 ```
 
 真实模型运行结束时也会自动生成 `JOB/magpie-summary.json`。Harbor 保存每个 trial 的 `result.json`，adapter 另外保存 `agent/transcript.jsonl`、`folding-metrics.json`、bridge 日志及隔离归档。恢复引用对应的原文留在该 trial 的归档中；不要把一个 trial 的状态目录复用给另一个。
+
+归档由宿主 Bun 进程写入，容器的 `terminal` 不会自动看见宿主路径。本适配器的 `read_file` 对本 trial 可信 scope 下生成的 `.txt`、`.messages.txt` 和 `.jsonl` 文件提供原生只读访问，校验路径、拒绝符号链接与越界，其他文件仍在容器内读取。它不接受任意宿主路径，不执行宿主 shell，也不注册恢复 MCP 工具。需要在容器内直接 `grep` 时，宿主必须另行提供共享挂载。直接文件读取没有 keep 副作用；`recovery_calls` 统计对此 trial 归档路径的 `read_file` 调用。
 
 报告分别记录：
 

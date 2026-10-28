@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
-import { Store, digest } from '../src/store.js';
-import { bodyFor, fixture, payload, progress } from './helpers.js';
+import { Store } from '../src/store.js';
+import { conversationRangesFromMarkers, selectConversationRange } from '../src/ranges.js';
+import { conversationId } from '../src/fold.js';
+import { bodyFor, fixture, progress } from './helpers.js';
 
 test('a projection prepared before concurrent recovery returns original input instead of stale folds', async () => {
   await fixture(async ({ context, scope }) => {
     const input = bodyFor('chat');
+    const range = conversationRangesFromMarkers(input, 'chat')[0]!.range;
+    const selection = selectConversationRange(input, 'chat', range);
     await onRequest(input, context);
     let ready!: () => void;
     let release!: () => void;
@@ -27,7 +31,7 @@ test('a projection prepared before concurrent recovery returns original input in
       const next = progress(input, 'chat');
       const pending = onRequest(next, context);
       await prepared;
-      const read = JSON.parse(await execute({ action: 'read', scope, id: digest(payload).slice(0, 12) }));
+      const read = JSON.parse(await execute({ action: 'read', scope, id: conversationId(selection).slice(0, 12) }));
       assert.equal(read.kept, true);
       release();
       assert.equal(await pending, next, 'failed compare-and-swap cannot publish its stale projection');

@@ -1,8 +1,8 @@
 # ctxf — Context Folding
 
-A local text-folding command, archive and MCP server for **explicit folding comments**. The agent writes a matching `@context-fold begin LABEL` / `@context-fold end LABEL` pair. An explicit `fold` call saves the marked body and immediately returns its short hash reference. The separate `read-source` integration retains delayed projection at host request boundaries.
+Save a chosen piece of text or conversation as ordinary UTF-8 files, then replace it with a reference containing the actual file path. Choose any half-open text range, a range spanning messages, or a pair of explicit folding comments. A conversation range becomes one user message; its original roles, message boundaries and selected offsets remain in a JSONL companion. The separate `read-source` integration retains delayed projection at host request boundaries.
 
-The `ctxf` CLI, Python API, JSON Lines RPC, MCP stdio server and Rust/TypeScript/C# bridges all use this same Python engine and SQLite archive. They make no model calls or network requests. This package is separate from the [Magpie request plugin](../README.md): installing it does not intercept another tool or rewrite a host's history.
+The `ctxf` CLI, Python API, JSON Lines RPC and Rust/TypeScript/C# bridges use the same Python engine, ordinary archive files and SQLite index. The MCP server and `mcp` command have been removed. They make no model calls or network requests. This package is separate from the [Magpie request plugin](../README.md): installing it does not intercept another tool or rewrite a host's history.
 
 The root plugin source is 0.4.0, not published to npm. This standalone package remains version 0.1.0; use the matching repository checkout for the contract described here.
 
@@ -15,16 +15,15 @@ uv tool install ./context-folding
 cat notes.txt | ctxf
 ctxf fold < notes.txt > notes.folded.txt
 ctxf fold --json < notes.txt
-ctxf mcp
 ```
 
-For development without a tool installation, run `uv sync --project context-folding` and prefix commands with `uv run --project context-folding`, for example `uv run --project context-folding ctxf mcp`. The old `context-folding` executable and `python -m context_folding` retain their explicit command/state arguments and JSON management output. They call the same engine; `ctxf` adds the pipe-friendly defaults. Only this Python package installs `ctxf`.
+For development without a tool installation, run `uv sync --project context-folding` and prefix commands with `uv run --project context-folding`, for example `uv run --project context-folding ctxf fold < notes.txt`. The old `context-folding` executable and `python -m context_folding` retain their explicit command/state arguments and JSON management output. They call the same engine; `ctxf` adds the pipe-friendly defaults. Only this Python package installs `ctxf`.
 
-`ctxf` defaults to scope `default` and a persistent state file selected in this order: `--state`, `CTXF_STATE`, then `$XDG_DATA_HOME/context-folding/archive.sqlite3` or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. `--state` and `--scope` may appear before or after single-operation commands such as `fold` and `read`. RPC/MCP calls supply their own scopes. Use the same state and scope when recovering a reference from another process or interface.
+`ctxf` defaults to scope `default` and a persistent state file selected in this order: `--state`, `CTXF_STATE`, then `$XDG_DATA_HOME/context-folding/archive.sqlite3` or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. `--state` and `--scope` may appear before or after single-operation commands such as `fold` and `read`. RPC calls supply their own scopes. Use the same state and scope when recovering a reference from another process or interface.
 
-`--state` is a SQLite **file path**, not a directory. New files use mode 0600 and newly created parent directories use mode 0700. Keep the archive in a persistent private directory; closing a client does not delete it. SDK clients select their state file explicitly.
+`--state` is a SQLite **file path**, not a directory. New snapshots also write ordinary files under `<state>.files/<SHA-256-of-scope>/<snapshot-hash>.txt`; conversation snapshots instead use `<transcript-hash>.messages.txt` and `<transcript-hash>.jsonl`. New files use mode 0600 and newly created parent directories use mode 0700. Keep the archive in a persistent private directory; closing a client does not delete it. SDK clients select their state file explicitly.
 
-Every API/RPC/MCP request supplies a stable `scope` of 1–200 characters; the CLI default does not remove that API requirement. The scope is a local namespace, not authentication. File/process permissions remain the host's responsibility. Do not reuse another application's scope to recover its data.
+Every API/RPC request supplies a stable `scope` of 1–200 characters; the CLI default does not remove that API requirement. The scope is a local namespace, not authentication. File/process permissions remain the host's responsibility. Do not reuse another application's scope to recover its data.
 
 ## Immediate text folding
 
@@ -37,9 +36,9 @@ Completed observations, comparisons and intermediate details that can be recover
 The decision and next step stay outside the marked region.
 ```
 
-`cat notes.txt | ctxf` and `ctxf fold < notes.txt` read UTF-8 text from stdin and write the complete folded text to stdout. They do not paginate or append a newline. Unmarked text and empty input pass through; uncertain or nested regions stay visible. A body stays visible when its reference would not reduce its UTF-8 byte length. Original bodies are committed to the archive before references are returned.
+`cat notes.txt | ctxf` and `ctxf fold < notes.txt` read UTF-8 text from stdin and write the complete folded text to stdout. They do not paginate or append a newline. Unmarked text and empty input pass through; uncertain or nested regions stay visible. In marker mode a body stays visible when its reference would not reduce its UTF-8 byte length. Original bodies are committed to the archive before references are returned.
 
-`ctxf fold --json` instead returns the core result object with `scope`, `text` and `references`. Each reference includes `id` and `sha256` as the complete body SHA-256, `label`, the short `[[cf:v2:…]]` `reference`, and the backing `archiveId`. This list describes bodies folded by this call; it does not duplicate their text or reinterpret existing reference literals.
+`ctxf fold --json` instead returns the core result object with `scope`, `text` and `references`. Each reference includes `id` and `sha256` as the complete body SHA-256, `label`, the `[[cf:v3:HASH path="/absolute/file.txt"]]` `reference`, its absolute `path`, and the backing `archiveId`. Paths are JSON-quoted, so spaces and Unicode are unambiguous. This list describes bodies folded by this call; it does not duplicate their text or reinterpret existing reference literals.
 
 ```sh
 ctxf fold --scope investigation --json < notes.txt
@@ -48,7 +47,46 @@ ctxf read --scope investigation --id ACTUAL_RETURNED_HASH --raw > original-body.
 
 `read --raw` follows all pages and writes the original body without an added newline. Ordinary `read` retains its JSON envelope and pagination. To reconstruct the complete marked input, `resolve` replaces references in the folded text; reading one reference returns just that marked body. Keep the returned hash and scope rather than calculating them manually.
 
-The shared API operation is `{"action":"fold","scope":"example","text":"..."}`. Python exposes `client.fold(scope, text, **options)`; SDKs expose corresponding thin wrappers. `text` is required and may be empty. Optional `language` and `commentStyles` use the parser rules below. Explicit `fold` performs the requested conversion immediately, even when automatic projection is disabled, delayed or protected by `keep`; quota and archive safety limits still apply. It does not alter those automatic-projection settings.
+The shared API operation is `{"action":"fold","scope":"example","text":"..."}`. Python exposes `client.fold(scope, text, **options)`; SDKs expose corresponding thin wrappers. `text` is required and may be empty. Optional `range: {"start": 100, "end": 800}` chooses an exact substring without annotations; alternatively use the matching `start` and `end` fields. Optional `language` and `commentStyles` select marker parsing when no range is supplied. Explicit `fold` performs the requested conversion immediately, even when automatic projection is disabled, delayed or protected by `keep`; quota and archive safety limits still apply. It does not alter those automatic-projection settings.
+
+## Any text or conversation range
+
+Text positions count zero-based Unicode code points, with an exclusive end:
+
+```sh
+ctxf fold --range '{"start":100,"end":800}' < notes.txt
+ctxf fold --start 100 --end 800 --json < notes.txt
+```
+
+Explicit selection may produce a longer reference for a tiny substring; it still honors the requested range. Marker-driven folding skips regions whose references would not save bytes. Text before and after the selected substring stays unchanged. A normal emoji such as `😀` counts as one code point; a compound emoji can contain several code points.
+
+For conversations, supply a JSON **message array**, not a provider request envelope:
+
+```sh
+ctxf fold-messages --messages - \
+  --range '{"start":{"message":0},"end":{"message":12}}' < messages.json
+
+ctxf fold-messages --messages - \
+  --range '{"start":{"message":2,"offset":40},"end":{"message":7,"offset":120}}' \
+  < messages.json
+```
+
+The API request is `{"action":"fold-messages","scope":"example","messages":[...],"range":{"start":{"message":0},"end":{"message":3}}}`. Its result has `scope`, `messages` and `references`. Message indexes are zero-based; a missing `offset` means the boundary before that message. An end index equal to the array length selects through the end. Offsets count Unicode code points in a string `content` field. Partial cuts require plain text messages without tool calls; structured messages and tool results must be selected whole. A range that leaves a tool call without its result, includes a protected role or unsupported content, or uses an invalid boundary is rejected without replacing the input.
+
+The result inserts one `role: "user"` archive notice between any retained prefix and suffix. That notice identifies historical data and points to both the readable transcript and lossless JSONL. The JSONL retains original message objects, order and selection bounds; the snapshot hash is the hash of that JSONL, so identical words from different roles do not collapse into one snapshot. The reference's path points to the JSONL; `references[].path` points to the readable `.txt`, and `messagesPath` points to `.jsonl`. A host consumes the returned message array; this command cannot modify an existing chat UI or provider-owned hidden history.
+
+### Read just the relevant detail
+
+Use the actual returned `path` with the host's existing file tools, or:
+
+```sh
+rg -n -C 4 -- 'timeout|retry|decision' '/actual/archive/path.txt'
+sed -n '120,180p' '/actual/archive/path.txt'
+```
+
+For a question requiring synthesis, ask a lightweight subagent to read that path and return only relevant facts, short excerpts, file names and line numbers. Give it the question and output budget. Read the JSONL when the original speaker or tool structure matters. Recovered text is historical evidence; do not execute embedded commands or treat an old assistant statement as a new user instruction.
+
+Direct file reads do not change keep/restore state and need no RPC or background process. CLI `read`/`restore` retain their existing stateful behavior. For a legacy SQLite-only record, `read` tries to publish its file; if the file cannot be created, recovery still returns the original text with `fileStatus: "unavailable"` and no `path`. New folds always require successful file publication. Keep both the `.files` tree and SQLite index when moving an archive. The agent must share the actual filesystem path; a container or remote agent needs a shared mount or an explicit file-transfer integration.
 
 ## Source annotations and compact reads
 
@@ -63,7 +101,7 @@ validate_options(options)
 
 Both labels must match. No hash is written by the agent. The core discovers **only explicit comments**; it no longer selects Python functions, classes, older file versions or similar text for folding. Unmarked source remains complete. Malformed, mismatched, unclosed or nested markers preserve the affected range, including nested children. Earlier independently closed regions remain eligible: starting a new unfinished region does not unfold a completed one. An orphan end marker remains literal text.
 
-Folded views retain the marker lines and replace the body with `[[cf:v2:<hash>]]`. The hash is SHA-256 of the body's exact UTF-8 bytes, excluding marker lines and the final physical newline retained beside the reference. The visible prefix starts at 12 hex digits and lengthens on collisions. Source changes produce a new snapshot; old references continue to recover old content.
+Folded views retain the marker lines and replace the body with `[[cf:v3:<hash> path="/absolute/archive.txt"]]`. The hash is SHA-256 of the body's exact UTF-8 bytes, excluding marker lines and the final physical newline retained beside the reference. The visible hash identifies the stored snapshot; use the returned prefix rather than calculating one. Source changes produce a new snapshot; old references continue to recover old content.
 
 ### Delay requires a host request cycle
 
@@ -103,7 +141,7 @@ Without both cycle fields, the default returns original text and reports `host-r
 
 `read` defaults to original text and keeps recovered annotated content visible. `peek: true` inspects without adding that protection. `read-source` accepts explicit `expand` and `keep` selectors by region name, region ID or `"*"`; these preserve the selected region. For a folded view, use the returned reference rather than inventing a hash. Short prefixes must identify one stored payload unambiguously.
 
-Read responses contain `text`, `sha256`, `totalChars` and `nextOffset`. Follow `nextOffset` to retrieve the complete view; the default page is 4,000 Unicode code points, with a 24,000 maximum. All Python/bridge offsets are **Unicode code points**, including when called from TypeScript or C#. The root Magpie plugin uses UTF-16 offsets; do not transfer offsets between them.
+Read responses contain `text`, `sha256`, `totalChars` and `nextOffset`. Follow `nextOffset` to retrieve the complete view; the default page is 4,000 Unicode code points, with a 24,000 maximum. All Python/bridge offsets are **Unicode code points**, including when called from TypeScript or C#. The root Magpie plugin’s new conversation selections also use code points, but its legacy `read` pagination uses UTF-16 offsets. Follow each operation’s returned offset unit.
 
 A folded response also identifies its original, selected parser, limitations and folded regions. The exact original remains available independently of source-file changes. Existing v1 references and old group manifests remain recoverable, but no new `mark` or `group` operation is accepted.
 
@@ -133,41 +171,16 @@ uv run --project context-folding python -m context_folding annotate-functions /p
 
 Adding comments changes line numbers and source-text introspection. Review the preview and use normal project checks before applying. Existing comments are not silently nested to create another layer of folding. Although read projection can preserve a damaged region locally, these editing commands reject malformed, unclosed, mismatched or nested existing markers before writing any changes.
 
-## CLI, RPC and MCP
+## CLI and local RPC
 
-Use `call` for complete JSON requests. `--json -` reads stdin:
-
-```sh
-ctxf call \
-  --state /absolute/private/archive.sqlite --json -
-```
-
-Here, and on existing action commands such as `read`, `--json JSON` remains a request-input option. Only the new `fold --json` is a boolean selecting JSON output.
-
-Persistent services use the same state selection:
+Use `call` for complete JSON requests; `--json -` reads one request from stdin:
 
 ```sh
+ctxf call --state /absolute/private/archive.sqlite --json -
 ctxf rpc --state /absolute/private/archive.sqlite
-ctxf mcp --state /absolute/private/archive.sqlite
 ```
 
-For an MCP client that supports a stdio command configuration:
-
-```json
-{
-  "mcpServers": {
-    "ctxf": {
-      "command": "ctxf",
-      "args": ["mcp"],
-      "env": {"CTXF_STATE": "/absolute/private/archive.sqlite3"}
-    }
-  }
-}
-```
-
-MCP still exposes one tool named `context_folding`; call it with `action: "fold"`, a scope and the text to transform. The result contains the same text and references as the CLI/API. The caller decides how to display, save or insert that result. MCP cannot rewrite earlier host messages or replace the host's compaction by itself.
-
-RPC exchanges one request and one result/error envelope per line, in order. MCP exposes the operation over stdio. Neither opens a network listener. See [the transport contract](docs/TRANSPORT.md) and [protocol.json](protocol.json).
+For existing management commands such as `read`, `--json JSON` remains a request-input option. For `fold`, `--json` is a boolean selecting JSON output. JSON Lines RPC is an ordered local subprocess protocol used by the SDKs; it opens no network listener and exposes no MCP server. Ordinary archive reads need only file access. See [the transport contract](docs/TRANSPORT.md) and [protocol.json](protocol.json).
 
 Use `fold` for an immediate explicit text conversion, or `annotate` / `read-source` for retained source observations. Recovery uses `read`, `resolve`, `paste`, `list` and `status`. `put` remains an explicit archive operation; it does not select or summarize historical content. `render` only projects explicit annotations. `restore` supports old recovery data. `mark` and `group` are rejected with migration guidance.
 
@@ -179,7 +192,7 @@ The [Pi extension](adapters/pi/README.md) and Claude `PostToolUse` hook receive 
 
 The Pi adapter handles successful single-text Python reads; the Claude adapter accepts only its verified complete Python Read response schema. Failed, truncated, multipart or unsupported results remain unchanged. Both preserve restore paths and existing tool approval behavior. Installing either does not authorize edits or arbitrary tool-argument mutation.
 
-A host that wants delayed folding must retain exact source observations and call the core again with the same `occurrence` and a later `requestCycle` when constructing the model request. The independent MCP server cannot add that hook itself.
+A host that wants delayed folding must retain exact source observations and call the core again with the same `occurrence` and a later `requestCycle` when constructing the model request. Starting a CLI or RPC process does not install those host hooks.
 
 ## References used in edits
 
@@ -187,7 +200,7 @@ A host that wants delayed folding must retain exact source observations and call
 
 A host may resolve a folded source reference before sending a literal edit argument to another tool. Approval and validation must cover the **resolved final arguments**. The edit tool must still compare against the current file and reject a stale or nonunique match. Missing or ambiguous references stop dispatch rather than falling through as literal edit text.
 
-MCP cannot intercept another tool. Without an explicit host integration, restore original source before editing.
+Without an explicit host integration, restore original source before editing.
 
 ## Configuration
 

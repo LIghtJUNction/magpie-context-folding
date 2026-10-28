@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -11,6 +12,9 @@ import { bodyFor, marked, payload, progress } from './helpers.js';
 
 type Reply = { id: unknown; ok: boolean; result?: any; error?: { code: string; message: string } };
 const assistantText = (body: any): string => body.messages.find((message: any) => message.role === 'assistant').content;
+const archiveNotice = (body: any): string => body.messages.find((message: any) => message.role === 'user'
+  && typeof message.content === 'string' && message.content.includes('[[cf:v3:')).content;
+const requestBody = () => { const body = bodyFor('chat'); delete body.tools; return body; };
 
 async function withBridge(run: (f: {
   directory: string; call: (request: Record<string, unknown>) => Promise<Reply>;
@@ -57,7 +61,7 @@ async function withBridge(run: (f: {
 
 test('Harbor bridge drives the real delayed projection, exact recovery and completion metrics', async () => {
   await withBridge(async ({ call }) => {
-    const original = bodyFor('chat');
+    const original = requestBody();
     const first = await call({ op: 'project', mode: 'folding', body: original });
     assert.equal(first.ok, true);
     assert.match(first.result.scope, /^[a-f0-9]{64}$/);
@@ -73,9 +77,18 @@ test('Harbor bridge drives the real delayed projection, exact recovery and compl
     const nextBody = progress(original, 'chat');
     const next = await call({ op: 'project', mode: 'folding', body: nextBody });
     assert.equal(next.ok, true);
-    const compact = assistantText(next.result.body);
-    const hash = compact.match(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/)?.[1];
+    const compact = archiveNotice(next.result.body);
+    const match = compact.match(/\[\[cf:v3:([a-f0-9]{12,64}) path=("(?:\\.|[^"\\])*")\]\]/);
+    const hash = match?.[1];
     assert.ok(hash);
+    const path: string = JSON.parse(match![2]!);
+    const readable = await readFile(path, 'utf8');
+    assert.ok(readable.includes(payload));
+    const transcript = await readFile(path.replace(/\.messages\.txt$/, '.jsonl'), 'utf8');
+    assert.equal(createHash('sha256').update(transcript).digest('hex'), basename(path).slice(0, 64));
+    assert.equal(transcript.trimEnd().split('\n').map(line => JSON.parse(line))[1].original.content, marked());
+    assert.equal(next.result.body.messages.filter((message: any) => message.role === 'user'
+      && message.content?.includes('[[cf:v3:')).length, 1);
     assert.ok(next.result.output_bytes < next.result.input_bytes);
     // The bridge did not mutate the parent's authoritative original transcript.
     assert.equal((original.messages as any[])[2].content, marked());
@@ -86,7 +99,7 @@ test('Harbor bridge drives the real delayed projection, exact recovery and compl
     assert.equal(status.result.metrics.successfulFoldedRequests, 1);
     assert.equal(status.result.metrics.itemsFolded, 1);
     const recovered = await call({ op: 'recover', args: { action: 'read', id: hash, limit: 24000 } });
-    assert.equal(recovered.result.text, payload);
+    assert.equal(recovered.result.text, readable);
     assert.equal(recovered.result.kept, true);
     assert.equal(recovered.result.nextOffset, null);
 
@@ -98,7 +111,7 @@ test('Harbor bridge drives the real delayed projection, exact recovery and compl
 
 test('Harbor baseline remains byte-identical and never creates a folding archive', async () => {
   await withBridge(async ({ directory, call }) => {
-    const body = bodyFor('chat');
+    const body = requestBody();
     const baseline = await call({ op: 'project', mode: 'baseline', body });
     assert.equal(baseline.ok, true);
     assert.deepEqual(baseline.result.body, body);
@@ -113,7 +126,7 @@ test('Harbor baseline remains byte-identical and never creates a folding archive
 
 test('Harbor recovery cannot write to the host or read another trial scope', async () => {
   await withBridge(async ({ call }) => {
-    await call({ op: 'project', mode: 'folding', body: bodyFor('chat') });
+    await call({ op: 'project', mode: 'folding', body: requestBody() });
     await call({ op: 'response', success: true });
     for (const action of ['paste', 'forget', 'stats', 'mark']) {
       const denied = await call({ op: 'recover', args: { action, path: '/tmp/forbidden' } });
@@ -135,7 +148,7 @@ test('Harbor JSONL protocol survives bad input and enforces one completion per r
     assert.equal(malformed.id, null);
     assert.equal(malformed.error?.code, 'invalid_json');
     assert.equal((await call({ op: 'response', success: true })).error?.code, 'no_request');
-    const body = bodyFor('chat');
+    const body = requestBody();
     await call({ op: 'project', mode: 'folding', body });
     assert.equal((await call({ op: 'project', mode: 'folding', body })).error?.code, 'request_pending');
     assert.equal((await call({ op: 'recover', args: { action: 'status' } })).error?.code, 'request_pending');

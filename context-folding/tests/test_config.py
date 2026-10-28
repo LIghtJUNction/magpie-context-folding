@@ -198,7 +198,7 @@ class ConfigTests(unittest.TestCase):
                    "folding.max_session_bytes": [False, 0, 67108865],
                    "folding.enabled": ["true", 1], "annotations.keep": [[""], ["a\0b"], "a"],
                    "magpie.gateway_timeout_ms": [99, 10001],
-                   "magpie.recovery_tool_name": ["", "bad name", "a" * 201]}
+                   "magpie.file_access": ["true", 0, None]}
         for key, values in invalid.items():
             section, field = key.split(".")
             for value in values:
@@ -209,7 +209,7 @@ class ConfigTests(unittest.TestCase):
                 self.load(config)
         valid = self.load({"folding": {"delay_requests": 0, "context_window_tokens": 1,
                             "reserve_output_tokens": 0, "max_session_bytes": 1},
-                           "magpie": {"recovery_tool_name": "context_folding", "gateway_timeout_ms": 100}})
+                           "magpie": {"file_access": True, "gateway_timeout_ms": 100}})
         self.assertEqual(valid["folding"]["delay_requests"], 0)
 
 
