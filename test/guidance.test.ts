@@ -139,3 +139,25 @@ test('removed budget metadata stays absent and guide-only overhead remains visib
     assert.ok(BigInt(stats.metrics.estimatedTokenDelta) < 0n, 'fixed guidance overhead is not hidden');
   });
 });
+
+test('empty and missing system containers retain their shape and Gemini metadata on replay', () => {
+  const cases: { protocol: Protocol; body: Record<string, unknown> }[] = [
+    { protocol: 'anthropic', body: { system: '', messages: [] } },
+    { protocol: 'gemini', body: { systemInstruction: '', contents: [] } },
+    { protocol: 'gemini', body: { systemInstruction: { role: 'system', parts: [] }, contents: [] } },
+    { protocol: 'gemini', body: { system_instruction: { parts: [] }, contents: [] } },
+    { protocol: 'gemini', body: { config: { system_instruction: { parts: [] } }, contents: [] } },
+    { protocol: 'gemini', body: { systemInstruction: { parts: [] }, config: {}, contents: [] } },
+    { protocol: 'gemini', body: { systemInstruction: { parts: [] }, config: { temperature: 0.2 }, contents: [] } },
+    { protocol: 'gemini', body: { contents: [] } },
+    { protocol: 'gemini', body: { config: {}, contents: [] } },
+    { protocol: 'gemini', body: { config: { temperature: 0.2 }, contents: [] } },
+    { protocol: 'gemini', body: { config: { temperature: 0.2,
+      system_instruction: { role: 'system', parts: [] } }, contents: [] } },
+  ];
+  for (const { body, protocol } of cases) {
+    const once = appendGuidance(body, protocol, options);
+    assert.deepEqual(withoutGuidance(once, protocol), body);
+    assert.deepEqual(appendGuidance(once, protocol, options), once);
+  }
+});
