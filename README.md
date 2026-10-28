@@ -165,13 +165,15 @@ min_savings_tokens = 256
 
 ### 已安装插件的 Magpie gateway smoke
 
-测试脚本从 Magpie 本机 npm 插件安装目录读取 `magpie-context-folding@0.5.0`，复制到临时隔离目录，在 bubblewrap、临时 HOME/XDG 和独立 localhost 合成模型下启动真实 Magpie host。它发送 18 个 Chat Completions 请求，并检查闭合标记延迟、重试、折叠引用、系统指导、CLI 分页读取、文件导出、显式恢复、会话隔离和源码只读等行为。逐步断言见 [`scripts/host-smoke.py`](scripts/host-smoke.py) 与 [`scripts/installed-package-smoke.py`](scripts/installed-package-smoke.py)。
+测试脚本从 Magpie 本机 npm 插件安装目录读取已安装的 `magpie-context-folding`，复制到临时隔离目录，在 bubblewrap、临时 HOME/XDG 和独立 localhost 合成模型下启动真实 Magpie host。它发送 18 个 Chat Completions 请求，并检查闭合标记延迟、重试、折叠引用、系统指导、CLI 分页读取、文件导出、显式恢复、会话隔离和源码只读等行为。逐步断言见 [`scripts/host-smoke.py`](scripts/host-smoke.py) 与 [`scripts/installed-package-smoke.py`](scripts/installed-package-smoke.py)。
 
 需要 Linux、bubblewrap、Magpie、Bun 1.4+ 和已安装的 npm 插件。默认读取 `~/.config/magpie/plugins/node_modules/magpie-context-folding`；也可通过 `--package` 指定安装目录。测试不修改现有 Magpie 插件配置或当前 gateway，不连接供应商模型。
 
 ```sh
 npm ci
 npm run test:host:installed
+# 核对指定版本：
+npm run test:host:installed -- --expected-version 0.5.1
 # 非默认安装位置：
 npm run test:host:installed -- --package /absolute/path/to/magpie-context-folding
 ```

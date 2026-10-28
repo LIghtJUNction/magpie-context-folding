@@ -19,6 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path, default=DEFAULT_PACKAGE,
                         help="installed magpie-context-folding package directory")
+    parser.add_argument("--expected-version", help="require this installed package version")
     parser.add_argument("--magpie", default=shutil.which("magpie"))
     parser.add_argument("--bun", default=shutil.which("bun"))
     parser.add_argument("--bwrap", default=shutil.which("bwrap"))
@@ -29,8 +30,10 @@ def main() -> None:
         parser.error("required executable(s) unavailable: " + ", ".join(missing))
     package = args.package.expanduser().resolve()
     metadata = json.loads((package / "package.json").read_text(encoding="utf-8"))
-    if metadata.get("name") != "magpie-context-folding" or metadata.get("version") != "0.5.0":
-        parser.error(f"expected installed magpie-context-folding@0.5.0, found {metadata.get('name')}@{metadata.get('version')}")
+    if metadata.get("name") != "magpie-context-folding":
+        parser.error(f"expected installed magpie-context-folding, found {metadata.get('name')}")
+    if args.expected_version and metadata.get("version") != args.expected_version:
+        parser.error(f"expected version {args.expected_version}, found {metadata.get('version')}")
     source = package / "src"
     if not (source / "context.hooks.ts").is_file() or not (source / "cli.ts").is_file():
         parser.error("installed npm package is missing its hook or CLI TypeScript source")
