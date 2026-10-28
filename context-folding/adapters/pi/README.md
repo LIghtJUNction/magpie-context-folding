@@ -1,33 +1,62 @@
-# Pi read adapter
+# Pi source read adapter
 
-Optional Pi extension, verified against the locally installed `@earendil-works/pi-coding-agent` 0.85.1. No model calls, dependency installation, or live configuration changes are required for the tests.
+This optional extension projects **explicitly annotated Python source** from successful Pi `read` results. It does not select functions or old tool output automatically.
 
-Load manually with Pi's extension flag, supplying a private absolute archive path:
+**The extension sees one `tool_result`, not later model requests. With the default `delay_requests = 1`, it leaves the result complete.** A host request-replay integration would be needed for delayed folding. Explicitly configuring `delay_requests = 0` allows immediate views of complete annotations; there is no background timer.
+
+## Load
+
+Supply a private absolute archive path:
 
 ```sh
 pi -e /absolute/path/context-folding/adapters/pi/extension.ts \
   --context-folding-state /absolute/private/path/pi-context.sqlite
 ```
 
-The extension imports Pi types and TypeBox using Pi's extension loader dependency resolution. The adapter itself uses Node built-ins and the existing Python core, launched with `python3 -I` to avoid importing modules from the working project. JSON request bodies travel through stdin (`--json -`), keeping source contents out of process arguments and avoiding their size limit. Python must already satisfy the standalone core requirements. No persistent child process is created.
+The extension resolves Pi types and TypeBox through Pi's loader. The adapter launches the existing Python core using `python3 -I`; requests travel through stdin, keeping source contents out of process arguments. Python must satisfy the standalone core requirements. No persistent child process is created.
 
-Only successful, single-text-block `read` results for `.py` paths are candidates. The adapter passes the exact returned text to the shared core's `annotate` and `read` actions. It never reads a file itself, never submits `path` to the core, and never interprets Pi line offsets as core character offsets. Valid Python source is folded using the core AST parser. Unsupported formats, images, malformed ranges, small results, invalid Python fragments, and results carrying Pi continuation/truncation notices remain unchanged. Other tools are untouched.
+Use the shared configuration if immediate source projection is intended:
 
-Before returning a shorter view, the adapter verifies the full original by paginating core reads and checking SHA-256, confirms a shorter view, persists a session custom entry, then pins the original against core garbage collection. No-benefit results and persistence failures never change existing pin state. A pin failure can leave a harmless session record but publishes no folded view. Any core, integrity, or persistence failure returns no override, so Pi keeps the original tool result. Folded text includes the snapshot ID and instructions for `context_folding_restore`. That read-only tool returns the exact original result, with a second integrity check, only if the active session branch contains its matching record. Session ID plus project cwd determine a hashed scope; callers cannot supply a scope, path, or arbitrary core action. Local scopes are namespaces, not authentication: protect the SQLite archive using normal OS file permissions.
+```toml
+[folding]
+delay_requests = 0
+```
 
-The extension does not intercept `tool_call`, resolve references in edit/write arguments, override built-in tools, alter trust, or change permissions. Restore original text before using literal source in normal edit/write calls. Pi's usual approval extensions remain responsible for those calls. Arbitrary tool-argument reference expansion is intentionally unsupported because mutating arguments could invalidate an earlier approval.
+The core subprocess does not infer the active Pi project from the source path. Make sure the configuration is actually visible to the configured core process; otherwise the default preserves full text. The adapter deliberately passes returned source text, not the file path, to the core.
 
-Pinned snapshots remain on disk until the owner explicitly unpins/removes them through normal core maintenance. No background cleanup or session shutdown cleanup deletes recovery material.
+## What is eligible
 
-Run local verification:
+Only successful, single-text-block `read` results for `.py` files are candidates. The text must contain real whole-line Python comments such as:
+
+```python
+# @context-fold begin parse-options
+# Long implementation or investigation detail here.
+# @context-fold end parse-options
+```
+
+Unsupported formats, images, errors, malformed ranges, small results and truncation/continuation notices remain unchanged. Unmarked Python source stays complete. The adapter does not interpret Pi line offsets as Python character offsets, and never rereads the file to replace the already approved observation.
+
+Before returning a shorter view, the adapter verifies the complete original through paginated archive reads and SHA-256, persists a session record, and pins the recovery snapshot. Failure at any stage produces no override, so Pi retains its original result. No-benefit reads do not publish a replacement.
+
+## Restore and edit
+
+`context_folding_restore` reads the exact snapshot only when the active session branch has its matching record. Session ID plus project cwd determine the scope; callers cannot supply an arbitrary scope, path or core action. The recovered text is checked again and kept visible. Local scopes are namespaces, not OS access controls.
+
+Fold references are display references in this adapter. Restore original text before using literal source in ordinary edit/write tools. The extension does not mutate `tool_call` arguments, override approval extensions, grant permissions or resolve arbitrary edit parameters.
+
+Pinned snapshots remain until explicitly unpinned and cleaned through normal core maintenance. Session shutdown does not delete recovery material.
+
+## Verification
+
+```sh
+node --test context-folding/adapters/pi/adapter.test.mjs
+```
+
+Optional real-tool checks use:
 
 ```sh
 PI_PACKAGE_ROOT=/absolute/path/to/@earendil-works/pi-coding-agent \
   node --test context-folding/adapters/pi/adapter.test.mjs
 ```
 
-Tests exercise the real Python core and, when `PI_PACKAGE_ROOT` is set, Pi's installed `createReadToolDefinition().execute` with offset/limit, source changes after reading, and continuation notices. They test exact restoration, session/project/branch isolation, Unicode pagination, failure passthrough, and persistence failure. They do not start a model or claim an interactive model conversation was tested.
-
-Verified API sources: Pi `dist/core/extensions/types.d.ts` (`tool_result`, `registerTool`, `appendEntry`, `getFlag`), `dist/core/session-manager.d.ts` (`getSessionId`, `getBranch`), and `dist/core/tools/read.js` (line slicing and truncation semantics). The real Pi `loadExtensions` loader also loaded `extension.ts` successfully with its `tool_result` handler and restore tool.
-
-The subprocess request function and paginated integrity reader are provider-neutral and use the standalone core contract. They could move to a common adapter helper if another harness needs the same path; only event mapping, session records, and scope derivation are Pi-specific. No other adapter is imported or modified.
+The earlier implementation was checked against Pi 0.85.1; that historical API check is not a new-version or interactive-model validation claim. Current tests exercise the Python core, full-text default, explicit annotations, exact recovery, failure passthrough and session/project/branch isolation. Actual tool checks remain conditional on an installed Pi package.

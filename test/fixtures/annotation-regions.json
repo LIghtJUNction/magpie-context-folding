@@ -1,0 +1,160 @@
+[
+  {
+    "name": "html'\\n'",
+    "text": "<!-- @context-fold begin x -->\n中文😀\n keep spaces \n<!-- @context-fold end x -->\n",
+    "payloads": [
+      "中文😀\n keep spaces "
+    ]
+  },
+  {
+    "name": "html'\\r\\n'",
+    "text": "<!-- @context-fold begin x -->\r\n中文😀\r\n keep spaces \r\n<!-- @context-fold end x -->\r\n",
+    "payloads": [
+      "中文😀\r\n keep spaces "
+    ]
+  },
+  {
+    "name": "html'\\r'",
+    "text": "<!-- @context-fold begin x -->\r中文😀\r keep spaces \r<!-- @context-fold end x -->\r",
+    "payloads": [
+      "中文😀\r keep spaces "
+    ]
+  },
+  {
+    "name": "slash'\\n'",
+    "text": "// @context-fold begin x\n中文😀\n keep spaces \n// @context-fold end x\n",
+    "payloads": [
+      "中文😀\n keep spaces "
+    ]
+  },
+  {
+    "name": "slash'\\r\\n'",
+    "text": "// @context-fold begin x\r\n中文😀\r\n keep spaces \r\n// @context-fold end x\r\n",
+    "payloads": [
+      "中文😀\r\n keep spaces "
+    ]
+  },
+  {
+    "name": "slash'\\r'",
+    "text": "// @context-fold begin x\r中文😀\r keep spaces \r// @context-fold end x\r",
+    "payloads": [
+      "中文😀\r keep spaces "
+    ]
+  },
+  {
+    "name": "hash'\\n'",
+    "text": "# @context-fold begin x\n中文😀\n keep spaces \n# @context-fold end x\n",
+    "payloads": [
+      "中文😀\n keep spaces "
+    ]
+  },
+  {
+    "name": "hash'\\r\\n'",
+    "text": "# @context-fold begin x\r\n中文😀\r\n keep spaces \r\n# @context-fold end x\r\n",
+    "payloads": [
+      "中文😀\r\n keep spaces "
+    ]
+  },
+  {
+    "name": "hash'\\r'",
+    "text": "# @context-fold begin x\r中文😀\r keep spaces \r# @context-fold end x\r",
+    "payloads": [
+      "中文😀\r keep spaces "
+    ]
+  },
+  {
+    "name": "block'\\n'",
+    "text": "/* @context-fold begin x */\n中文😀\n keep spaces \n/* @context-fold end x */\n",
+    "payloads": [
+      "中文😀\n keep spaces "
+    ]
+  },
+  {
+    "name": "block'\\r\\n'",
+    "text": "/* @context-fold begin x */\r\n中文😀\r\n keep spaces \r\n/* @context-fold end x */\r\n",
+    "payloads": [
+      "中文😀\r\n keep spaces "
+    ]
+  },
+  {
+    "name": "block'\\r'",
+    "text": "/* @context-fold begin x */\r中文😀\r keep spaces \r/* @context-fold end x */\r",
+    "payloads": [
+      "中文😀\r keep spaces "
+    ]
+  },
+  {
+    "name": "plain'\\n'",
+    "text": "@context-fold begin x\n中文😀\n keep spaces \n@context-fold end x\n",
+    "payloads": [
+      "中文😀\n keep spaces "
+    ]
+  },
+  {
+    "name": "plain'\\r\\n'",
+    "text": "@context-fold begin x\r\n中文😀\r\n keep spaces \r\n@context-fold end x\r\n",
+    "payloads": [
+      "中文😀\r\n keep spaces "
+    ]
+  },
+  {
+    "name": "plain'\\r'",
+    "text": "@context-fold begin x\r中文😀\r keep spaces \r@context-fold end x\r",
+    "payloads": [
+      "中文😀\r keep spaces "
+    ]
+  },
+  {
+    "name": "open",
+    "text": "# @context-fold begin x\na",
+    "payloads": []
+  },
+  {
+    "name": "unmatched",
+    "text": "# @context-fold end x",
+    "payloads": []
+  },
+  {
+    "name": "nested",
+    "text": "# @context-fold begin x\n# @context-fold begin y\na\n# @context-fold end y\n# @context-fold end x",
+    "payloads": []
+  },
+  {
+    "name": "mismatch",
+    "text": "# @context-fold begin x\na\n# @context-fold end y",
+    "payloads": []
+  },
+  {
+    "name": "later-open",
+    "text": "# @context-fold begin a\ncompleted\n# @context-fold end a\n# @context-fold begin b\nactive",
+    "payloads": [
+      "completed"
+    ]
+  },
+  {
+    "name": "later-nested",
+    "text": "# @context-fold begin a\ncompleted\n# @context-fold end a\n# @context-fold begin b\n# @context-fold begin c\nactive\n# @context-fold end c\n# @context-fold end b",
+    "payloads": [
+      "completed"
+    ]
+  },
+  {
+    "name": "later-mismatch",
+    "text": "# @context-fold begin a\ncompleted\n# @context-fold end a\n# @context-fold begin b\nactive\n# @context-fold end c",
+    "payloads": [
+      "completed"
+    ]
+  },
+  {
+    "name": "later-malformed",
+    "text": "# @context-fold begin a\ncompleted\n# @context-fold end a\n# @context-fold begin b\nactive\n# @context-fold bogus b\n# @context-fold end b",
+    "payloads": [
+      "completed"
+    ]
+  },
+  {
+    "name": "malformed-region",
+    "text": "# @context-fold begin x\nvalue\n# @context-fold bogus x\n# @context-fold end x",
+    "payloads": []
+  }
+]

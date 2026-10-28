@@ -1,59 +1,247 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Context Folding RPC v1",
+  "title": "Context Folding RPC v2",
   "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run python -m context_folding rpc --state /absolute/private/archive.sqlite. State is a SQLite file selected outside the request. Core validation defines action-specific constraints. No network listener or model calls.",
   "type": "object",
-  "required": ["action", "scope"],
+  "required": [
+    "action",
+    "scope"
+  ],
   "properties": {
-    "action": {"type": "string", "enum": ["put", "list", "mark", "read", "render", "group", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source"]},
-    "scope": {"type": "string", "minLength": 1, "maxLength": 200},
-    "text": {"type": "string"},
-    "language": {"type": "string"},
-    "commentStyles": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["start"], "properties": {"start": {"type": "string", "minLength": 1, "maxLength": 64}, "end": {"type": "string", "maxLength": 64}}, "additionalProperties": false}},
-    "keep": {"type": "array", "items": {"type": "string"}},
-    "expand": {"type": "array", "items": {"type": "string"}},
-    "expandMode": {"type": "string", "enum": ["single", "recursive"]},
-    "files": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object"}},
-    "id": {"type": "string"},
-    "ids": {"type": "array", "items": {"type": "string"}},
-    "role": {"type": "string"},
-    "source": {"type": "object"},
-    "summary": {"type": "string"},
-    "disposition": {"type": "string", "enum": ["foldable", "keep", "unmarked"]},
-    "protected": {"type": "array", "items": {"type": "string"}},
+    "action": {
+      "type": "string",
+      "enum": [
+        "put",
+        "list",
+        "read",
+        "render",
+        "restore",
+        "resolve",
+        "paste",
+        "status",
+        "gc",
+        "roots",
+        "pin",
+        "skills",
+        "annotate",
+        "read-source"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "text": {
+      "type": "string"
+    },
+    "language": {
+      "type": "string"
+    },
+    "commentStyles": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": [
+          "start"
+        ],
+        "properties": {
+          "start": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "end": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "keep": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expand": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expandMode": {
+      "type": "string",
+      "enum": [
+        "single",
+        "recursive"
+      ]
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object"
+      }
+    },
+    "id": {
+      "type": "string"
+    },
+    "ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "role": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object"
+    },
+    "protected": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "value": {},
-    "query": {"type": "string"},
-    "path": {"type": "string"},
-    "marks": {"type": "array", "items": {"type": "object"}},
-    "mode": {"type": "string"},
-    "config": {"type": "object"},
-    "body": {"type": "string"},
-    "description": {"type": "string"},
-    "limit": {"type": "integer", "minimum": 1},
-    "offset": {"type": "integer", "minimum": 0},
-    "depth": {"type": "integer", "minimum": 0, "maximum": 8},
-    "sort": {"type": "string", "enum": ["chronological", "size", "id", "version"]},
-    "order": {"type": "string", "enum": ["asc", "desc"]},
-    "name": {"type": "string"},
-    "pinned": {"type": "boolean"}
+    "query": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "config": {
+      "type": "object"
+    },
+    "body": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "depth": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8
+    },
+    "sort": {
+      "type": "string",
+      "enum": [
+        "chronological",
+        "size",
+        "id",
+        "version"
+      ]
+    },
+    "order": {
+      "type": "string",
+      "enum": [
+        "asc",
+        "desc"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "occurrence": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "requestCycle": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "peek": {
+      "type": "boolean"
+    }
   },
   "additionalProperties": true,
   "$defs": {
     "response": {
       "oneOf": [
-        {"type": "object", "required": ["result"], "properties": {"result": {}}, "additionalProperties": false},
-        {"type": "object", "required": ["error"], "properties": {"error": {"type": "object", "required": ["code", "message"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}}}}, "additionalProperties": false}
+        {
+          "type": "object",
+          "required": [
+            "result"
+          ],
+          "properties": {
+            "result": {}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "error": {
+              "type": "object",
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
       ]
     }
   },
   "examples": [
-    {"action": "put", "scope": "example", "text": "original text", "role": "tool", "source": {"path": "/project/example.py", "range": "full"}},
-    {"action": "mark", "scope": "example", "id": "ENTRY_ID", "disposition": "foldable", "summary": "Agent-written historical summary"},
-    {"action": "render", "scope": "example", "ids": ["ENTRY_ID"], "protected": []},
-    {"action": "resolve", "scope": "example", "value": {"content": "[[cf:v1:ENTRY_ID]]"}},
-    {"action": "roots", "scope": "example", "ids": ["ENTRY_ID"]},
-    {"action": "pin", "scope": "example", "id": "ENTRY_ID", "pinned": true},
-    {"action": "gc", "scope": "example", "mode": "configure", "config": {"strength": "conservative", "autoPurge": false}},
-    {"action": "skills", "scope": "example", "mode": "candidates"}
+    {
+      "action": "read-source",
+      "scope": "example",
+      "text": "# @context-fold begin result\ncompleted evidence\n# @context-fold end result",
+      "language": "python",
+      "occurrence": "read-1",
+      "requestCycle": 0
+    },
+    {
+      "action": "read-source",
+      "scope": "example",
+      "id": "ENTRY_ID",
+      "occurrence": "read-1",
+      "requestCycle": 1
+    },
+    {
+      "action": "read",
+      "scope": "example",
+      "id": "CONTENT_HASH_PREFIX"
+    },
+    {
+      "action": "resolve",
+      "scope": "example",
+      "value": "[[cf:v2:CONTENT_HASH_PREFIX]]"
+    }
   ]
 }

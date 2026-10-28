@@ -36,7 +36,11 @@ class TransportTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.state = str(Path(self.tmp.name) / "state")
         self.env = dict(os.environ)
-        self.env["PYTHONPATH"] = str(PACKAGE / "python")
+        self.env["PYTHONPATH"] = str(PACKAGE / "python") + os.pathsep + self.env.get("PYTHONPATH", "")
+        self.env["XDG_CONFIG_HOME"] = str(Path(self.tmp.name) / "config")
+        config = Path(self.env["XDG_CONFIG_HOME"]) / "context-folding" / "config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text("[folding]\ndelay_requests=0\n")
 
     def run_cli(self, command, data=b"", *args):
         result = subprocess.run(
@@ -60,7 +64,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(replies[0]["result"]["text"], text)
 
     def test_source_cli_batch_expansion_recovery_and_project_configuration(self):
-        source = "def alpha():\r\n" + "".join(f"    value_{n} = {n}\r\n" for n in range(25))
+        source = "# @context-fold begin alpha\r\ndef alpha():\r\n" + "".join(f"    value_{n} = {n}\r\n" for n in range(25)) + "# @context-fold end alpha\r\n"
         path = Path(self.tmp.name) / "source.py"
         path.write_bytes(source.encode())
         code, replies = self.run_cli("read-source", b"", "--scope", "test", "--path", str(path))
@@ -213,11 +217,10 @@ class TransportTests(unittest.TestCase):
         code, replies = self.run_cli("put", "A😀BC".encode(), "--scope", "test")
         self.assertEqual(code, 0)
         entry_id = replies[0]["result"]["id"]
-        code, replies = self.run_cli("mark", b"", "--scope", "test", "--marks", json.dumps([
-            {"id": entry_id, "disposition": "keep"},
-        ]))
-        self.assertEqual(code, 0)
-        self.assertEqual(replies[0]["result"]["marked"], 1)
+        code, replies = self.run_cli("call", encoded({"action": "mark", "scope": "test", "id": entry_id,
+                                                         "disposition": "foldable", "summary": "removed"}))
+        self.assertEqual(code, 1)
+        self.assertIn("removed", replies[0]["error"]["message"])
         code, replies = self.run_cli("read", b"", "--scope", "test", "--id", entry_id, "--offset", "1", "--limit", "1")
         self.assertEqual(code, 0)
         self.assertEqual(replies[0]["result"]["text"], "😀")

@@ -1,7 +1,7 @@
 {
   "name": "magpie-context-folding",
-  "version": "0.3.0",
-  "description": "Agent-directed, reversible context folding with a conservative cache cost gate for Magpie",
+  "version": "0.4.0",
+  "description": "Reversible context folding from agent-authored comment markers for Magpie",
   "type": "module",
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
@@ -22,9 +22,6 @@
     "test": "bun test test/*.test.ts",
     "test:host": "python3 scripts/host-smoke.py",
     "stats": "bun src/cli.ts stats",
-    "bench:folding": "bun scripts/folding-benchmark.ts",
-    "bench:economics": "python3 scripts/economic-analysis.py",
-    "bench:inference": "python3 scripts/inference-benchmark.py",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "engines": { "bun": ">=1.4.0", "node": ">=22" },

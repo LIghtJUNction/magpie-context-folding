@@ -273,16 +273,6 @@ impl Client {
         self.action("list", scope, options_object(options)?)
     }
 
-    pub fn mark(&self, scope: &str, id: &str, disposition: &str, summary: &str) -> Result<Value> {
-        self.action(
-            "mark",
-            scope,
-            options_object(json!({
-                "id": id, "disposition": disposition, "summary": summary
-            }))?,
-        )
-    }
-
     pub fn render(&self, scope: &str, ids: &[&str], protected: &[&str]) -> Result<Value> {
         self.action(
             "render",

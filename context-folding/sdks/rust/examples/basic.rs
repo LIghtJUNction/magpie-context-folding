@@ -4,34 +4,26 @@ use std::ffi::OsString;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = std::env::args_os()
         .nth(1)
-        .unwrap_or_else(|| OsString::from("context-folding-state.json"));
+        .unwrap_or_else(|| OsString::from("context-folding-state.sqlite"));
     let python =
         std::env::var_os("CONTEXT_FOLDING_PYTHON").unwrap_or_else(|| OsString::from("python3"));
     let client = Client::with_config(Config::new(state).python(python))?;
-    let entry = client.put(
-        "rust-example",
-        "Original tool output kept for later inspection.",
-        json!({
-            "role": "tool", "source": {"path": "example.txt"}
-        }),
-    )?;
-    let id = entry
-        .get("id")
-        .and_then(|value| value.as_str())
-        .ok_or("put response missing entry id")?;
-    client.mark(
-        "rust-example",
-        id,
-        "foldable",
-        "Tool output archived; reopen if needed.",
-    )?;
-    let _rendered = client.render("rust-example", &[id], &[])?;
-    let _original = client.read("rust-example", id, json!({"offset": 0, "limit": 100}))?;
-    let _resolved = client.resolve(
-        "rust-example",
-        json!({"content": format!("[[cf:v1:{id}]]")}),
-    )?;
+    let text = format!(
+        "# @context-fold begin investigation\n{}# @context-fold end investigation\n",
+        "# Archived evidence from a completed step.\n".repeat(30)
+    );
+    let request = |cycle| json!({
+        "action": "read-source", "scope": "rust-example", "text": text,
+        "language": "python", "occurrence": "read-1", "requestCycle": cycle
+    });
+    let first = client.call(request(0))?;
+    let id = first["id"].as_str().ok_or("source response missing id")?;
+    let folded = client.call(request(1))?;
+    let view = folded["text"].as_str().ok_or("source response missing text")?;
+    let resolved = client.resolve("rust-example", json!({"content": view}))?;
+    assert_eq!(resolved["value"]["content"], text);
+    let _original = client.read("rust-example", id, json!({"limit": 4000}))?;
     client.close()?;
-    println!("Stored, marked, rendered, read, and resolved an archived entry.");
+    println!("Observed, folded on the next request, and recovered exact source.");
     Ok(())
 }

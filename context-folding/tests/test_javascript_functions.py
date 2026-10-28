@@ -43,13 +43,13 @@ const obj = {
 };
 '''
         result = annotate_javascript_functions(source)
-        self.assertEqual(5, len(result['added']))
+        self.assertEqual(4, len(result['added']))
         self.assertEqual(source, ''.join(line for line in result['text'].splitlines(keepends=True)
                                          if '// @context-fold ' not in line))
         self.assertEqual([], annotate_javascript_functions(result['text'])['added'])
         regions = discover_source(result['text'], 'javascript')['regions']
-        self.assertEqual(5, len(regions))
-        self.assertEqual(regions[0]['id'], regions[1]['parentId'])
+        self.assertEqual(4, len(regions))
+        self.assertTrue(all(region['parentId'] is None for region in regions))
         before, data = parse_source(source, 'javascript')
         after, output = parse_source(result['text'], 'javascript')
         self.assertEqual(_syntax(before, data), _syntax(after, output))
@@ -161,7 +161,7 @@ function actual() {
         with patch.dict(sys.modules, {'tree_sitter': None}):
             with self.assertRaisesRegex(ValueError, 'optional.*javascript'):
                 annotate_javascript_functions('function f() {\n  return 1;\n}')
-            self.assertEqual('python-ast', discover_source('def f():\n    return 1\n', 'python')['parser'])
+            self.assertEqual('python-comments', discover_source('def f():\n    return 1\n', 'python')['parser'])
             self.assertEqual('explicit-regions', discover_source('hello', 'text')['parser'])
 
     def test_runtime_behavior_including_asi_and_templates(self):
@@ -202,7 +202,7 @@ main();
                 result = real_discover(text, 'explicit', path, styles)
                 result['language'] = 'javascript'
                 return result
-            with Client(state) as client:
+            with Client(state, config={"folding": {"delay_requests": 0}}) as client:
                 with patch('context_folding.annotations.discover_source', side_effect=legacy_discover):
                     old = client.read_source('legacy', text=source, language='javascript')
                 marked = annotate_javascript_functions('function f() {\n' + ''.join(

@@ -27,7 +27,7 @@ def colon_in_annotation(
         self.assertEqual(source, result["text"])
         self.assertEqual([], result["added"])
 
-    def test_multiline_suites_still_fold_with_nested_colons(self):
+    def test_multiline_suites_need_explicit_markers_even_with_nested_colons(self):
         source = '''\
 @decorator("foo: bar")
 def ordinary(
@@ -43,7 +43,7 @@ def lambda_annotation() -> lambda x: x:
     return 1
 '''
         regions = discover_source(source, "python")["regions"]
-        self.assertEqual(["ordinary", "async_function", "lambda_annotation"], [r["name"] for r in regions])
+        self.assertEqual([], regions)
         result = annotate_python_functions(source)
         self.assertEqual(["ordinary", "async_function", "lambda_annotation"], [r["name"] for r in result["added"]])
         self.assertEqual([], annotate_python_functions(result["text"])["added"])

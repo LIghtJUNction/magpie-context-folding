@@ -106,7 +106,7 @@ def fold(event: dict, archive: Client, scope: str, *, selectors: list[str] | Non
     annotation = discover_source(text, "python")
     result = archive.read_source(scope, text=text, language="python", mode="folded", limit=24000,
                                  expand=[] if selectors is None else selectors, expandMode=expand_mode)
-    if result.get("parser") != "python-ast":
+    if result.get("parser") != "python-comments":
         return {}
     selected = {r["id"]: r for r in annotation["regions"]}
     regions = result.get("foldedRegions", [])

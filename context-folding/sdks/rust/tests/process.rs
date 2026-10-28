@@ -80,9 +80,13 @@ fn convenience_methods_preserve_fields_and_reuse_process() {
         json!({"action":"list", "scope":"s"})
     );
     assert_eq!(
-        client.mark("s", "id", "foldable", "summary").unwrap()["request"],
+        client.call(json!({
+            "action": "read-source", "scope": "s", "text": "# source",
+            "occurrence": "read-1", "requestCycle": 0
+        })).unwrap()["request"],
         json!({
-            "action":"mark", "scope":"s", "id":"id", "disposition":"foldable", "summary":"summary"
+            "action": "read-source", "scope": "s", "text": "# source",
+            "occurrence": "read-1", "requestCycle": 0
         })
     );
     assert_eq!(
@@ -243,4 +247,42 @@ fn shutdown_is_bounded_for_unresponsive_engine() {
     let start = Instant::now();
     client.close().unwrap();
     assert!(start.elapsed() < Duration::from_secs(3));
+}
+
+#[test]
+fn installed_core_delays_annotations_and_recovers_exact_source() {
+    let Some(core_path) = std::env::var_os("CONTEXT_FOLDING_REAL_CORE_PATH") else {
+        eprintln!("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH");
+        return;
+    };
+    let directory = marker().with_extension("dir");
+    std::fs::create_dir(&directory).unwrap();
+    let mut cfg = Config::new(directory.join("archive.sqlite"));
+    cfg.env.insert(OsString::from("PYTHONPATH"), core_path);
+    let client = Client::with_config(cfg).unwrap();
+    let text = format!("# @context-fold begin evidence\n{}# @context-fold end evidence\n",
+        "# 原文🙂 evidence\n".repeat(80));
+    let request = |cycle, occurrence| json!({
+        "action": "read-source", "scope": "real", "text": text,
+        "language": "python", "occurrence": occurrence, "requestCycle": cycle
+    });
+    let first = client.call(request(0, "read-1")).unwrap();
+    assert_eq!(first["text"], text);
+    assert_eq!(client.call(request(0, "read-1")).unwrap()["text"], text);
+    let folded = client.call(request(1, "read-1")).unwrap();
+    let view = folded["text"].as_str().unwrap();
+    assert!(view.contains("[[cf:v2:"));
+    assert_eq!(client.call(request(2, "read-2")).unwrap()["text"], text);
+    let resolved = client.resolve("real", json!({"content": view})).unwrap();
+    assert_eq!(resolved["value"]["content"], text);
+    let id = first["id"].as_str().unwrap();
+    assert_eq!(client.read("real", id, json!({})).unwrap()["text"], text);
+    assert_eq!(client.call(request(3, "read-1")).unwrap()["text"], text);
+    assert!(matches!(client.call(json!({
+        "action": "mark", "scope": "real", "id": id,
+        "disposition": "foldable", "summary": "obsolete"
+    })), Err(Error::Remote { .. })));
+    assert!(client.list("real", json!({})).is_ok());
+    client.close().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
 }

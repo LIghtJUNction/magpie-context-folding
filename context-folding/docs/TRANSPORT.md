@@ -1,115 +1,143 @@
-# CLI and stdio transports
+# CLI, RPC and MCP transport contract
 
-The Python package provides a local CLI, plain JSON Lines RPC, and an MCP stdio server. Python 3.11+ uses only the standard library; Python 3.10 uses `tomli` for TOML settings. No service opens a network listener or calls a model. The same `Client` core validates business requests and persists the scoped archive for every transport.
+All three interfaces call the same local Python `Client` and SQLite archive. They do not run a model, select historical text, or create a network listener. **Only paired source comments select new folding regions.** `mark` and `group` have been removed.
 
-## Run with uv
+Python 3.10+ is required; Python 3.10 also needs `tomli`. Runtime setup and source-language dependencies are described in the [subproject README](../README.md).
+
+## Launch and state
 
 From the repository root:
 
 ```sh
 uv sync --project context-folding
-uv run --project context-folding python -m context_folding status --state /absolute/private/archive.sqlite --scope example
+uv run --project context-folding python -m context_folding status \
+  --state /absolute/private/archive.sqlite --scope example
 uv run --project context-folding python -m context_folding rpc --state /absolute/private/archive.sqlite
 uv run --project context-folding python -m context_folding mcp --state /absolute/private/archive.sqlite
-uv run --project context-folding python -m context_folding call --state /absolute/private/archive.sqlite --json '{"action":"status","scope":"example"}'
 ```
 
-The installed `context-folding` console command accepts the same arguments. `--state` is required and may appear before or after the command. State is a SQLite file path, not a directory or JSON request field. Use a private persistent parent directory and a stable scope for related operations. Scopes are nonempty strings with at most 200 characters; they are namespaces, not authentication. References resolve only against the selected state file and scope. Packaging uses `uv_build`; see the [subproject README](../README.md) for Python SDK and persistent Python bridge setup.
+The installed `context-folding` command is equivalent to `python -m context_folding`. `--state` selects a SQLite file and may appear before or after the command. It is not a request field. Keep that file and its parent directory private and persistent.
 
-`call` accepts one complete request using `--json JSON`; omitting `--json`, or supplying `--json -`, reads a JSON document from stdin. This is a single call, so the document may span multiple lines. Each action also has an ergonomic subcommand requiring `--scope` and accepting `--json`. Explicit flags override corresponding JSON fields, and the chosen subcommand determines `action`.
+Each core request requires a nonempty `scope` of at most 200 characters. Scopes separate local archive namespaces; they are not authentication. A reference is resolved only against the selected state file and scope. Configure process and file access at the host boundary.
+
+## Single-call CLI
+
+`call --json JSON` accepts a complete request. Omitting `--json`, or passing `--json -`, reads one JSON document from stdin; this single-call document may span multiple lines.
 
 ```sh
-uv run --project context-folding python -m context_folding put --state /absolute/private/archive.sqlite --scope example < /project/output.txt
-uv run --project context-folding python -m context_folding mark --state /absolute/private/archive.sqlite --scope example --id ENTRY_ID --disposition foldable --summary 'Historical output; key failure was a missing configuration file.'
-uv run --project context-folding python -m context_folding read --state /absolute/private/archive.sqlite --scope example --id ENTRY_ID --offset 0 --limit 4000
-uv run --project context-folding python -m context_folding list --state /absolute/private/archive.sqlite --scope example --query configuration --depth 2 --sort size --order desc
-uv run --project context-folding python -m context_folding resolve --state /absolute/private/archive.sqlite --scope example --value '{"content":"[[cf:v1:ENTRY_ID]]"}'
+uv run --project context-folding python -m context_folding call \
+  --state /absolute/private/archive.sqlite --json '{"action":"status","scope":"example"}'
 ```
 
-Replace `ENTRY_ID` with an actual returned ID. `put` reads raw UTF-8 text from stdin if no text is supplied. `--text -`, `--summary -`, and `--body -` read raw UTF-8 text. `--source`, `--value`, `--config`, `--marks`, and `--files` take JSON values; `-` reads JSON from stdin. Only one input may consume stdin per invocation. Redirect large text rather than putting it in process arguments.
+Supported actions also have subcommands with `--scope`. Explicit flags override corresponding `--json` fields, and the subcommand determines the action:
 
-Other flags include `--ids` and `--protected` (zero or more IDs), `--role`, `--disposition`, `--path`, `--mode`, `--name`, `--description`, `--pinned`/`--no-pinned`, and pagination fields. Use `--json` for additional core options. Parser usage and help go to the normal argparse streams; successful archive operations do not print banners or diagnostics.
+```sh
+uv run --project context-folding python -m context_folding read-source \
+  --state /absolute/private/archive.sqlite --scope example \
+  --path /project/module.py --occurrence read-1 --request-cycle 0
 
-A single call emits exactly one JSON envelope and exits 0 on success or 1 on application/input failure. Argument usage errors exit 2, and keyboard interruption exits 130. Both services remain running after individual malformed requests or application errors and exit 0 at EOF. Broken output pipes terminate quietly.
+uv run --project context-folding python -m context_folding read \
+  --state /absolute/private/archive.sqlite --scope example \
+  --id ACTUAL_RETURNED_ID --offset 0 --limit 4000
+```
 
-## Actions and core fields
+`--request-cycle` maps to `requestCycle`; `--expand-mode` maps to `expandMode`; `--comment-styles` maps to `commentStyles`. `--text -` and `--body -` read raw UTF-8 stdin. JSON options such as `--value`, `--source`, `--config` and `--files` also accept `-`. Only one input can consume stdin per invocation. `put` reads raw stdin when no text is supplied. Use `--json` for core options without dedicated flags, for example `{"peek":true}`.
 
-Every request is an object containing `action` and `scope`. Core validation is authoritative; the transport does not duplicate action-specific validation.
+The CLI emits one JSON envelope, with no successful-operation banner:
 
-| Action | Principal fields and behavior |
+```json
+{"result":{"entries":0,"groups":0,"roots":0,"folded":0,"trashed":0,"offsetUnit":"unicode-code-points"}}
+```
+
+Application or input failures return `error` and exit 1; success exits 0. Argument usage errors exit 2, interruption exits 130, and broken output pipes terminate quietly.
+
+## Explicit source projection
+
+A source request selects exactly one of `text`, absolute UTF-8 regular-file `path`, or archived `id`. To change retained history later, use the archived ID or the exact previously read text: rereading a changed disk file is a new observation.
+
+Only whole-line `@context-fold begin LABEL` / `@context-fold end LABEL` comments create regions. The same label and comment style must close the region. The core preserves unmarked text and malformed, mismatched, unclosed or nested regions, including their children. An earlier independently closed region remains eligible when a later region is damaged or still open; an orphan end marker remains literal. Source-editing commands use strict validation and reject any damaged existing marker before writing.
+
+Python uses actual comment tokens; JS/TS requires optional Tree-sitter grammars; the generic literal fallback reports its lack of language parsing. The separate Magpie gateway uses a conservative Python/JS lexical filter and preserves a source read when complex constructs make comment boundaries ambiguous. Installing this Python transport does not extend the gateway's parser or intercept another host's tools.
+
+### A request cycle is supplied by the host
+
+`read-source` accepts:
+
+| Field | Contract |
 | --- | --- |
-| `put` | `text`, optional `role` (`user`, `assistant`, `tool`; default `tool`) and `source: {path, range}`. Returns `id`, `reference`, and version metadata where applicable. |
-| `list` | Optional `query`, subtree `id`, `depth` (0–8), `sort` (`chronological`, `size`, `id`, `version`), `order` (`asc`, `desc`), `offset`, and `limit` (1–100). Returns entries, total, and `nextOffset`. |
-| `mark` | `id`, `disposition` (`foldable`, `keep`, `unmarked`), and `summary` when foldable; alternatively a `marks` array of these objects. |
-| `read` | `id`, optional `mode` (`folded` or `original`), region `expand`, `offset` and `limit`. Annotated source defaults to folded text; other entries return originals. Defaults to 4000 code points; maximum limit 24000. |
-| `annotate` | Exactly one of source `text`, absolute file `path`, or archived `id`; optional `language`, region `keep`, and region `marks`. Archives source and annotations without editing input files. |
-| `read-source` | Same source selectors as `annotate`, plus `mode`, `expand`, `offset`, `limit`; returns the selected source view. Both source actions accept atomic `files` batches. |
-| `render` | `ids`, optional `protected`. Returns `entries` containing `id`, `text`, `folded`, plus `beforeChars` and `afterChars`. An unfolded group's `text` is a JSON-encoded array of original leaf entries with `id`, `role` and `text`. |
-| `group` | 2–100 child `ids` and an explicitly authored `summary`. Creates a reversible manifest of eligible historical nodes. |
-| `restore` | `id`. Reverses folding; use `gc` restore for trashed material. |
-| `resolve` | `value`, an arbitrary JSON value. Returns the substituted `value` and substitution count `resolved`. |
-| `paste` | `id`, absolute new-file `path`, optional `offset` and `limit`. Writes original text without overwriting an existing file. |
-| `status` | Returns scoped counts and `offsetUnit: "unicode-code-points"`. |
-| `roots` | `ids` replaces the active lifecycle root set. Use an empty array to clear it. |
-| `pin` | `id`, boolean `pinned`; pinning protects lifecycle reachability. |
-| `gc` | `mode`: `configure`, `status`, `collect`, `trash`, `restore`, or `purge`. `configure` accepts `config`; `trash`/`restore` require `ids`; `purge` optionally selects `ids`. |
-| `skills` | `mode: "candidates"` lists reuse evidence. `mode: "export"` requires `id`, `name`, `description`, explicitly authored `body`, and absolute new-directory `path`. |
+| `occurrence` | Nonempty string, at most 200 characters, identifying this appearance in retained history. A fresh read gets a new value. |
+| `requestCycle` | Integer from 0 to 9,007,199,254,740,991. The host advances it for a new model-request cycle; a retry reuses the value. |
+| `language` | Source language; inferred from supported path suffixes when available. |
+| `keep` / `expand` | Exact region names, region IDs or `"*"`; selected content remains visible. |
+| `mode` | `folded` or `original`. A folded view still obeys delay and keep protection. |
+| `offset` / `limit` | Pagination of the returned view, in Unicode code points. |
 
-Read and paste offsets count Unicode code points, not UTF-8 bytes or JavaScript UTF-16 units. This applies to every generic bridge, including TypeScript and C#. The separate root Magpie plugin uses UTF-16 offsets; do not reuse its offsets here. Follow returned `nextOffset` instead of calculating a byte offset. `paste` defaults to the complete remaining original. Group read/paste returns a child manifest rather than concatenated original text.
+Supply `occurrence` and `requestCycle` together. The first observation records its cycle. With the default `delay_requests = 1`, only a later cycle for the same occurrence can fold it. Repeating the same cycle does not consume delay; decreasing the cycle is an error. Changed source content resets the observation.
 
-Agents can fold completed investigations, repeated output and older observations proactively, according to the next task and context pressure. There is no fixed operation order or every-turn folding requirement. Preserve recovery references, current user requirements, latest file observations, essential reasoning and explicit `keep`/`unmarked` decisions. A successful archive or mark does not itself shorten host context: the host must use the rendered representation, and `folded: true` requires an eligible, strictly shorter result. Replacing default context compaction with reversible folding is the design goal. The current MCP server and root plugin request hook do not take over client compaction or control its threshold; local character reduction does not prove actual compaction was replaced or delayed.
-
-`roots` replaces the entire lifecycle root set, while every `put`, including a duplicate put, initially roots its ID. Hosts must synchronize this set with retained context; `ids: []` clears it. Tree roots are separate from lifecycle roots. Reachability follows group children, `version.previousId`, and annotation region payloads. Configured roots, pinned records, `keep` marks and folded representations protect their dependency closure. `pin` protects retention independently of folding; `keep` protects both.
-
-Lifecycle configuration fields are `strength` (`off`, `conservative`, `balanced`, `aggressive`), `idleSeconds`, `maxUses`, `retentionSeconds`, and boolean `autoPurge`. Automatic collection requires an explicit persisted `gc` configure policy or TOML `[gc] enabled = true`; defaults alone do not activate it. TOML supplies a temporary policy only when no saved policy exists, so a persisted `strength: "off"` also takes priority. Non-`off` configuration runs collection during subsequent ordinary core operations, with no background timer. Explicit `gc`, `skills` and folding `restore` skip the extra automatic pass. Collection first moves eligible unreachable cold records to recoverable trash. `autoPurge` defaults to false; when enabled, automatic purge waits for retention. Explicit purge permanently removes eligible trash without waiting for retention. `gc` restore recovers trash and dependencies; ordinary `restore` reverses folding and disables enclosing groups.
-
-## Source views and configuration
-
-`annotate` and `read-source` accept exactly one of `text`, an absolute UTF-8 file `path`, or an archived entry `id`. They never edit the input file. Python (`python` or `py`, inferred for `.py`/`.pyi` paths) uses the AST to identify functions, classes and compound blocks; all discovered regions default to foldable. Other languages recognize only explicit whole-line `@context-fold begin NAME` / `@context-fold end NAME` comment regions. This fallback is not a structural parser and may mistake marker-looking multiline string content for comments; inspect returned `parser` and `limitations`.
-
-Source `keep` and `expand` are arrays of exact region names, region IDs, or `"*"`. `keep` and region `marks: [{name, disposition}]` persist on that exact archived source. `keep`/`unmarked` preserve descendants. Expanding a child exposes its ancestors, while unrelated siblings can remain folded. Expansion is a view option. Only strictly shorter reference replacements fold. `read` defaults to folded views after annotation; `mode: "original"`, `expand: ["*"]`, `paste`, and original recovery references retain exact source recovery. For compact reads, `offset`, `nextOffset`, `totalChars` and `sha256` describe the selected full view; `originalChars` and `originalSha256` describe the original. Paginate with unchanged view options.
-
-Batch example, available through CLI `--files`, RPC and MCP:
+For example, send the following JSON object, replacing its illustrative source with the exact source being retained:
 
 ```json
-{"action":"read-source","scope":"example","files":[{"path":"/project/main.py","expand":["main"]},{"text":"def helper():\n    return 42\n","language":"python"}]}
+{"action":"read-source","scope":"example","text":"# @context-fold begin investigation\n# Completed detail, repeated enough to make a reference shorter.\n# @context-fold end investigation\n","language":"python","occurrence":"read-1","requestCycle":0}
 ```
 
-A `files` batch contains 1–100 source objects. Outer options supply defaults and per-file options override them; action and scope remain those of the outer request. Do not combine `files` with outer `text`, `path` or `id`, or nest batches. All archive writes roll back if any item fails.
+Its first response remains complete. Reproject the same immutable source and occurrence with `requestCycle: 1` when constructing the next model request. The core can then return:
 
-CLI flags include `--language`, `--keep` and `--expand` (zero or more selectors), and JSON `--files`. `--project-dir` may appear before or after any command, including `call`, `rpc` and `mcp`. Configuration loads once when the client/process starts: defaults < `$XDG_CONFIG_HOME/context-folding/config.toml` (or `~/.config/context-folding/config.toml`) < nearest ancestor `.context-folding.toml` < explicit Python `Client(..., config=...)`. Project discovery starts from `project_dir` or the working directory, checks the Git root and stops there. Invalid configuration fails before storage creation.
+```text
+# @context-fold begin investigation
+[[cf:v2:<actual-content-hash>]]
+# @context-fold end investigation
+```
 
-TOML uses optional `version = 1` and validated `[annotations]`, `[gc]`, `[folding]`, `[magpie]` sections. Annotation defaults are `enabled = true`, `default_fold = true`, `keep = []`. Configured keep patterns use case-sensitive glob matching over region names; unmatched patterns are ignored, while explicit request selectors must match. Explicit region marks override configured patterns. Disabling annotations skips automatic discovery in `read-source`; explicit `annotate` remains available. Disabling either annotation setting changes annotated reads to original by default; explicit mode still wins. GC is disabled by default; its TOML fields use snake_case (`idle_seconds`, `max_uses`, `retention_seconds`, `auto_purge`). TOML deep merging preserves inherited numeric limits when changing strength; explicit `gc configure` retains its preset-selection behavior.
+The placeholder above is not a valid callable reference; use the returned text. A region is replaced only when its reference is shorter. No code or source file is edited.
 
-## Plain JSON Lines RPC
+Without a host cycle, the default returns original text with `delayReason: "host-request-cycle-required"`. While waiting for a later cycle, the reason is `waiting-for-request-cycle`. Explicit `delay_requests = 0` permits immediate projection. A one-shot tool-result adapter cannot implement later history replacement on its own.
 
-Run `python -m context_folding rpc --state PATH`. Send one compact UTF-8 JSON request per line. The server flushes one response line per input frame, in order. The service has no request IDs, batching, notifications, or initialization handshake; callers associate responses with the input order.
+`files` batches 1–100 source objects atomically. Outer fields supply defaults and per-file fields override them. A batch-level occurrence is expanded by file position; keep that order stable when reprojecting the batch. Explicit per-file occurrences take priority. Use a new batch occurrence for a new read, or provide a distinct stable occurrence for each retained file appearance, including identical contents read twice. A batch cannot also supply outer `text`, `path` or `id`; nested batches are rejected. Failure rolls back the complete batch.
 
-Request:
+## Recovery and references
+
+A newly folded body uses `[[cf:v2:<hash>]]`. It identifies exact UTF-8 body bytes, without marker lines or the final physical newline left next to the reference. The stored SHA-256 is complete; the displayed prefix begins at 12 hexadecimal digits and lengthens when needed. Ambiguous prefixes fail with `ambiguous_hash`, never a guessed result.
+
+Legacy `[[cf:v1:<entry-id>]]` references still resolve against their original entries. New source payload hashes and old entry IDs are different identifiers. Do not construct a v2 reference from an arbitrary old ID.
+
+`read` returns original text by default and protects recovered annotated content from subsequent folding. `peek: true` inspects without adding that protection. For large content, follow `nextOffset` until null and join the pages. `sha256` and `totalChars` identify the selected complete view, while `text` is the current page. Source projections additionally return original metadata, folded-region references, parser information and limitations.
+
+Offsets and limits always count **Python Unicode code points**, including through TypeScript and C# bridges. They are not UTF-8 byte offsets or JavaScript/.NET UTF-16 lengths. The separate Magpie plugin uses UTF-16 units; offsets cannot be transferred between implementations.
+
+`resolve` expands references in string values inside a complete JSON value, without changing keys. It returns `value` and the substitution count `resolved`. Expansion is one pass: reference-looking strings inside archived originals remain data. Missing, malformed and ambiguous references produce an error. A legacy group manifest cannot substitute for source text.
+
+`paste` writes exact original text, or a legacy group manifest, to an absolute new-file path using exclusive creation. Existing files and symlinks are not overwritten. It defaults to the complete remaining original; explicit offsets select a range.
+
+## Remaining actions
+
+| Action | Purpose |
+| --- | --- |
+| `annotate` | Save original source and discover explicit comment regions; no source-file edits. |
+| `read-source` | Project an annotated source observation with host cycle information. |
+| `read`, `resolve`, `paste` | Recover or export exact stored content. |
+| `put` | Explicitly archive text, optional role and source provenance. It does not summarize or authorize folding. |
+| `render` | Project selected archived entries using explicit annotations; `protected` IDs remain original. |
+| `list` | Search/browse archived originals and legacy manifests, with pagination. |
+| `status` | Return scoped counts and offset units. |
+| `restore` | Recover visibility of an existing entry or legacy group. |
+| `roots`, `pin`, `gc` | Host-controlled retention and cleanup. Defaults do not enable automatic collection. |
+| `skills` | Inspect reuse evidence or export explicitly authored instructions with provenance. It does not install them. |
+
+`mark`, `group`, and source `marks` are rejected. Old summary layers and groups remain recovery data only. Lifecycle strength settings are retention policies, not alternative compression modes. Do not remove data still needed by references in retained history.
+
+## JSON Lines RPC
+
+`rpc` reads one UTF-8 JSON request and returns one envelope per line, in order. It has no request IDs; a client must keep request/response pairing and serialize concurrent writes. A successful response contains `result`; a failed response contains `error`, never both.
 
 ```json
-{"action":"put","scope":"example","text":"original text","role":"tool"}
+{"error":{"code":"invalid_request","message":"Source projection requires occurrence and requestCycle together"}}
 ```
 
-Success response:
-
-```json
-{"result":{"id":"ENTRY_ID","reference":"[[cf:v1:ENTRY_ID]]","version":{}}}
-```
-
-The ID and version object above are illustrative; use the actual result. Every response has either `result` or `error`, never both:
-
-```json
-{"error":{"code":"invalid_json","message":"Input must be valid UTF-8 JSON"}}
-```
-
-Transport error codes include `invalid_json`, `invalid_request`, `input_too_large`, and `internal_error`; core errors retain their string `code` and safe `message`. Invalid UTF-8 and JSON receive generic messages without echoing input. Unexpected internal failures do not expose exception details or tracebacks. No request or archive payloads are logged.
+Transport codes include `invalid_json`, `invalid_request`, `input_too_large` and `internal_error`. Core failures preserve their safe `code` and `message`. Malformed UTF-8/JSON and unexpected internal errors do not echo input or tracebacks. A single failed call does not close the service; EOF ends it normally.
 
 ## MCP stdio
 
-Run `python -m context_folding mcp --state PATH`. MCP uses JSON-RPC 2.0 messages in UTF-8 newline-delimited JSON. There are no `Content-Length` headers. Stdout contains protocol messages only; host launchers must not merge their diagnostic stderr into it.
-
-Initialize before tool discovery or tool calls:
+MCP uses newline-delimited JSON-RPC 2.0, without `Content-Length` headers. Stdout contains protocol messages only. Initialize before tool discovery or calls:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"example-host","version":"1"}}}
@@ -118,42 +146,33 @@ Initialize before tool discovery or tool calls:
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"context_folding","arguments":{"action":"status","scope":"example"}}}
 ```
 
-Supported protocol versions are `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`. A supported requested version is echoed. For an unsupported requested version, the server proposes `2025-11-25`; the client decides whether it can continue with that version. Server capabilities advertise tools only. `ping` returns an empty object. Valid notifications, including unknown extensions, are silent and do not execute archive operations.
+Supported protocol versions are `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`. A supported requested version is echoed; otherwise the server proposes `2025-11-25`. Capabilities advertise tools only. `ping` returns an empty object. Valid notifications are silent and cannot perform archive operations.
 
-`tools/list` exposes exactly one tool named `context_folding`. Its `inputSchema` is an object requiring `action` and `scope`, enumerates all supported actions, and advertises known request fields. Additional properties are permitted for core-owned options and protocol evolution. Business validation remains in core.
+`tools/list` returns one `context_folding` tool. Its schema requires action/scope and advertises the source occurrence/cycle fields. Core validation remains authoritative. A successful `tools/call` contains the raw core result serialized into `content[0].text`, with `isError: false`. An application failure uses `isError: true` and an ordinary `{"error":...}` envelope in that text.
 
-A successful `tools/call` returns JSON text for the raw core result:
+Malformed JSON/UTF-8 produces `-32700`; invalid envelopes or oversized frames produce `-32600`; invalid parameters or unknown tool names produce `-32602`; unknown methods produce `-32601`; missing initialization produces `-32000`; unexpected server failures produce `-32603`. Errors use `id: null` where no usable request ID exists. Individual errors leave the stream open.
 
-```json
-{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"entries\":0,\"groups\":0,\"roots\":0,\"folded\":0,\"trashed\":0,\"offsetUnit\":\"unicode-code-points\"}"}],"isError":false}}
-```
+## Framing and resource limits
 
-Application failures return a successful JSON-RPC envelope containing a tool error. Parse the text as the ordinary error envelope:
+Requests are limited to 8 MiB per frame or single-call input. Oversized lines are drained through their newline in bounded chunks, yielding one error before accepting the next frame. LF, CRLF and a final frame without newline are accepted. Embedded newlines inside strings must be JSON escaped.
 
-```json
-{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"error\":{\"code\":\"invalid_request\",\"message\":\"Unknown action\"}}"}],"isError":true}}
-```
+Empty lines, batch arrays, malformed UTF-8 and `NaN`/`Infinity` literals are rejected. Core text, archive and operation limits may be smaller than the transport frame limit. Output is compact JSON plus LF, flushed immediately; non-ASCII escaping preserves decoded Unicode values.
 
-Malformed JSON/UTF-8 produces JSON-RPC `-32700`; invalid envelopes or oversized frames produce `-32600`. Invalid method parameters and unknown tool names produce `-32602`; unknown methods produce `-32601`; calls requiring initialization before initialization produce `-32000`. Unexpected server failures produce `-32603`. Envelope errors have `id: null` when no usable request ID is available. One error does not close the stream.
+## SDK and host responsibilities
 
-## Framing and limits
+Rust, TypeScript and C# clients each keep one Python subprocess alive and transport this protocol. Generic `call` / `CallAsync` forwards `read-source`, including occurrence/cycle fields; wrappers for archive reads do not infer request progress. A bridge knows its RPC calls, not the host's model requests.
 
-Both services read lines with a bounded read, limiting a request payload to 8 MiB (8 × 1024 × 1024 bytes). An oversized frame is discarded through its newline in bounded chunks and produces one error; the next frame remains readable. LF and CRLF are accepted, and a final frame without a newline is accepted at EOF. Empty lines are invalid JSON. JSON strings must escape embedded newlines. Batch arrays, nonstandard `NaN`/`Infinity` literals, and malformed UTF-8 are rejected. Core text and operation limits can be lower than the transport limit.
+A host must retain the original source observation, choose its occurrence identity, update request cycles, and apply returned views to the correct editable history slots. Installing MCP or a skill provides none of those hooks. The server does not replace the host's default compaction.
 
-Outputs are compact JSON followed by LF and flushed immediately. Non-ASCII characters may be escaped, preserving their decoded Unicode value. Single-call stdin and raw text inputs use the same 8 MiB bound.
+When a tool argument intentionally contains a fold reference, an integrating host may resolve the **final argument value** and submit the resolved value through normal approval and current-file checks. Do this only when reference expansion is needed. Do not add an extra resolve call before unrelated tool calls, and do not forward unresolved references after an error.
 
-## Host integration and skill installation
+The SDKs serialize calls to preserve ordered RPC pairing. Application errors leave the process usable; malformed responses or process failure close it. TypeScript/C# queued cancellation preserves the stream, while cancellation after dispatch closes it because the protocol has no remote cancellation IDs. See each SDK README for its runtime and disposal details.
 
-The host must call `resolve` against the final complete argument value immediately before dispatching each other tool, then pass the returned `value` through its normal execution/approval path. Abort that dispatch on resolution failure. Do not silently forward unresolved references. Expansion is one pass: archived text remains data, and references found inside it are not recursively expanded. Group manifests cannot substitute for original entry text in tool arguments.
-
-An MCP server cannot intercept calls to other tools. Launching this server or copying the skill does not provide an automatic dispatch hook. The host must implement the hook, or the agent must explicitly resolve the final arguments before using another tool.
-
-To install the included skill, the user copies `skills/context-folding/` into a skill directory their host already discovers, retaining its `SKILL.md`. Copying the folder does not install the Python runtime, modify settings, register MCP, install hooks, or grant permissions. Reuse candidates are evidence for review, not authorization to install instructions. Export requires a caller-authored body and creates only `SKILL.md` in a new directory. Its frontmatter contains `source_manifest` with source ID/kind/hash, timestamps, reuse counts and available source/version/child metadata; there is no separate provenance sidecar. Review and install explicitly rather than converting archived tool output into executable instructions.
-
-## Local validation
+## Validation
 
 ```sh
-uv run --project context-folding python -m unittest discover -s context-folding/tests -p test_transport.py -v
+uv run --project context-folding python -m unittest discover \
+  -s context-folding/tests -p test_transport.py -v
 ```
 
-The transport suite launches real module subprocesses against the actual SQLite core and checks persistence, CLI stdin, lifecycle flags, Unicode offsets, RPC recovery, MCP negotiation/tool results/notifications, and malformed or oversized frames. It uses no inference services.
+The transport tests use real local subprocesses and SQLite. SDK tests separately cover their process bridges and optional actual-core calls. These checks do not run a paid model or establish real-host compaction or billing results.
