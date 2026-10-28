@@ -9,10 +9,10 @@
 | 组成 | 实际工作 |
 | --- | --- |
 | Harbor | 建立任务容器，执行一个 trial，收集产物，在另一容器运行评分器。 |
-| `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；只提供容器里的 `exec_command` 和完整 `read_file`；当前 trial 原文通过终端中的 CLI 按需查看。 |
+| `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；`terminal` 和完整 `read_file` 在容器执行，`context_folding` 通过真实 CLI 查询当前 trial 的归档。旧终端调用别名保持兼容。 |
 | `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse`，恢复由真实 CLI 子进程完成。没有另写压缩算法。 |
-| baseline | 完整历史，使用同一基础任务提示与终端工具；没有插件专属工具或手工教学。 |
-| folding | 同一基础提示、工具与模型参数；实际钩子自动注入短规则，默认延迟一个请求，指导和 CLI 回查开销全部计入请求，不配置或注入上下文预算。 |
+| baseline | 完整历史，使用同一基础任务提示和工具声明；归档查询返回不可用，不创建折叠归档。 |
+| folding | 同一基础提示、工具与模型参数；实际钩子自动注入短规则，并把真实可调用的 `terminal` 声明配置为 shell 入口，默认延迟一个请求。指导和 CLI 回查开销全部计入请求，不注入上下文预算。 |
 
 Agent 始终保留原始 transcript。每轮只将发送给模型的副本交给 bridge。普通 Assistant 标记和明确识别的源码完整读取可折叠；普通 shell 输出不伪装成源码读取。模型必须自己决定写哪些注释，没有额外总结模型，也没有自动挑选历史。
 
@@ -29,6 +29,8 @@ npm run bench:harbor -- doctor
 npm run bench:harbor -- validate
 npm run test:harbor
 ```
+
+若要让模型直接修改和测试本仓库，而非求解下方合成任务，使用独立的[项目自身沙箱迭代入口](../../docs/self-iteration.md)。
 
 `doctor` 只报告能力和是否配置凭据，不输出凭据。Bun 不在 PATH 时可将 `HARBOR_BUN` 指向其绝对路径。没有 Docker 时仍能做配置、真实钩子和评分器组件检查；这些检查不算完成 Harbor 容器基准。
 
@@ -47,7 +49,7 @@ npm run bench:harbor -- smoke
 | `ScriptedSmokeAgent` + baseline | 确定性脚本通过，历史不折叠。 |
 | `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实延迟折叠、精确 CLI 查阅，查看后历史继续保持折叠。 |
 
-归档查询通过相同的 CLI 子进程执行 `read`、`list`、`grep`、`meta`、`status`，只允许当前 trial 的 scope 与归档目录。嵌套查询返回当前节点的视图，子节点保持短引用；按需继续读取子节点，不展开原历史。
+归档查询由 `context_folding` 或终端中识别出的固定 CLI 命令，通过相同的真实 CLI 子进程执行 `read`、`list`、`grep`、`meta`、`status`，只允许当前 trial 的 scope 与归档目录。嵌套查询返回当前节点的视图，子节点保持短引用；按需继续读取子节点，不展开原历史。
 
 脚本 Agent 直接使用仓库中公开的 oracle，并不测模型解题能力。它不会连接模型服务，token/费用保持未知，不伪造为零。命令会检查所有预期 trial 的实际结果，不能只因 Harbor 进程退出码为 0 就判通过。
 

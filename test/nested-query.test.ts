@@ -253,7 +253,10 @@ test('CLI complete views, original exports and restoration preserve nested Unico
     const view = heading + '\n' + block('child', '[[cf:v2:' + digest(leaf).slice(0, 12) + ']]') + '\nparent ending';
     const invoke = (...args: string[]) => spawnSync(process.execPath, [new URL('../src/cli.ts', import.meta.url).pathname,
       'read', '--state-dir', store.directory, '--scope', scope, '--id', digest(parent), ...args], { encoding: 'utf8' });
-    const bounded = invoke();
+    const complete = invoke();
+    assert.equal(complete.status, 0, complete.stderr);
+    assert.equal(complete.stdout, view, 'ordinary CLI reads return the complete view');
+    const bounded = invoke('--limit', '1200');
     assert.equal(bounded.status, 0, bounded.stderr);
     assert.equal(bounded.stdout, view.slice(0, 1200));
     for (const [flags, expected] of [[['--full'], view], [['--all'], parent], [['--all', '--layer', 'view'], view],

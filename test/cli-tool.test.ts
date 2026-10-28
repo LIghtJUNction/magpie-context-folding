@@ -42,14 +42,18 @@ async function command(directory: string, args: string[], input?: string, enviro
   return { stdout, stderr, code };
 }
 
-test('CLI defaults to a bounded query and exports paginated exact text explicitly with no added newline and supports JSON/range/pipe export/config', async () => {
+test('CLI defaults to a complete view and supports explicit pages, exact exports, JSON, pipes and config', async () => {
   await fixture(async (store, scope, directory, text) => {
     await writeFile(join(directory, '.context-folding.toml'), '[folding]\nenabled = false\n');
     const config = await command(directory, ['config']);
     assert.equal(config.code, 0);
     assert.equal(JSON.parse(config.stdout).config.folding.enabled, false);
     assert.ok(!config.stdout.includes('hidden'));
-    const bounded = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    const complete = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    assert.equal(complete.code, 0, complete.stderr);
+    assert.equal(complete.stdout, text, 'default reading traverses every 24000-unit page without losing Unicode');
+    assert.equal(complete.stderr, '');
+    const bounded = await command(directory, ['read', '--scope', scope, '--id', 'a', '--limit', '1200']);
     assert.equal(bounded.stdout, text.slice(0, 1200));
     const read = await command(directory, ['read', '--scope', scope, '--id', 'a', '--full']);
     assert.equal(read.code, 0, read.stderr);
@@ -111,7 +115,7 @@ test('raw CLI pages preserve Unicode pairs and pagination always advances', asyn
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.entries[0]!.text = text;
     });
-    const first = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    const first = await command(directory, ['read', '--scope', scope, '--id', 'a', '--limit', '1200']);
     assert.equal(first.code, 0, first.stderr);
     assert.equal(first.stdout, 'a'.repeat(1199));
     assert.match(first.stderr, /--offset 1199/);

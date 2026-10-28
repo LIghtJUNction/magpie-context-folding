@@ -65,6 +65,11 @@ export class FoldingBridge {
         protocol: 'chat', model: input.body.model, session: this.session,
         agent: 'harbor', origin: 'harbor-benchmark', cwd: this.cwd, state,
         options: { enabled: this.mode === 'folding', delayRequests: 1,
+          // The benchmark's terminal is a real executable shell wrapper.
+          // Other clients retain the production tool-name discovery rules.
+          ...(Array.isArray(input.body.tools) && input.body.tools.some(tool => record(tool)
+            && tool.type === 'function' && record(tool.function) && tool.function.name === 'terminal')
+            ? { shellToolName: 'terminal' } : {}),
           maxSessionBytes: 64 * 1024 * 1024 },
       });
       const projectionMs = performance.now() - start;

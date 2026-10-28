@@ -7,6 +7,8 @@ description: Add explicit, optionally nested source-folding comments while keepi
 
 Use whole-line comments in the source language:
 
+Author the markers proactively when a completed region may need later retrieval. The same directive syntax works in conversation text using whole-line HTML comments and in source using valid language comments. No marker means no folding.
+
 ```rust
 // Decode the validated frame.
 // @context-fold begin decode-frame

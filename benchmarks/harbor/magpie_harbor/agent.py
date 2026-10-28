@@ -33,9 +33,14 @@ from . import __version__
 
 BENCH = Path(__file__).resolve().parents[1]
 ROOT = BENCH.parents[1]
-SYSTEM = """Complete the user's task in the sandbox using exec_command and read_file.
-Use read_file for complete source files; use exec_command to edit and test files.
+SYSTEM = """Complete the user's task in the sandbox using terminal and read_file.
+Use read_file for complete source files; use terminal to edit and test files.
 When complete, give a short final answer without tool calls.
+Proactively mark completed temporary work that may need later retrieval. In
+conversation, use whole-line <!-- @context-fold begin LABEL --> and
+<!-- @context-fold end LABEL --> comments. In source, use the same directives
+inside valid whole-line comments for that language. Match labels and keep
+conclusions, constraints, failures and next steps outside. Never calculate hashes.
 Never read or modify /tests or verifier logs.
 """
 
@@ -45,10 +50,15 @@ def tool(name: str, description: str, properties: dict, required: list[str]) -> 
                            "required": required, "additionalProperties": False}}}
 
 TOOLS = [
-    tool("exec_command", "Execute a shell command inside the task sandbox.",
-         {"cmd": {"type": "string"}}, ["cmd"]),
-    tool("read_file", "Read one complete UTF-8 source file from the task sandbox. Large reads fail; use exec_command for partial inspection.",
+    tool("terminal", "Execute a shell command inside the task sandbox.",
+         {"command": {"type": "string"}}, ["command"]),
+    tool("read_file", "Read one complete UTF-8 source file from the task sandbox. Large reads fail; use terminal for partial inspection.",
          {"path": {"type": "string"}}, ["path"]),
+    tool("context_folding", "Query this trial's archive. read returns a bounded current view without restoring history; follow nextOffset. meta and grep inspect nested references.",
+         {"action": {"type": "string", "enum": ["read", "list", "status", "meta", "grep"]},
+          "id": {"type": "string"}, "query": {"type": "string"},
+          "recursive": {"type": "boolean"}, "offset": {"type": "integer", "minimum": 0},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 24000}}, ["action"]),
 ]
 
 
@@ -167,6 +177,32 @@ def cli_arguments(command: str, bridge: Bridge) -> list[str] | None:
     return None
 
 
+def archive_arguments(args: dict) -> list[str]:
+    if set(args) - {"action", "id", "query", "recursive", "offset", "limit"}:
+        raise ValueError("Unexpected archive arguments")
+    action = args.get("action")
+    if not isinstance(action, str) or action not in {"read", "list", "status", "meta", "grep"}:
+        raise ValueError("Unsupported archive action")
+    argv = [action, "--json"]
+    for name in ("id", "query", "offset", "limit", "recursive"):
+        if name not in args:
+            continue
+        value = args[name]
+        if name in {"id", "query"}:
+            if not isinstance(value, str) or not value or "\0" in value or value.startswith("-"):
+                raise ValueError("Invalid archive text argument")
+        elif name == "recursive":
+            if type(value) is not bool:
+                raise ValueError("Invalid recursive flag")
+            if value:
+                argv.append("--recursive")
+            continue
+        elif type(value) is not int or value < 0 or (name == "limit" and not 1 <= value <= 24000):
+            raise ValueError("Invalid archive range")
+        argv.extend(["--" + name, str(value)])
+    return argv
+
+
 class Usage:
     """Missing counters poison totals instead of inventing zero usage."""
     def __init__(self):
@@ -225,6 +261,18 @@ class MagpieAgent(BaseAgent):
         return response.json()
 
     async def _tool(self, name: str, args: dict, environment: BaseEnvironment, bridge: Bridge) -> str:
+        if name == "context_folding":
+            try:
+                argv = archive_arguments(args)
+            except ValueError as error:
+                return json.dumps({"error": str(error)})
+            try:
+                result = await bridge.call("cli", argv=argv)
+            except BridgeError as error:
+                if error.code not in {"archive_unavailable", "invalid_request", "unsupported_action", "scope_mismatch"}:
+                    raise
+                return json.dumps({"error": error.code})
+            return json.dumps(json.loads(result["stdout"]) if result["exit_code"] == 0 else result, ensure_ascii=False)
         if name == "read_file":
             path = args.get("path")
             if not isinstance(path, str) or not path or "\x00" in path:
@@ -234,14 +282,12 @@ class MagpieAgent(BaseAgent):
                       f"b=Path(sys.argv[1]).read_bytes(); assert len(b)<={self.options.max_tool_chars}, 'file too large'; "
                       "sys.stdout.write(b.decode('utf-8'))")
             command = "python3 -c " + shlex.quote(script) + " " + shlex.quote(path)
-        elif name == "exec_command":
-            command = args.get("cmd")
-            if not isinstance(command, str) or not command:
+        elif name in {"terminal", "exec_command"}:
+            command = args.get("command", args.get("cmd"))
+            if not isinstance(command, str) or not command or "\0" in command:
                 return json.dumps({"error": "Expected a nonempty command"})
             argv = cli_arguments(command, bridge) if bridge is not None else None
             if argv is not None:
-                # The archive belongs to this host-side trial. Only its fixed
-                # CLI crosses the boundary; arbitrary shell stays in Harbor.
                 try:
                     result = await bridge.call("cli", argv=argv)
                 except BridgeError as error:
@@ -335,8 +381,11 @@ class MagpieAgent(BaseAgent):
                         except (ValueError, TypeError):
                             result = json.dumps({"error": "Tool arguments must be a JSON object"})
                         else:
-                            if function["name"] == "exec_command" and isinstance(args.get("cmd"), str):
-                                argv = cli_arguments(args["cmd"], bridge)
+                            if function["name"] == "context_folding" and args.get("action") == "read":
+                                metrics["recovery_calls"] += 1
+                            elif function["name"] in {"terminal", "exec_command"}:
+                                command = args.get("command", args.get("cmd"))
+                                argv = cli_arguments(command, bridge) if isinstance(command, str) else None
                                 if argv and argv[0] == "read":
                                     metrics["recovery_calls"] += 1
                             result = await self._tool(function["name"], args, environment, bridge)
@@ -383,7 +432,7 @@ class ScriptedSmokeAgent(MagpieAgent):
 
     async def _complete(self, payload: dict) -> dict:
         step, self._step = self._step, self._step + 1
-        content, name, args = "", "exec_command", {"cmd": "printf 'smoke checkpoint\\n'"}
+        content, name, args = "", "terminal", {"command": "printf 'smoke checkpoint\\n'"}
         if step == 0:
             content = ("<!-- @context-fold begin smoke-notes -->\n" + "Synthetic recoverable note. " * 80
                        + "\n<!-- @context-fold end smoke-notes -->\nKeep: solve the task and check output.")
@@ -393,20 +442,15 @@ class ScriptedSmokeAgent(MagpieAgent):
             if self.options.mode == "folding":
                 if not match:
                     raise RuntimeError("Smoke expected a delayed production-hook reference")
-                guidance = " ".join(m.get("content") or "" for m in payload["messages"] if m["role"] == "system")
-                recall = re.search(r"Need detail: (.+?) --id HASH\.", guidance)
-                if not recall:
-                    raise RuntimeError("Smoke expected a CLI recovery command in system guidance")
-                args = {"cmd": f"{recall[1]} --id {match[1]} --limit 24000 --json"}
+                name, args = "context_folding", {"action": "read", "id": match[1], "limit": 24000}
             elif match:
                 raise RuntimeError("Baseline unexpectedly folded a note")
         elif step == 3:
             if self.options.mode == "folding":
-                output = json.loads(payload["messages"][-1]["content"])
-                recovered = json.loads(output["stdout"])
+                recovered = json.loads(payload["messages"][-1]["content"])
                 if recovered.get("text") != "Synthetic recoverable note. " * 80:
                     raise RuntimeError("Smoke recovery did not return exact original text")
-            args = {"cmd": self._solution}
+            args = {"command": self._solution}
         elif step >= 4:
             return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Scripted smoke complete."}}]}
         return {"choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": content,

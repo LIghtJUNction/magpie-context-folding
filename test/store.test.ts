@@ -472,6 +472,29 @@ test('invalid recursive chains and duplicate entry IDs cannot corrupt recovery s
   });
 });
 
+test('deep annotation chains remain writable and readable without exhausting the call stack', async () => {
+  await fixture(async store => {
+    const scope = await store.scopeFor('deep annotation chain');
+    const count = 50000;
+    await store.transaction(scope, true, sessionLimit, snapshot => {
+      snapshot.entries = Array.from({ length: count }, (_, index) => ({
+        ...entry(`node-${index}`, 'x'),
+        annotation: { sha256: digest('x'), label: 'node', ...(index + 1 < count
+          ? { children: [{ id: `node-${index + 1}`, label: 'child', start: 0, end: 1 }] } : {}) },
+      }));
+    });
+    const state = await read(store, scope);
+    assert.equal(state.entries.length, count);
+    assert.equal(state.entries[0]!.annotation!.children![0]!.id, 'node-1');
+    assert.equal(state.entries.at(-1)!.text, 'x');
+    await assert.rejects(store.transaction(scope, false, sessionLimit, snapshot => {
+      snapshot.entries.at(-1)!.annotation!.children = [{ id: 'node-0', label: 'cycle', start: 0, end: 1 }];
+    }), /Cyclic annotation graph/);
+    assert.equal((await read(store, scope)).entries.at(-1)!.annotation!.children, undefined,
+      'rejecting a deep back edge leaves the durable chain unchanged');
+  });
+});
+
 test('full auto-vacuum releases pages after unreferenced archive content is removed', async () => {
   await fixture(async (store, directory) => {
     const scope = await store.scopeFor('one');

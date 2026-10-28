@@ -42,9 +42,9 @@ def assistant(content="done", calls=None, usage=None):
     return reply
 
 
-def tool_call(name="exec_command", args=None, call_id="call-1"):
+def tool_call(name="terminal", args=None, call_id="call-1"):
     return {"id": call_id, "type": "function", "function": {
-        "name": name, "arguments": json.dumps(args or {"cmd": "true"})}}
+        "name": name, "arguments": json.dumps(args or {"command": "true"})}}
 
 
 FULL_USAGE = {"prompt_tokens": 10, "completion_tokens": 4,
@@ -137,6 +137,31 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "HTTP 307"):
                 await self.agent._complete(payload)
         self.assertEqual(received, [payload])
+
+    async def test_archive_tool_uses_cli_parsed_json_and_validates_before_dispatch(self):
+        bridge = type("FixtureBridge", (), {})()
+        bridge.call = AsyncMock(return_value={"exit_code": 0, "stdout": '{"text":"precise 中文😀"}', "stderr": ""})
+        environment = FakeEnvironment()
+        result = await self.agent._tool("context_folding", {"action": "read", "id": "abc", "offset": 2, "limit": 30}, environment, bridge)
+        self.assertEqual(json.loads(result), {"text": "precise 中文😀"})
+        bridge.call.assert_awaited_once_with("cli", argv=["read", "--json", "--id", "abc", "--offset", "2", "--limit", "30"])
+        for args in ({"action": []}, {"action": "read", "scope": "other"},
+                     {"action": "read", "limit": True}, {"action": "read", "id": "--restore"}):
+            self.assertIn("error", json.loads(await self.agent._tool("context_folding", args, environment, bridge)))
+        self.assertEqual(bridge.call.await_count, 1)
+        self.assertEqual(environment.commands, [])
+        self.assertEqual([item["function"]["name"] for item in module.TOOLS], ["terminal", "read_file", "context_folding"])
+
+    async def test_fixed_terminal_archive_prefix_never_executes_host_or_environment_shell(self):
+        bridge = type("FixtureBridge", (), {"cli_prefix": ("/runtime/bun", "/package/src/cli.ts")})()
+        bridge.call = AsyncMock(return_value={"exit_code": 0, "stdout": "{}", "stderr": ""})
+        environment = FakeEnvironment()
+        await self.agent._tool("terminal", {"command": "magpie-context-folding status"}, environment, bridge)
+        await self.agent._tool("exec_command", {"cmd": "/runtime/bun /package/src/cli.ts status"}, environment, bridge)
+        self.assertEqual(bridge.call.await_count, 2)
+        self.assertEqual(environment.commands, [])
+        await self.agent._tool("terminal", {"command": "printf sandbox"}, environment, bridge)
+        self.assertEqual(environment.commands, ["printf sandbox"])
 
     async def test_read_file_is_executed_in_environment_and_never_sliced_on_success(self):
         text = "# @context-fold begin source\n" + "x = '中文😀'\n" * 500 + "# @context-fold end source\n"
@@ -232,6 +257,21 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(found["matches"][0]["id"], child)
             recovered = await query("read", "--id", child, "--limit", "24000", "--json")
             self.assertEqual(recovered["text"], leaf)
+            agent = MagpieAgent(logs_dir=self.directory / "nested-agent", model_name="fixture/model")
+            environment = FakeEnvironment()
+            for action, fields, expected in (
+                ("meta", {"id": parent}, meta),
+                ("grep", {"id": parent, "query": "needle-child"}, found),
+                ("read", {"id": child, "limit": 24000}, recovered),
+            ):
+                parsed = json.loads(await agent._tool("context_folding", {"action": action, **fields}, environment, bridge))
+                if action == "read":
+                    self.assertEqual(parsed["text"], expected["text"])
+                elif action == "meta":
+                    self.assertEqual(parsed["children"], expected["children"])
+                else:
+                    self.assertEqual(parsed["matches"], expected["matches"])
+            self.assertEqual(environment.commands, [])
             repeated = await bridge.call("project", mode="folding", body=body)
             self.assertEqual(repeated["body"], projected["body"])
             await bridge.call("response", success=True)
@@ -267,16 +307,20 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     if mode == "folding":
                         self.assertIn("[[cf:v2:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
-                        # CLI returns the requested text; prior assistant history stays folded.
+                        # Dedicated recovery returns parsed text; history stays folded.
                         output = json.loads(agent.received[3]["messages"][-1]["content"])
-                        self.assertEqual(output["exit_code"], 0)
-                        self.assertEqual(json.loads(output["stdout"])["text"], original)
+                        self.assertEqual(output["text"], original)
                         self.assertNotIn(original, all_text(agent.received[3]))
                         self.assertIn("[[cf:v2:", all_text(agent.received[3]))
                         self.assertIn("[[cf:v2:", all_text(agent.received[4]))
                     else:
                         self.assertIn(original, all_text(agent.received[2]))
                     metrics = context.metadata["magpie_harbor"]
+                    self.assertEqual(metrics["requests"], len(agent.received))
+                    self.assertEqual(metrics["sent_request_bytes"], sum(
+                        len(json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                        for request in agent.received))
+                    self.assertGreater(metrics["raw_request_bytes"], len(original.encode("utf-8")) * 3)
                     self.assertEqual(metrics["measurement"], "scripted-smoke")
                     self.assertEqual(metrics["completion"], "final")
                     self.assertEqual(metrics["recovery_calls"], int(mode == "folding"))

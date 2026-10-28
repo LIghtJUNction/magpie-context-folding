@@ -40,6 +40,7 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     assert.equal(hashed.code, 0);
     assert.equal(JSON.parse(hashed.out).id, 'a');
     assert.equal(JSON.parse(hashed.out).text, read.out);
+    assert.equal(JSON.parse(hashed.out).kept, false, 'default reads leave folding intact');
     const output = join(directory, 'paste.txt');
     const paste = await invoke(['paste', '--scope', scope, '--id', 'a', '--path', output]);
     assert.equal(paste.code, 0);
@@ -128,6 +129,13 @@ test('CLI invalid commands and arguments use stderr, exit 1 and never leak suppl
       ['mark', '--scope', scope, '--marks', '{private-secret'], ['mode', '--scope', scope, '--mode', 'private-secret'],
       ['read', '--scope', scope, '--id', 'a', '--keep-folded'], ['read', '--scope', scope, '--id', 'a', '--limit', '24001'],
       ['read', '--scope', scope, '--id', 'a', '--all', '--limit', '10'],
+      ['read', '--scope', scope, '--id', 'a', '--full', '--limit', '10'],
+      ['read', '--scope', scope, '--id', 'a', '--full', '--all'],
+      ['read', '--scope', scope, '--id', 'a', '--full', '--start-line', '1'],
+      ['read', '--scope', scope, '--id', 'a', '--start-line', '1.5'],
+      ['read', '--scope', scope, '--id', 'a', '--end-line', '-1'],
+      ['read', '--scope', scope, '--id', 'a', '--restore', '--layer', 'view'],
+      ['read', '--scope', scope, '--id', 'a', '--restore', '--offset', '0'],
       ['read', '--scope', scope, '--id', 'a', '--restore', '--peek'] ]) {
       const result = await invoke(args);
       assert.equal(result.code, 1, JSON.stringify(args));
@@ -149,7 +157,8 @@ test('CLI grep/list/meta use short content keys and read accepts bounded view li
     const hash = digest('原文🙂\n```ts\nexact();\n```\n').slice(0, 12);
     const list = await invoke(['list', '--scope', scope]);
     assert.equal(list.code, 0);
-    assert.ok(list.out.startsWith(hash + ' '));
+    const listed = JSON.parse(list.out);
+    assert.equal(listed.entries[0].key, hash);
     assert.ok(!list.out.includes('exact();'));
     const grep = await invoke(['grep', '--scope', scope, '--query', 'exact()']);
     assert.equal(grep.code, 0, grep.err);

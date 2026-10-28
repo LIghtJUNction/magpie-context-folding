@@ -1,0 +1,326 @@
+{
+  "date": "2026-10-28",
+  "model_requested": "codex/gpt-6-luna",
+  "trials": [
+    {
+      "path": ".local-tests/luna-cli-round1/01-folding",
+      "mode": "folding",
+      "completion": "max-turns",
+      "verified": false,
+      "requests": 24,
+      "folded_requests": 0,
+      "changed_files": [
+        "src/cli.ts",
+        "test/cli.test.ts",
+        "test/nested-query.test.ts"
+      ],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "25db391ab9acec9196ea2aa05571f324a4a9d11a54686a21dbb88858b85a8e37",
+      "verification_exit": 1,
+      "usage": {
+        "prompt_tokens": 1821866,
+        "completion_tokens": 4455,
+        "cached_tokens": 1731072
+      },
+      "wall_seconds": 144.09500770800514,
+      "failure": "Model request limit reached before normal completion; candidate not accepted.",
+      "test_count": 29,
+      "test_runner": "bun"
+    },
+    {
+      "path": ".local-tests/luna-cli-round2/01-folding",
+      "mode": "folding",
+      "completion": "final",
+      "verified": true,
+      "requests": 8,
+      "folded_requests": 0,
+      "changed_files": [],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "ec67bbb80f8bf4dd7db53a24aeac4b64c168e74104fb9c6db6b5899eac999c1c",
+      "verification_exit": 0,
+      "usage": {
+        "prompt_tokens": 272030,
+        "completion_tokens": 911,
+        "cached_tokens": 225792
+      },
+      "wall_seconds": 258.72237716498785,
+      "failure": null,
+      "test_count": 29,
+      "test_runner": "bun"
+    },
+    {
+      "path": ".local-tests/luna-harbor-round1/01-baseline",
+      "mode": "baseline",
+      "completion": "max-turns",
+      "verified": false,
+      "requests": 24,
+      "folded_requests": 0,
+      "changed_files": [
+        "benchmarks/harbor/magpie_harbor/agent.py",
+        "benchmarks/harbor/tests/test_agent.py"
+      ],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "4575e41203c6dd83da030dbfd61b9c5b2b1760cd800a63b785024127513232d4",
+      "verification_exit": 2,
+      "usage": {
+        "prompt_tokens": 1112240,
+        "completion_tokens": 4833,
+        "cached_tokens": 988288
+      },
+      "wall_seconds": 442.11534975797986,
+      "failure": "Model request limit reached before normal completion; candidate not accepted.",
+      "test_count": 32,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-harbor-round1/01-folding",
+      "mode": "folding",
+      "completion": "max-turns",
+      "verified": false,
+      "requests": 24,
+      "folded_requests": 0,
+      "changed_files": [
+        "benchmarks/harbor/magpie_harbor/agent.py",
+        "benchmarks/harbor/tests/test_agent.py"
+      ],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "a2384e76fbd6dfe69d73c8b8358528188905d1e5effbb3866f7fe3ee38e52a50",
+      "verification_exit": 2,
+      "usage": {
+        "prompt_tokens": 1231206,
+        "completion_tokens": 9042,
+        "cached_tokens": 1152384
+      },
+      "wall_seconds": 925.2424509340199,
+      "failure": "Model request limit reached before normal completion; candidate not accepted.",
+      "test_count": 32,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-recursive-round3/01-baseline",
+      "mode": "baseline",
+      "completion": "final",
+      "verified": false,
+      "requests": 2,
+      "folded_requests": 0,
+      "changed_files": [],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "c51280c42cc0bdc8ffabef0d0a078b8aadc4abb606e9556d0bff23be29451a9c",
+      "verification_exit": 1,
+      "usage": {
+        "prompt_tokens": 8283,
+        "completion_tokens": 347,
+        "cached_tokens": 3456
+      },
+      "wall_seconds": 8.654541565018008,
+      "failure": "Sandbox startup failed: node_modules symlink mount destination. No project command executed.",
+      "test_count": null,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-recursive-round3/01-folding",
+      "mode": "folding",
+      "completion": "final",
+      "verified": false,
+      "requests": 5,
+      "folded_requests": 0,
+      "changed_files": [],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "c51280c42cc0bdc8ffabef0d0a078b8aadc4abb606e9556d0bff23be29451a9c",
+      "verification_exit": 1,
+      "usage": {
+        "prompt_tokens": 21665,
+        "completion_tokens": 525,
+        "cached_tokens": 12288
+      },
+      "wall_seconds": 19.489817560999654,
+      "failure": "Sandbox startup failed: node_modules symlink mount destination. No project command executed.",
+      "test_count": null,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-recursive-round4/01-baseline",
+      "mode": "baseline",
+      "completion": "max-turns",
+      "verified": false,
+      "requests": 12,
+      "folded_requests": 0,
+      "changed_files": [],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "10387f7e782d408dd3dd11dc7ac10b73db4e0a9bb06ac83a04791675c2ab5830",
+      "verification_exit": 0,
+      "usage": {
+        "prompt_tokens": 190898,
+        "completion_tokens": 1702,
+        "cached_tokens": 171264
+      },
+      "wall_seconds": 87.42724697099766,
+      "failure": "Controller rejected model-supplied timeout field; task incomplete.",
+      "test_count": 168,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-recursive-round4/01-folding",
+      "mode": "folding",
+      "completion": "max-turns",
+      "verified": false,
+      "requests": 12,
+      "folded_requests": 0,
+      "changed_files": [
+        "context-folding/tests/test_nested_search.py"
+      ],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "10387f7e782d408dd3dd11dc7ac10b73db4e0a9bb06ac83a04791675c2ab5830",
+      "verification_exit": 1,
+      "usage": {
+        "prompt_tokens": 227593,
+        "completion_tokens": 2544,
+        "cached_tokens": 189312
+      },
+      "wall_seconds": 82.25945759599563,
+      "failure": "Controller rejected model-supplied timeout field; task incomplete.",
+      "test_count": 169,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-recursive-round5/01-baseline",
+      "mode": "baseline",
+      "completion": "final",
+      "verified": true,
+      "requests": 11,
+      "folded_requests": 0,
+      "changed_files": [
+        "context-folding/tests/test_nested_search.py"
+      ],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "2c75e2c8d0444e094ceffc40fb6896261021268063f2fd2e178b2b3aebd6fe37",
+      "verification_exit": 0,
+      "usage": {
+        "prompt_tokens": 199839,
+        "completion_tokens": 2394,
+        "cached_tokens": 170112
+      },
+      "wall_seconds": 102.1006652470096,
+      "failure": null,
+      "test_count": 169,
+      "test_runner": "unittest"
+    },
+    {
+      "path": ".local-tests/luna-recursive-round5/01-folding",
+      "mode": "folding",
+      "completion": "final",
+      "verified": true,
+      "requests": 5,
+      "folded_requests": 0,
+      "changed_files": [
+        "context-folding/tests/test_nested_search.py"
+      ],
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "2c75e2c8d0444e094ceffc40fb6896261021268063f2fd2e178b2b3aebd6fe37",
+      "verification_exit": 0,
+      "usage": {
+        "prompt_tokens": 87136,
+        "completion_tokens": 1813,
+        "cached_tokens": 60928
+      },
+      "wall_seconds": 78.38157853399753,
+      "failure": null,
+      "test_count": 169,
+      "test_runner": "unittest"
+    }
+  ],
+  "conclusion": "Luna CLI round2 and recursive round5 passed; earlier failures retained. Recursive round5 starts from identical source hashes. No actual dialog fold occurred, so no folding efficiency claim.",
+  "cost_usd": null,
+  "local_validation": {
+    "source_snapshot_sha256": "9701c22bad94bdcef268d3210079bfde0d855345a3970d7a49638256c0e75766",
+    "sandbox": {
+      "type": "linux-bubblewrap",
+      "network": "unshare-all (offline)",
+      "source": "writable disposable snapshot",
+      "host_project": "not mounted",
+      "home": "empty /home/sandbox"
+    },
+    "status": "passed",
+    "checks": [
+      {
+        "name": "sandbox-probe",
+        "returncode": 0,
+        "test_counts": {},
+        "wall_seconds": 0.036189
+      },
+      {
+        "name": "runtime-versions",
+        "returncode": 0,
+        "test_counts": {},
+        "wall_seconds": 0.153892
+      },
+      {
+        "name": "npm-check",
+        "returncode": 0,
+        "test_counts": {
+          "pass": 253,
+          "fail": 0
+        },
+        "wall_seconds": 26.013905
+      },
+      {
+        "name": "controller-regressions",
+        "returncode": 0,
+        "test_counts": {
+          "run": 7,
+          "skip": 0
+        },
+        "wall_seconds": 0.139779
+      },
+      {
+        "name": "typescript-recursive",
+        "returncode": 0,
+        "test_counts": {
+          "pass": 72,
+          "fail": 0
+        },
+        "wall_seconds": 5.9235
+      },
+      {
+        "name": "python-core",
+        "returncode": 0,
+        "test_counts": {
+          "run": 169,
+          "skip": 0
+        },
+        "wall_seconds": 13.321969
+      }
+    ],
+    "harbor_component_tests": 34,
+    "harbor_docker_smoke": {
+      "status": "passed",
+      "trials": 8,
+      "exceptions": 0
+    },
+    "real_magpie_host_smoke": {
+      "status": "passed",
+      "synthetic_requests": 18,
+      "model_calls": 0
+    }
+  }
+}

@@ -55,6 +55,9 @@ export function versionMetadata(version: NonNullable<Entry['version']>) {
 /** Queries never recursively expand a reference or alter its owner's folded state. */
 export function archiveView(snapshot: Snapshot, node: ArchiveNode): string {
   if ('children' in node) return JSON.stringify({ id: node.id, summary: node.summary, children: node.children });
+  // Leaves need no reference resolution. Avoid rebuilding archive-wide indexes
+  // for each leaf visited by search or grep.
+  if (!node.annotation?.children?.length) return node.text;
   let text = node.text;
   const byId = new Map(snapshot.entries.map(entry => [entry.id, entry]));
   const hashes = [...snapshot.entries.flatMap(entry => [entry.id, ...(entry.annotation ? [entry.annotation.sha256] : [])]),

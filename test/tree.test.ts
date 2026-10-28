@@ -7,7 +7,7 @@ import { Store } from '../src/store.js';
 import type { Entry, Snapshot } from '../src/store.js';
 import { emptyMetrics } from '../src/metrics.js';
 import { execute } from '../src/tool.js';
-import { browse, grep, latestVersions } from '../src/tree.js';
+import { archiveView, browse, grep, latestVersions } from '../src/tree.js';
 import { ContextFoldingPlugin } from '../src/index.js';
 
 const entry = (id: string, text = id): Entry => ({ id, text, role: 'tool', mark: { disposition: 'unmarked' }, layers: [] });
@@ -125,6 +125,28 @@ test('group read/paste return only the manifest and forget protects folded group
     assert.equal((await call({ action: 'forget', scope, force: true })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
   });
+});
+
+test('leaf views preserve exact text and nested views retain collision-safe child references', () => {
+  const text = 'literal [[cf:v2:123456789abc]]\r\n中文🙂\ud800';
+  const leaf = entry('leaf', text);
+  const hash = '123456789abc' + 'a'.repeat(52);
+  leaf.annotation = { sha256: hash, label: 'leaf' };
+  const parent = entry('parent', 'before ' + text + ' after');
+  parent.annotation = { sha256: 'f'.repeat(64), label: 'parent',
+    children: [{ id: leaf.id, label: 'child', start: 7, end: 7 + text.length }] };
+  const state: Snapshot = { version: 1, entries: [leaf, parent], decision: {}, metrics: emptyMetrics(),
+    groups: [group(hash.slice(0, 12) + 'b', ['parent', 'leaf'])] };
+  assert.equal(archiveView(state, leaf), text);
+  leaf.annotation.children = [];
+  assert.equal(archiveView(state, leaf), text);
+  assert.equal(archiveView(state, entry('unannotated', text)), text);
+  assert.equal(archiveView(state, parent), 'before [[cf:v2:' + hash.slice(0, 14) + ']] after');
+  const hit = grep(state, { id: 'parent', query: '中文', limit: 1 });
+  assert.equal(hit.total, 1);
+  assert.equal(hit.matches[0]!.id, 'leaf');
+  assert.equal(hit.matches[0]!.offset, text.indexOf('中文'));
+  assert.equal(hit.nextOffset, null);
 });
 
 test('tree depth, subtree and pagination bound every returned node', () => {

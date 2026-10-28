@@ -229,11 +229,14 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           else if (children.length && JSON.stringify(entry.annotation!.children) !== JSON.stringify(children)) {
             throw new Error('Annotation child structure changed');
           }
+        }
+        // Record provenance on the first commit as well as later observations.
+        // Identical replay must not grow an otherwise unchanged archive.
+        const candidate = candidateByRegion.get(region);
+        if (candidate?.sourceRanges.length) {
           const observedRanges = entry.annotation!.observedRanges ??= [];
-          for (const candidate of candidateByRegion.get(region) ? [candidateByRegion.get(region)!] : []) {
-            for (const range of candidate.sourceRanges) {
-              if (!observedRanges.some(observed => JSON.stringify(observed) === JSON.stringify(range))) observedRanges.push({ ...range });
-            }
+          for (const range of candidate.sourceRanges) {
+            if (!observedRanges.some(observed => JSON.stringify(observed) === JSON.stringify(range))) observedRanges.push({ ...range });
           }
           if (observedRanges.length > 64) observedRanges.splice(0, observedRanges.length - 64);
         }

@@ -148,30 +148,41 @@ function validateLayers(snapshot: Snapshot): void {
   const byId = new Map(snapshot.entries.map(entry => [entry.id, entry]));
   const visiting = new Set<string>();
   const checked = new Set<string>();
-  const validateChildren = (entry: Entry) => {
-    if (visiting.has(entry.id)) throw new Error('Cyclic annotation graph');
-    if (checked.has(entry.id)) return;
+  // Persisted chains are not bounded by the query depth limit. Keep DFS state
+  // on the heap so a valid deep archive remains readable and recoverable.
+  for (const entry of snapshot.entries) {
+    if (checked.has(entry.id)) continue;
+    const pending = [{ entry, nextChild: 0, previousEnd: 0 }];
     visiting.add(entry.id);
-    let previousEnd = 0;
-    for (const edge of entry.annotation?.children ?? []) {
+    while (pending.length) {
+      const frame = pending.at(-1)!;
+      const edge = frame.entry.annotation?.children?.[frame.nextChild];
+      if (!edge) {
+        visiting.delete(frame.entry.id);
+        checked.add(frame.entry.id);
+        pending.pop();
+        continue;
+      }
+      frame.nextChild++;
       const child = byId.get(edge.id);
-      if (!child?.annotation || edge.start < previousEnd || edge.end <= edge.start || edge.end > entry.text.length) {
+      if (!child?.annotation || edge.start < frame.previousEnd || edge.end <= edge.start || edge.end > frame.entry.text.length) {
         throw new Error('Invalid annotation child range');
       }
-      const body = entry.text.slice(edge.start, edge.end);
+      const body = frame.entry.text.slice(edge.start, edge.end);
       const ref = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(body.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
       if (body !== child.text && (!ref || !child.annotation.sha256.startsWith(ref)
         || snapshot.entries.some(other => other.annotation?.sha256.startsWith(ref)
           && other.annotation.sha256 !== child.annotation!.sha256))) {
         throw new Error('Annotation child content mismatch');
       }
-      previousEnd = edge.end;
-      validateChildren(child);
+      frame.previousEnd = edge.end;
+      if (visiting.has(child.id)) throw new Error('Cyclic annotation graph');
+      if (!checked.has(child.id)) {
+        visiting.add(child.id);
+        pending.push({ entry: child, nextChild: 0, previousEnd: 0 });
+      }
     }
-    visiting.delete(entry.id);
-    checked.add(entry.id);
-  };
-  for (const entry of snapshot.entries) validateChildren(entry);
+  }
   const latestSeries = new Set<string>();
   for (const entry of snapshot.entries) {
     const version = entry.version;
