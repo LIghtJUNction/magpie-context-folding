@@ -25,15 +25,16 @@ async function fixture(run: (f: { root: string; project: string; global: string;
   }
 }
 
-test('annotation-only defaults and optional context budget', async () => {
+test('annotation-only defaults do not expose context capacity or output reserves', async () => {
   await fixture(async f => {
     const options = await loadOptions(undefined, f.project);
     assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1,
-      reserveOutputTokens: 0, contextWindowTokens: undefined, gatewayTimeoutMs: undefined, recoveryToolName: undefined });
-    assert.deepEqual(parseOptions({ delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000 }), {
-      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0, contextWindowTokens: 128000, reserveOutputTokens: 8000,
+      gatewayTimeoutMs: undefined, recoveryToolName: undefined });
+    assert.deepEqual(parseOptions({ delayRequests: 0 }), {
+      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0,
     });
     const { config, sources } = await loadConfig(f.project);
+    assert.deepEqual(config.folding, { enabled: true, max_session_bytes: 67_108_864, delay_requests: 1 });
     assert.deepEqual(config.annotations, { enabled: true, default_fold: true, keep: [] });
     assert.deepEqual(config.gc, { enabled: false, strength: 'conservative', idle_seconds: 2_592_000,
       max_uses: 2, retention_seconds: 2_592_000, auto_purge: false });
@@ -44,20 +45,19 @@ test('annotation-only defaults and optional context budget', async () => {
 
 test('global/project/explicit fields merge without injecting defaults into partial layers', async () => {
   await fixture(async f => {
-    await f.file(f.global, 'version=1\n[folding]\ndelay_requests=3\ncontext_window_tokens=128000\nreserve_output_tokens=8000\n[magpie]\ngateway_timeout_ms=700\n');
+    await f.file(f.global, 'version=1\n[folding]\ndelay_requests=3\nmax_session_bytes=12000\n[magpie]\ngateway_timeout_ms=700\n');
     await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\n[magpie]\nrecovery_tool_name="archive.recall"\n');
     const explicit = { enabled: false, delayRequests: 0 };
     const before = structuredClone(explicit);
     const options = await loadOptions(explicit, f.project);
     assert.equal(options.delayRequests, 0);
-    assert.equal(options.contextWindowTokens, 128000);
-    assert.equal(options.reserveOutputTokens, 8000);
+    assert.equal(options.maxSessionBytes, 12000);
     assert.equal(options.gatewayTimeoutMs, 700);
     assert.equal(options.recoveryToolName, 'archive.recall');
     assert.equal(options.enabled, false);
     assert.deepEqual(explicit, before);
     assert.equal((await loadOptions({}, f.project)).delayRequests, 2);
-    assert.equal((await loadConfig(f.project, { folding: { reserve_output_tokens: 12000 } })).config.folding.delay_requests, 2);
+    assert.equal((await loadConfig(f.project, { folding: { max_session_bytes: 24000 } })).config.folding.delay_requests, 2);
     await f.file(join(f.project, '.context-folding.toml'), '[annotations]\nkeep=["active"]\n[gc]\nstrength="balanced"\nretention_seconds=9\n');
     await f.file(f.global, '[gc]\nidle_seconds=123\n');
     const shared = await loadConfig(f.project, { gc: { idle_seconds: 0.5 } });
@@ -74,12 +74,12 @@ test('nearest project settings stop at git/worktree boundary and HOME is a fallb
     const child = join(f.project, 'nested');
     await mkdir(child);
     assert.equal(await projectConfigPath(child), null);
-    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\ncontext_window_tokens=32000\n');
+    await f.file(join(f.project, '.context-folding.toml'), '[folding]\ndelay_requests=2\nmax_session_bytes=32000\n');
     assert.equal((await loadOptions({}, child)).delayRequests, 2);
     const nearest = join(child, '.context-folding.toml');
     await f.file(nearest, '[folding]\ndelay_requests=3\n');
     assert.equal(await projectConfigPath(child), nearest);
-    assert.equal((await loadOptions({}, child)).contextWindowTokens, undefined);
+    assert.equal((await loadOptions({}, child)).maxSessionBytes, 67_108_864);
     await rm(nearest);
     await rm(join(f.project, '.context-folding.toml'));
     await rm(join(f.project, '.git'), { recursive: true });
@@ -123,11 +123,37 @@ test('removed modes, thresholds, policy and accounting explain annotation migrat
   });
 });
 
+test('removed context window and output reserve settings fail at every config entry point', async () => {
+  await fixture(async f => {
+    const removed = (source: string, field: string) => (error: unknown) => {
+      assert.ok(error instanceof ConfigError);
+      assert.equal(error.source, source);
+      assert.equal(error.field, field);
+      assert.match(error.message, /removed/);
+      assert.ok(!error.message.includes('private-secret'));
+      return true;
+    };
+    for (const key of ['contextWindowTokens', 'reserveOutputTokens']) {
+      assert.throws(() => parseOptions({ [key]: 128000 }), removed('<options>', key));
+      await assert.rejects(loadOptions({ [key]: 'private-secret' }, f.project), removed('<overrides>', key));
+    }
+    for (const key of ['context_window_tokens', 'reserve_output_tokens']) {
+      await assert.rejects(loadConfig(f.project, { folding: { [key]: 128000 } }), removed('<overrides>', `folding.${key}`));
+      await f.file(f.global, `[folding]\n${key}=128000\n`);
+      await assert.rejects(loadOptions({}, f.project), removed(f.global, `folding.${key}`));
+      await rm(f.global);
+      const project = join(f.project, '.context-folding.toml');
+      await f.file(project, `[folding]\n${key}="private-secret"\n`);
+      await assert.rejects(loadConfig(f.project), removed(project, `folding.${key}`));
+      await rm(project);
+    }
+  });
+});
+
 test('strict schema and numeric limits report safe source paths', async () => {
   await fixture(async f => {
     for (const content of ['unknown=1', 'version=2', 'version=true', 'folding=false',
       '[folding]\nunknown=1', '[folding]\ndelay_requests=-1', '[folding]\ndelay_requests=0.5',
-      '[folding]\ncontext_window_tokens=0', '[folding]\nreserve_output_tokens=-1',
       '[folding]\nmax_session_bytes=67108865', '[folding]\nenabled=1',
       '[annotations]\nkeep=[1]', '[annotations]\nkeep=[""]', '[gc]\nstrength="invalid"',
       '[gc]\nidle_seconds=315576001', '[gc]\nmax_uses=1.5', '[gc]\nauto_purge=1',
@@ -142,7 +168,7 @@ test('strict schema and numeric limits report safe source paths', async () => {
     }
     await rm(f.global);
     for (const explicit of [false, [], { 'private-key': 'private-secret' }, { enabled: 1 },
-      { delayRequests: Number.MAX_SAFE_INTEGER + 1 }, { contextWindowTokens: 0 }]) {
+      { delayRequests: Number.MAX_SAFE_INTEGER + 1 }, { maxSessionBytes: 0 }]) {
       await assert.rejects(loadOptions(explicit, f.project), (error: unknown) => {
         assert.ok(error instanceof ConfigError);
         assert.ok(!error.message.includes('private-key'));

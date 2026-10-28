@@ -200,8 +200,6 @@ version = 1
 enabled = true
 delay_requests = 1
 max_session_bytes = 67108864
-reserve_output_tokens = 0
-# context_window_tokens = 128000
 
 [annotations]
 enabled = true
@@ -214,7 +212,7 @@ enabled = false
 
 The core also accepts the root plugin's `[magpie]` settings so a project can share one file; those settings do not install Magpie hooks. Remove old `folding.mode`, threshold/head/keep-recent controls, `[policy]` and accounting settings. They return migration errors, not a silent policy fallback.
 
-The budget-related fields describe host capacity; the standalone archive does not count an unseen full model request. See the [root README](../README.md) for Magpie's estimate and its limits.
+Remove `folding.context_window_tokens` and `folding.reserve_output_tokens` from earlier configurations as well; they now return removed-setting errors. Model window sizes and context budgets are outside this project's scope. The agent decides when to mark content for folding; the archive saves and restores those marked bodies.
 
 ## SDKs and verification
 

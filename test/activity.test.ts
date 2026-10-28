@@ -163,15 +163,16 @@ test('repeated result envelopes and ID-less Gemini controls cannot turn into ord
 
 test('synthetic guide-only text does not masquerade as a new user turn or consume a result', () => {
   const guide = `<context-folding scope=${'a'.repeat(64)}>\ntools["context_folding"]\n</context-folding>`;
+  const recovery = `<context-folding scope=${'a'.repeat(64)} />`;
   const budget = '<context-budget>Estimate: 12 tokens</context-budget>';
   const receipt = '<context-folding-receipts>\n{"state":"applied"}\n</context-folding-receipts>';
-  for (const text of [guide, budget, receipt, `${budget}\n\n${guide}\n${receipt}`]) assert.equal(isPluginGuide(text), true, text);
-  for (const text of ['', `${guide}\nContinue`, `My question\n${guide}`, `<example>${guide}</example>`, '<context-folding>not closed']) {
+  for (const text of [guide, recovery, budget, receipt, `${recovery}\n\n${guide}\n${receipt}`, `${budget}\n\n${guide}\n${receipt}`]) assert.equal(isPluginGuide(text), true, text);
+  for (const text of ['', `${guide}\nContinue`, `${recovery}\nContinue`, `My question\n${guide}`, `<example>${guide}</example>`, '<context-folding>not closed']) {
     assert.equal(isPluginGuide(text), false, text);
   }
   const spans = extractSpans({ messages: [
     { role: 'tool', content: 'new tool result' },
-    { role: 'user', content: `${guide}\n${receipt}` },
+    { role: 'user', content: `${recovery}\n${receipt}` },
   ] }, 'chat');
   assert.equal(activityProtectedSpans(spans, -1).get(spans[0]!.id), 'active-tool-result');
   assert.equal(activityProtectedSpans(spans, -1).get(spans[1]!.id), 'plugin-control', 'a receipt must not become foldable user history');

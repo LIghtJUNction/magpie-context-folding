@@ -64,7 +64,7 @@ export class FoldingBridge {
         protocol: 'chat', model: input.body.model, session: this.session,
         agent: 'harbor', origin: 'harbor-benchmark', cwd: this.cwd, state,
         options: { enabled: this.mode === 'folding', delayRequests: 1,
-          maxSessionBytes: 64 * 1024 * 1024, reserveOutputTokens: 0 },
+          maxSessionBytes: 64 * 1024 * 1024 },
       });
       const projectionMs = performance.now() - start;
       // Read only the hook's trusted completion state, never a scope-shaped

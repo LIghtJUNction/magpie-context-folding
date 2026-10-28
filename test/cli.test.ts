@@ -64,11 +64,13 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
 test('CLI keeps recovery available with disabled, legacy or broken config and explains migration', async () => {
   await fixture(async (scope, directory, invoke) => {
     const config = join(directory, '.context-folding.toml');
-    await writeFile(config, '[folding]\nenabled = false\ncontext_window_tokens = 32000\n');
+    await writeFile(config, '[folding]\nenabled = false\n');
     const effective = await invoke(['config', '--project-dir', directory, '--json']);
     assert.equal(effective.code, 0);
     assert.equal(JSON.parse(effective.out).config.folding.enabled, false);
-    assert.equal(JSON.parse(effective.out).config.folding.context_window_tokens, 32000);
+    assert.deepEqual(JSON.parse(effective.out).config.folding, {
+      enabled: false, max_session_bytes: 67_108_864, delay_requests: 1,
+    });
     assert.ok(!effective.out.includes('secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
     await writeFile(config, '[folding]\nenabled = "private-secret"\n');
@@ -83,6 +85,15 @@ test('CLI keeps recovery available with disabled, legacy or broken config and ex
     assert.match(legacy.err, /removed.*@context-fold/);
     assert.ok(!legacy.err.includes('private-secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
+    for (const key of ['context_window_tokens', 'reserve_output_tokens']) {
+      await writeFile(config, `[folding]\n${key} = 32000\n`);
+      const retired = await invoke(['config']);
+      assert.equal(retired.code, 1);
+      assert.equal(retired.out, '');
+      assert.match(retired.err, /removed/);
+      assert.ok(retired.err.includes(key));
+      assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
+    }
   });
 });
 

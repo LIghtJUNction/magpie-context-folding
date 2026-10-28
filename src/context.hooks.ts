@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { ConfigError, loadOptions } from './config.js';
-import { appendBudget, estimateTokens, withoutBudget } from './budget.js';
+import { appendRecoveryMetadata, withoutRecoveryMetadata } from './recovery.js';
 import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
-import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
+import { addMetrics, emptyMetrics, estimateTokens, metricsSchema } from './metrics.js';
 import { extractSpans, recoveryToolName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
@@ -102,15 +102,10 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
     ctx.signal?.throwIfAborted();
     const options = await loadOptions(ctx.options, ctx.cwd);
     if (!options.enabled) return input;
-    const body = withoutBudget(input, ctx.protocol);
+    const body = withoutRecoveryMetadata(input, ctx.protocol);
     const spans = extractSpans(body, ctx.protocol);
     if (!spans.length || spans.some(span => span.protectedReason)) return input;
-    const budgetOptions = {
-      reserveOutputTokens: options.reserveOutputTokens,
-      ...(options.contextWindowTokens === undefined ? {} : { contextWindowTokens: options.contextWindowTokens }),
-    };
-    // A visible budget is useful even when this host cannot recover originals.
-    if (!recoveryToolName(body, ctx.protocol, options.recoveryToolName)) return appendBudget(body, ctx.protocol, budgetOptions);
+    if (!recoveryToolName(body, ctx.protocol, options.recoveryToolName)) return input;
     const store = new Store();
     const scope = await store.scopeFor(JSON.stringify([ctx.session, ctx.origin ?? '', ctx.agent ?? '', ctx.cwd ?? '']));
     let pending: z.infer<typeof pendingSchema> | undefined;
@@ -157,7 +152,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         if (!observed.folded) { newlyFolded++; observed.folded = true; }
       }
       // Occurrence metadata is a short-lived cursor; originals and old references
-      // are durable until explicitly forgotten, never evicted to meet a budget.
+      // are durable until explicitly forgotten.
       for (const entry of snapshot.entries) if (entry.occurrences) {
         for (const [key, occurrence] of Object.entries(entry.occurrences)) {
           if (occurrence.lastSeen < previousCycle) delete entry.occurrences[key];
@@ -171,7 +166,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
-      const result = appendBudget(projected, ctx.protocol, { ...budgetOptions, scope });
+      const result = appendRecoveryMetadata(projected, ctx.protocol, scope);
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
         cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
