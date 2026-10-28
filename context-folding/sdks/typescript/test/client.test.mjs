@@ -109,7 +109,7 @@ test('installed Python core delays explicit annotations and recovers exact origi
     assert.equal(first.text, text);
     assert.equal((await client.call({ ...request, requestCycle: 0 })).text, text, 'retry must not consume delay');
     const folded = await client.call({ ...request, requestCycle: 1 });
-    assert.match(folded.text, /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
+    assert.match(folded.text, /\[\[cf:v3:[a-f0-9]{12,64} path=".+"\]\]/);
     assert.equal((await client.call({ ...request, occurrence: 'read-2', requestCycle: 2 })).text, text, 'new read gets its own delay');
     const resolved = await client.resolve('real', { content: folded.text });
     assert.equal(resolved.value.content, text);
@@ -148,7 +148,7 @@ test('installed Python core folds submitted text immediately and returns recover
     assert.equal(reference.id, sha256);
     assert.equal(reference.sha256, sha256);
     assert.equal(reference.label, 'evidence');
-    assert.match(reference.reference, /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/);
+    assert.match(reference.reference, /^\[\[cf:v3:[a-f0-9]{12,64} path=".+"\]\]$/);
     assert.equal(folded.text, prefix + reference.reference + suffix, 'full text must not be paginated or gain a newline');
     assert.equal((await client.resolve('fold-test', { content: folded.text })).value.content, text);
     assert.equal((await client.read('fold-test', reference.id)).text, body);

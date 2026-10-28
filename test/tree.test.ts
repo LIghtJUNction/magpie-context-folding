@@ -243,6 +243,6 @@ test('runtime list bounds, read default and public schema stay explicit', async 
     assert.equal(read.text.length, 4000);
     assert.equal(read.nextOffset, 4000);
     const plugin = await ContextFoldingPlugin();
-    assert.equal(plugin.tool.context_folding.args.oneOf.length, 6);
+    assert.deepEqual(plugin, {}, 'the plugin registers no MCP tools');
   });
 });

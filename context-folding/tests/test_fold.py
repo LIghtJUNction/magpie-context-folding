@@ -29,12 +29,6 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def initialize():
-    return {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "protocolVersion": "2025-11-25", "capabilities": {},
-        "clientInfo": {"name": "ctxf-test", "version": "1"},
-    }}
-
 
 class FoldTests(unittest.TestCase):
     def setUp(self):
@@ -56,13 +50,14 @@ class FoldTests(unittest.TestCase):
         source = before + block() + after
         result = self.client.fold("s", source)
         sha = digest(BODY)
-        reference = f"[[cf:v2:{sha[:12]}]]"
+        reference = result["references"][0]["reference"]
+        self.assertTrue(reference.startswith(f"[[cf:v3:{sha[:12]} path="))
         self.assertEqual(result["text"], before + block(reference) + after)
         self.assertGreater(len(result["text"]), 24000)
         self.assertEqual(result["scope"], "s")
         self.assertEqual(len(result["references"]), 1)
         entry = result["references"][0]
-        self.assertEqual(set(entry), {"id", "label", "sha256", "reference", "archiveId"})
+        self.assertEqual(set(entry), {"id", "label", "sha256", "reference", "archiveId", "path"})
         self.assertEqual({k: entry[k] for k in ("id", "label", "sha256", "reference")},
                          {"id": sha, "label": "evidence", "sha256": sha, "reference": reference})
         self.assertNotIn(BODY, json.dumps(entry, ensure_ascii=False))
@@ -104,15 +99,15 @@ class FoldTests(unittest.TestCase):
             self.assertEqual(tiny.fold("s", block("short"))["references"], [])
             self.assertIsNone(self.snapshot())
 
-    def test_utf8_savings_allow_short_chinese_payload_and_never_store_short_ascii(self):
-        source = block("汉" * 8, "chinese") + "\n" + block("short", "ascii")
+    def test_savings_include_file_pointer_overhead_and_never_store_short_ascii(self):
+        source = block("汉" * 200, "chinese") + "\n" + block("short", "ascii")
         result = self.client.fold("s", source)
         self.assertEqual([r["label"] for r in result["references"]], ["chinese"])
         self.assertLess(len(result["text"].encode("utf-8")), len(source.encode("utf-8")))
-        self.assertEqual([entry["text"] for entry in self.snapshot()["entries"]], ["汉" * 8])
+        self.assertEqual([entry["text"] for entry in self.snapshot()["entries"]], ["汉" * 200])
         with Client(self.directory / "automatic.sqlite3", project_dir=self.directory,
                     config={"folding": {"delay_requests": 0}}) as automatic:
-            view = automatic.read_source("s", text=block("汉" * 8, "chinese"))
+            view = automatic.read_source("s", text=block("汉" * 200, "chinese"))
             self.assertEqual(len(view["foldedRegions"]), 1)
 
     def test_explicit_fold_does_not_change_background_delay_or_keep(self):
@@ -163,7 +158,7 @@ class FoldTests(unittest.TestCase):
         with patch("context_folding.core.hashlib.sha256", synthetic):
             result = self.client.fold("s", block(left, "left") + "\n" + block(right, "right"))
             self.assertEqual([item["reference"] for item in result["references"]],
-                             [f"[[cf:v2:{left_hash[:14]}]]", f"[[cf:v2:{right_hash[:14]}]]"])
+                             [f'[[cf:v3:{sha[:14]} path={json.dumps(item["path"], ensure_ascii=False)}]]' for sha, item in zip((left_hash, right_hash), result["references"]) ])
             with self.assertRaises(FoldingError) as raised:
                 self.client.read("s", "1" * 12)
             self.assertEqual(raised.exception.code, "ambiguous_hash")
@@ -263,7 +258,8 @@ class CtxfProcessTests(unittest.TestCase):
             output, second_error = second.communicate(timeout=15)
             self.assertEqual((first.returncode, second.returncode), (0, 0))
             self.assertEqual((first_error, second_error), (b"", b""))
-            expected = source.replace(BODY, f"[[cf:v2:{digest(BODY)[:12]}]]").encode()
+            reference = json.loads(self.succeeded(self.run_ctxf("fold", "--json", data=source.encode())))["references"][0]["reference"]
+            expected = source.replace(BODY, reference).encode()
             self.assertEqual(output, expected)
             self.assertGreater(len(output), 24000)
             self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", digest(BODY))), BODY.encode())
@@ -305,29 +301,18 @@ class CtxfProcessTests(unittest.TestCase):
         result = json.loads(self.succeeded(self.run_ctxf("call", data=supplied)))
         self.assertEqual(result["result"]["scope"], "json-scope")
 
-    def test_rpc_and_mcp_use_the_shared_fold_action_and_default_state(self):
+    def test_rpc_uses_the_shared_fold_action_and_default_state(self):
         request = {"action": "fold", "scope": "wire", "text": block()}
         wire = json.dumps(request, ensure_ascii=False).encode() + b"\n"
         result = json.loads(self.succeeded(self.run_ctxf("rpc", data=wire)))
         self.assertTrue(result["result"]["references"])
-        messages = [initialize(), {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-                    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-                        "name": "context_folding", "arguments": request}}]
-        output = self.succeeded(self.run_ctxf("mcp", data=b"".join(json.dumps(m).encode() + b"\n" for m in messages)))
-        replies = [json.loads(line) for line in output.splitlines()]
-        tool = replies[1]["result"]["tools"][0]
-        self.assertEqual(tool["name"], "context_folding")
-        self.assertIn("fold", tool["inputSchema"]["properties"]["action"]["enum"])
-        self.assertIn("immediate", replies[0]["result"]["instructions"])
-        self.assertFalse(replies[2]["result"]["isError"])
-        self.assertEqual(json.loads(replies[2]["result"]["content"][0]["text"]), result["result"])
 
     def test_server_scope_is_per_request_and_raw_read_accepts_peek(self):
-        for command in ("rpc", "mcp"):
+        for command in ("rpc",):
             rejected = self.run_ctxf("--scope", "ignored", command)
             self.assertEqual(rejected.returncode, 2)
             self.assertEqual(rejected.stdout, b"")
-            self.assertIn(b"each RPC/MCP request", rejected.stderr)
+            self.assertIn(b"each RPC request", rejected.stderr)
         folded = json.loads(self.succeeded(self.run_ctxf("--json", data=block().encode())))
         identifier = folded["references"][0]["id"]
         self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--peek", "--id", identifier)), BODY.encode())

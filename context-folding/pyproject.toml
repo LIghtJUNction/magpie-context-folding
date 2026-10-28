@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "context-folding"
 version = "0.1.0"
-description = "Host-neutral reversible context archive, transparent references, CLI and MCP server"
+description = "Host-neutral reversible context archive, ordinary UTF-8 files, CLI and JSON Lines RPC"
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"

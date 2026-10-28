@@ -116,7 +116,7 @@ try
         Check((await real.CallAsync(SourceRequest(0))).GetProperty("text").GetString() == text, "Retry must not consume delay");
         var folded = await real.CallAsync(SourceRequest(1));
         var view = folded.GetProperty("text").GetString()!;
-        Check(view.Contains("[[cf:v2:"), "Explicit source markers fold after delay");
+        Check(view.Contains("[[cf:v3:"), "Explicit source markers fold after delay");
         Check((await real.CallAsync(SourceRequest(2, "read-2"))).GetProperty("text").GetString() == text, "New occurrence gets its own delay");
         var resolved = await real.ResolveAsync("real", new { content = view });
         Check(resolved.GetProperty("value").GetProperty("content").GetString() == text, "Exact annotated source recovery");
