@@ -142,6 +142,10 @@ export class ContextFoldingClient implements AsyncDisposable {
     });
   }
 
+  /** Immediately project explicitly marked text using the shared Python archive. */
+  fold<T = unknown>(scope: string, text: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
+    return this.call<T>({ ...fields, action: 'fold', scope, text }, signal);
+  }
   put<T = unknown>(scope: string, text: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'put', scope, text }, signal);
   }

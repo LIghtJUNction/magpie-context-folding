@@ -1,24 +1,54 @@
-# Context Folding
+# ctxf — Context Folding
 
-A local archive and source-view engine for **explicit folding comments**. The agent writes a matching `@context-fold begin LABEL` / `@context-fold end LABEL` pair. The core saves exact content, waits for host-reported request progress, and replaces only the marked body with a short hash reference.
+A local text-folding command, archive and MCP server for **explicit folding comments**. The agent writes a matching `@context-fold begin LABEL` / `@context-fold end LABEL` pair. An explicit `fold` call saves the marked body and immediately returns its short hash reference. The separate `read-source` integration retains delayed projection at host request boundaries.
 
-This subproject provides Python, CLI, JSON Lines RPC and MCP stdio interfaces, plus Rust, TypeScript and C# subprocess bridges. It makes no model calls or network requests. It is separate from the [Magpie request plugin](../README.md): installing this package does not intercept another tool or rewrite a host's history.
+The `ctxf` CLI, Python API, JSON Lines RPC, MCP stdio server and Rust/TypeScript/C# bridges all use this same Python engine and SQLite archive. They make no model calls or network requests. This package is separate from the [Magpie request plugin](../README.md): installing it does not intercept another tool or rewrite a host's history.
 
 The root plugin source is 0.4.0, not published to npm. This standalone package remains version 0.1.0; use the matching repository checkout for the contract described here.
 
 ## Install and run
 
-Python 3.10+ is required. Python 3.11+ uses the standard library; Python 3.10 additionally requires `tomli`. From the repository root:
+Python 3.10+ is required. Python 3.11+ uses the standard library; Python 3.10 additionally requires `tomli`. Install the command from the repository root:
 
 ```sh
-uv sync --project context-folding
-uv run --project context-folding python -m context_folding status \
-  --state /absolute/private/archive.sqlite --scope example
+uv tool install ./context-folding
+cat notes.txt | ctxf
+ctxf fold < notes.txt > notes.folded.txt
+ctxf fold --json < notes.txt
+ctxf mcp
 ```
 
-`--state` is a SQLite **file path**, not a directory. New files use mode 0600 and newly created parent directories use mode 0700. Keep the archive in a persistent private directory; closing a client does not delete it.
+For development without a tool installation, run `uv sync --project context-folding` and prefix commands with `uv run --project context-folding`, for example `uv run --project context-folding ctxf mcp`. The old `context-folding` executable and `python -m context_folding` retain their explicit command/state arguments and JSON management output. They call the same engine; `ctxf` adds the pipe-friendly defaults. Only this Python package installs `ctxf`.
 
-Each request supplies a stable `scope` of 1–200 characters. The scope is a local namespace, not authentication. File/process permissions remain the host's responsibility. Do not reuse another application's scope to recover its data.
+`ctxf` defaults to scope `default` and a persistent state file selected in this order: `--state`, `CTXF_STATE`, then `$XDG_DATA_HOME/context-folding/archive.sqlite3` or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. `--state` and `--scope` may appear before or after single-operation commands such as `fold` and `read`. RPC/MCP calls supply their own scopes. Use the same state and scope when recovering a reference from another process or interface.
+
+`--state` is a SQLite **file path**, not a directory. New files use mode 0600 and newly created parent directories use mode 0700. Keep the archive in a persistent private directory; closing a client does not delete it. SDK clients select their state file explicitly.
+
+Every API/RPC/MCP request supplies a stable `scope` of 1–200 characters; the CLI default does not remove that API requirement. The scope is a local namespace, not authentication. File/process permissions remain the host's responsibility. Do not reuse another application's scope to recover its data.
+
+## Immediate text folding
+
+For notes or assistant-authored text, use whole-line HTML comments:
+
+```text
+<!-- @context-fold begin investigation -->
+Completed observations, comparisons and intermediate details that can be recovered later.
+<!-- @context-fold end investigation -->
+The decision and next step stay outside the marked region.
+```
+
+`cat notes.txt | ctxf` and `ctxf fold < notes.txt` read UTF-8 text from stdin and write the complete folded text to stdout. They do not paginate or append a newline. Unmarked text and empty input pass through; uncertain or nested regions stay visible. A body stays visible when its reference would not reduce its UTF-8 byte length. Original bodies are committed to the archive before references are returned.
+
+`ctxf fold --json` instead returns the core result object with `scope`, `text` and `references`. Each reference includes `id` and `sha256` as the complete body SHA-256, `label`, the short `[[cf:v2:…]]` `reference`, and the backing `archiveId`. This list describes bodies folded by this call; it does not duplicate their text or reinterpret existing reference literals.
+
+```sh
+ctxf fold --scope investigation --json < notes.txt
+ctxf read --scope investigation --id ACTUAL_RETURNED_HASH --raw > original-body.txt
+```
+
+`read --raw` follows all pages and writes the original body without an added newline. Ordinary `read` retains its JSON envelope and pagination. To reconstruct the complete marked input, `resolve` replaces references in the folded text; reading one reference returns just that marked body. Keep the returned hash and scope rather than calculating them manually.
+
+The shared API operation is `{"action":"fold","scope":"example","text":"..."}`. Python exposes `client.fold(scope, text, **options)`; SDKs expose corresponding thin wrappers. `text` is required and may be empty. Optional `language` and `commentStyles` use the parser rules below. Explicit `fold` performs the requested conversion immediately, even when automatic projection is disabled, delayed or protected by `keep`; quota and archive safety limits still apply. It does not alter those automatic-projection settings.
 
 ## Source annotations and compact reads
 
@@ -108,20 +138,38 @@ Adding comments changes line numbers and source-text introspection. Review the p
 Use `call` for complete JSON requests. `--json -` reads stdin:
 
 ```sh
-uv run --project context-folding python -m context_folding call \
+ctxf call \
   --state /absolute/private/archive.sqlite --json -
 ```
 
-Persistent services:
+Here, and on existing action commands such as `read`, `--json JSON` remains a request-input option. Only the new `fold --json` is a boolean selecting JSON output.
+
+Persistent services use the same state selection:
 
 ```sh
-uv run --project context-folding python -m context_folding rpc --state /absolute/private/archive.sqlite
-uv run --project context-folding python -m context_folding mcp --state /absolute/private/archive.sqlite
+ctxf rpc --state /absolute/private/archive.sqlite
+ctxf mcp --state /absolute/private/archive.sqlite
 ```
 
-RPC exchanges one request and one result/error envelope per line, in order. MCP exposes `context_folding` over stdio. Neither opens a network listener. See [the transport contract](docs/TRANSPORT.md) and [protocol.json](protocol.json).
+For an MCP client that supports a stdio command configuration:
 
-The current workflow uses `annotate` / `read-source`, `read`, `resolve`, `paste`, `list` and `status`. `put` remains an explicit archive operation; it does not select or summarize historical content. `render` only projects explicit annotations. `restore` supports old recovery data. `mark` and `group` are rejected with migration guidance.
+```json
+{
+  "mcpServers": {
+    "ctxf": {
+      "command": "ctxf",
+      "args": ["mcp"],
+      "env": {"CTXF_STATE": "/absolute/private/archive.sqlite3"}
+    }
+  }
+}
+```
+
+MCP still exposes one tool named `context_folding`; call it with `action: "fold"`, a scope and the text to transform. The result contains the same text and references as the CLI/API. The caller decides how to display, save or insert that result. MCP cannot rewrite earlier host messages or replace the host's compaction by itself.
+
+RPC exchanges one request and one result/error envelope per line, in order. MCP exposes the operation over stdio. Neither opens a network listener. See [the transport contract](docs/TRANSPORT.md) and [protocol.json](protocol.json).
+
+Use `fold` for an immediate explicit text conversion, or `annotate` / `read-source` for retained source observations. Recovery uses `read`, `resolve`, `paste`, `list` and `status`. `put` remains an explicit archive operation; it does not select or summarize historical content. `render` only projects explicit annotations. `restore` supports old recovery data. `mark` and `group` are rejected with migration guidance.
 
 Lifecycle operations (`roots`, `pin`, `gc`) remain available for the host to retain and clean its own archive. They are not compression modes. Automatic collection is disabled by default. Do not remove recovery data still referenced by a request; pins and roots are retention controls, distinct from folding permission.
 
@@ -170,7 +218,7 @@ The budget-related fields describe host capacity; the standalone archive does no
 
 ## SDKs and verification
 
-The [Rust](sdks/rust/README.md), [TypeScript](sdks/typescript/README.md) and [C#](sdks/csharp/README.md) SDKs each keep one Python subprocess alive. They transport the same core protocol; they are not independent implementations of folding. Python must remain installed at runtime. Their examples use explicit annotations and request cycles.
+The [Rust](sdks/rust/README.md), [TypeScript](sdks/typescript/README.md) and [C#](sdks/csharp/README.md) SDKs each keep one Python subprocess alive. They transport the same core protocol; they are not independent implementations of folding. Python must remain installed at runtime. Their examples call `fold` and recover the result. Generic calls also expose `read-source` and its host-supplied request cycles.
 
 Run the Python suite from the repository root:
 

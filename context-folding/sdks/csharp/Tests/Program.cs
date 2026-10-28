@@ -52,11 +52,19 @@ try
             client.ReadAsync("scope", "entry"),
             client.CallAsync(new Dictionary<string, object?> { ["action"] = "read-source", ["scope"] = "scope", ["text"] = "# source", ["occurrence"] = "read-1", ["requestCycle"] = 0 }),
             client.RenderAsync("scope", ["entry"]),
-            client.ResolveAsync("scope", new { content = "[[cf:v1:entry]]" }));
+            client.ResolveAsync("scope", new { content = "[[cf:v1:entry]]" }),
+            client.FoldAsync("scope", "", new Dictionary<string, object?>
+            {
+                ["action"] = "wrong", ["scope"] = "wrong", ["text"] = "wrong",
+                ["language"] = "explicit", ["commentStyles"] = new[] { new { start = ";;" } },
+            }));
         Check(values.Select(v => v.GetProperty("pid").GetInt32()).Distinct().Count() == 1, "Process must persist");
-        Check(values.Select(Action).SequenceEqual(new[] { "put", "list", "read", "read-source", "render", "resolve" }), "Wrappers forward actions");
+        Check(values.Select(Action).SequenceEqual(new[] { "put", "list", "read", "read-source", "render", "resolve", "fold" }), "Wrappers forward actions");
         Check(values[0].GetProperty("request").GetProperty("text").GetString() == "原文🙂", "Unicode round trip");
         Check(values[0].GetProperty("argv")[1].GetString()!.EndsWith("state with spaces.sqlite"), "ArgumentList preserves spaces");
+        var foldRequest = values[6].GetProperty("request");
+        Check(foldRequest.GetProperty("scope").GetString() == "scope" && foldRequest.GetProperty("text").GetString() == "", "Fold preserves explicit arguments and empty text");
+        Check(foldRequest.GetProperty("commentStyles")[0].GetProperty("start").GetString() == ";;", "Fold forwards comment styles");
         await Reject(client.CallAsync(new Dictionary<string, object?> { ["action"] = "error", ["scope"] = "s" }), "missing");
         Check(Action(await client.CallAsync(new Dictionary<string, object?> { ["action"] = "stderr", ["scope"] = "s" })) == "stderr", "stderr drained");
         var slow = client.CallAsync(new Dictionary<string, object?> { ["action"] = "slow", ["scope"] = "s" });
@@ -125,6 +133,26 @@ try
         }));
         await real.ListAsync("real");
         Console.WriteLine("PASS: actual Python source marker delay, retry, fresh occurrence, exact recovery, keep and Unicode offsets");
+        var empty = await real.FoldAsync("fold-test", "");
+        Check(empty.GetProperty("scope").GetString() == "fold-test" && empty.GetProperty("text").GetString() == "", "Fold accepts empty text");
+        Check(empty.GetProperty("references").GetArrayLength() == 0, "Empty text has no references");
+        var body = string.Concat(Enumerable.Repeat("completed 中文🙂\n", 80)).TrimEnd('\n');
+        var prefix = string.Concat(Enumerable.Repeat("visible\n", 800)) + "<!-- @context-fold begin evidence -->\r\n";
+        var suffix = "\r\n<!-- @context-fold end evidence -->\r\nlast line without newline";
+        var submitted = prefix + body + suffix;
+        var immediate = await real.FoldAsync("fold-test", submitted);
+        var references = immediate.GetProperty("references");
+        Check(references.GetArrayLength() == 1, "Explicit fold is immediate");
+        var reference = references[0];
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(body))).ToLowerInvariant();
+        Check(reference.GetProperty("id").GetString() == hash && reference.GetProperty("sha256").GetString() == hash, "Fold hashes exact UTF-8 body");
+        Check(reference.GetProperty("label").GetString() == "evidence", "Fold returns marker label");
+        var immediateText = immediate.GetProperty("text").GetString()!;
+        Check(immediateText == prefix + reference.GetProperty("reference").GetString() + suffix, "Fold returns full text without an extra newline");
+        Check((await real.ResolveAsync("fold-test", immediateText)).GetProperty("value").GetString() == submitted, "Immediate fold recovers exact text");
+        Check((await real.ReadAsync("fold-test", hash)).GetProperty("text").GetString() == body, "Fold hash reads original marked body");
+        await Reject(real.ReadAsync("another-scope", hash));
+        Console.WriteLine("PASS: immediate fold, empty input, complete view, Unicode hash and scoped recovery");
     }
     else Console.WriteLine("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH to context-folding/python");
 }

@@ -109,6 +109,14 @@ fn convenience_methods_preserve_fields_and_reuse_process() {
             .unwrap()["request"]["extra"],
         42
     );
+    assert_eq!(
+        client.fold("s", "", json!({
+            "action": "wrong", "scope": "wrong", "text": "wrong",
+            "language": "explicit", "commentStyles": [{"start": ";;"}]
+        })).unwrap()["request"],
+        json!({"action": "fold", "scope": "s", "text": "",
+            "language": "explicit", "commentStyles": [{"start": ";;"}]})
+    );
     client.close().unwrap();
     client.close().unwrap();
     assert!(matches!(client.list("s", json!(null)), Err(Error::Closed)));
@@ -283,6 +291,43 @@ fn installed_core_delays_annotations_and_recovers_exact_source() {
         "disposition": "foldable", "summary": "obsolete"
     })), Err(Error::Remote { .. })));
     assert!(client.list("real", json!({})).is_ok());
+    client.close().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn installed_core_folds_submitted_text_and_returns_recoverable_references() {
+    let Some(core_path) = std::env::var_os("CONTEXT_FOLDING_REAL_CORE_PATH") else {
+        eprintln!("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH");
+        return;
+    };
+    let directory = marker().with_extension("dir");
+    std::fs::create_dir(&directory).unwrap();
+    let mut cfg = Config::new(directory.join("archive.sqlite"));
+    cfg.env.insert(OsString::from("PYTHONPATH"), core_path);
+    let client = Client::with_config(cfg).unwrap();
+    let empty = client.fold("fold-test", "", json!({})).unwrap();
+    assert_eq!(empty["scope"], "fold-test");
+    assert_eq!(empty["text"], "");
+    assert_eq!(empty["references"], json!([]));
+    let body = "completed 中文🙂\n".repeat(80).trim_end_matches('\n').to_owned();
+    let prefix = format!("{}<!-- @context-fold begin evidence -->\r\n", "visible\n".repeat(800));
+    let suffix = "\r\n<!-- @context-fold end evidence -->\r\nlast line without newline";
+    let text = format!("{prefix}{body}{suffix}");
+    let folded = client.fold("fold-test", &text, json!({})).unwrap();
+    assert_eq!(folded["references"].as_array().unwrap().len(), 1);
+    let reference = &folded["references"][0];
+    assert_eq!(reference["label"], "evidence");
+    assert_eq!(reference["id"], reference["sha256"]);
+    let id = reference["id"].as_str().unwrap();
+    assert_eq!(id.len(), 64);
+    let literal = reference["reference"].as_str().unwrap();
+    assert!(literal.starts_with("[[cf:v2:"));
+    assert_eq!(folded["text"], format!("{prefix}{literal}{suffix}"));
+    let resolved = client.resolve("fold-test", folded["text"].clone()).unwrap();
+    assert_eq!(resolved["value"], text);
+    assert_eq!(client.read("fold-test", id, json!({})).unwrap()["text"], body);
+    assert!(matches!(client.read("another-scope", id, json!({})), Err(Error::Remote { .. })));
     client.close().unwrap();
     std::fs::remove_dir_all(directory).unwrap();
 }

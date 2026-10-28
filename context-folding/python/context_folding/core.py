@@ -178,6 +178,11 @@ class Client:
                               "retention_seconds": "retentionSeconds", "auto_purge": "autoPurge"}
                     snapshot["config"]["gc"] = {dest: self.config["gc"][src] for src, dest in fields.items()}
                 result = self._dispatch(snapshot, request, now)
+                if request["action"] == "fold" and not result["references"]:
+                    # A literal/no-benefit pass creates no archive or lifecycle
+                    # writes and is not blocked by a quota for new payloads.
+                    self._db.rollback()
+                    return result
                 from .lifecycle import maintain_lifecycle
                 maintain_lifecycle(snapshot, now, collect=request["action"] not in ("gc", "skills", "restore"))
                 if gc_default and not (request["action"] == "gc" and request.get("mode") == "configure"):
@@ -207,6 +212,10 @@ class Client:
 
     def put(self, scope: str, text: str, **options):
         return self.call({**options, "action": "put", "scope": scope, "text": text})
+
+    def fold(self, scope: str, text: str, **options):
+        """Immediately fold explicitly annotated text in one durable transaction."""
+        return self.call({**options, "action": "fold", "scope": scope, "text": text})
 
     def read(self, scope: str, id: str, **options):
         return self.call({**options, "action": "read", "scope": scope, "id": id})
@@ -327,6 +336,8 @@ class Client:
 
     def _dispatch(self, snapshot: dict, request: dict, now: float) -> Any:
         action = request["action"]
+        if action == "fold":
+            return self._fold(snapshot, request, now)
         if action in ("annotate", "read-source"):
             return self._source(snapshot, request, now)
         if action == "put":
@@ -353,6 +364,49 @@ class Client:
                     "trashed": sum(n.get("trashedAt") is not None for n in _nodes(snapshot).values()),
                     "offsetUnit": "unicode-code-points"}
         _error("Unknown action")
+
+    def _fold(self, snapshot: dict, request: dict, now: float) -> dict:
+        """An explicit operation, independent of host-driven projection cycles.
+
+        The caller publishes this complete projection only after Client.call has
+        committed every referenced original. Existing references remain literal.
+        """
+        from .annotations import compact_source, discover_source
+        if set(request) - {"action", "scope", "text", "language", "commentStyles"}:
+            _error("fold accepts only scope, text, language and commentStyles")
+        text = request.get("text")
+        if text != "":
+            _string(text, "text", MAX_TEXT)
+        language = request.get("language")
+        if language is not None:
+            _string(language, "language", 100)
+        annotation = discover_source(text, language, styles=request.get("commentStyles"))
+        # Allocate prefixes against the complete candidate batch without storing
+        # tiny blocks that cannot make the UTF-8 output shorter.
+        candidates = [(region, text[region["start"]:region["end"]]) for region in annotation["regions"]]
+        candidates = [(region, payload) for region, payload in candidates
+                      if len(payload.encode("utf-8")) > len(f"[[cf:v2:{region['id']}]]")]
+        catalog = {"entries": [*snapshot["entries"], *({"text": payload} for _, payload in candidates)]}
+        annotation["regions"] = []
+        for region, payload in candidates:
+            region["reference"] = f"[[cf:v2:{_short_hash(catalog, region['sha256'])}]]"
+            if len(region["reference"]) >= len(payload.encode("utf-8")):
+                continue
+            archived = self._put(snapshot, {"scope": request["scope"], "text": payload}, now)
+            region["archiveId"] = archived["id"]
+            # The reference can outlive the current roots list (for example in a
+            # piped file). Keep its original live under the existing GC rules.
+            _entry(snapshot, archived["id"])["folded"] = region["reference"]
+            annotation["regions"].append(region)
+        view = compact_source(text, annotation, allow_reference_literals=True)
+        by_location = {(r["id"], r["startLine"], r["endLine"]): r for r in annotation["regions"]}
+        references = []
+        for item in view["foldedRegions"]:
+            region = by_location[item["id"], item["startLine"], item["endLine"]]
+            references.append({"id": region["sha256"], "label": region["name"],
+                               "sha256": region["sha256"], "reference": region["reference"],
+                               "archiveId": region["archiveId"]})
+        return {"scope": request["scope"], "text": view["text"], "references": references}
 
     def _put(self, snapshot: dict, request: dict, now: float) -> dict:
         text = _string(request.get("text"), "text", MAX_TEXT)

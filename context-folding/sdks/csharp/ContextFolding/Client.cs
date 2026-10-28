@@ -214,6 +214,8 @@ public sealed class Client : IAsyncDisposable
         return CallAsync(request, cancellationToken);
     }
 
+    public Task<JsonElement> FoldAsync(string scope, string text, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
+        => OperationAsync("fold", scope, fields, cancellationToken, ("text", text));
     public Task<JsonElement> PutAsync(string scope, string text, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("put", scope, fields, cancellationToken, ("text", text));
     public Task<JsonElement> ListAsync(string scope, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)

@@ -18,7 +18,7 @@ from .core import Client, FoldingError
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-ACTIONS = ("put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
+ACTIONS = ("fold", "put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
 TOOL_SCHEMA = {
     "type": "object",
     "required": ["action", "scope"],
@@ -59,7 +59,7 @@ TOOL_SCHEMA = {
 }
 TOOL = {
     "name": "context_folding",
-    "description": "Read and recover explicit @context-fold begin/end regions. The host provides occurrence and requestCycle for delayed projection; without a cycle the original stays visible. No automatic summaries or fold strategies.",
+    "description": "fold immediately archives and replaces closed @context-fold begin/end regions in supplied text, returning the complete text and recoverable references. Existing references stay literal. read/resolve recover originals. Background read-source instead requires host occurrence/requestCycle for delayed projection; without a cycle the original stays visible. No automatic summaries or fold strategies.",
     "inputSchema": TOOL_SCHEMA,
 }
 
@@ -180,7 +180,7 @@ class MCPServer:
                 "protocolVersion": version if version in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "context-folding", "version": "0.1.0"},
-                "instructions": "Use explicit @context-fold begin/end comments. Delayed source projection requires host occurrence/requestCycle; read recovers originals on demand. A host may call resolve only when final tool arguments actually contain fold references. This MCP server cannot intercept calls to other tools.",
+                "instructions": "Use explicit @context-fold begin LABEL and @context-fold end LABEL comments. fold is an immediate explicit operation on supplied text; read-source is a delayed background projection requiring host occurrence/requestCycle. read recovers originals on demand. A host may call resolve only when final tool arguments actually contain fold references. This MCP server cannot intercept calls to other tools.",
             }
             self.initialized = True
         elif method == "ping":
@@ -246,10 +246,21 @@ def _text(value: str) -> str:
         raise InputError("invalid_utf8", "Text must be valid UTF-8") from None
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local reversible context archive; no model calls.")
-    parser.add_argument("--state", help="SQLite state file (also accepted after the command)")
+def _default_state() -> str:
+    return os.environ.get("CTXF_STATE") or str(
+        Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        / "context-folding" / "archive.sqlite3")
+
+
+def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="ctxf" if ctxf else None,
+        description="Fold explicit comment regions from UTF-8 stdin (default: fold); originals persist for read/resolve."
+        if ctxf else "Local reversible context archive; no model calls.")
+    parser.add_argument("--state", default=_default_state() if ctxf else None,
+                        help="SQLite state file (ctxf default: CTXF_STATE or XDG data directory; also accepted after the command)")
     parser.add_argument("--project-dir", help="Project settings discovery directory (default: current directory)")
+    if ctxf:
+        parser.add_argument("--scope", default=argparse.SUPPRESS, help="Persistent archive namespace (default: default)")
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
         sub = commands.add_parser(command)
@@ -265,10 +276,21 @@ def _parser() -> argparse.ArgumentParser:
         sub.add_argument("--project-dir", default=argparse.SUPPRESS, help="Project settings discovery directory")
         if command in ("rpc", "mcp"):
             continue
+        if command == "fold":
+            sub.add_argument("--scope", required=not ctxf, default=argparse.SUPPRESS)
+            sub.add_argument("--text", default=argparse.SUPPRESS, help="UTF-8 text; '-' or omission reads stdin")
+            sub.add_argument("--language", default=argparse.SUPPRESS)
+            sub.add_argument("--comment-styles", default=argparse.SUPPRESS, help="Additional comment delimiters as JSON")
+            sub.add_argument("--json", action="store_true", help="Output text and reference metadata as JSON")
+            continue
         sub.add_argument("--json", metavar="JSON", help="Request object; '-' reads JSON stdin")
         if command == "call":
+            if ctxf:
+                sub.add_argument("--scope", default=argparse.SUPPRESS)
             continue
-        sub.add_argument("--scope", required=True)
+        sub.add_argument("--scope", required=not ctxf, default=argparse.SUPPRESS)
+        if command == "read":
+            sub.add_argument("--raw", action="store_true", help="Output complete UTF-8 text without JSON; --limit requests only that range")
         for name in ("id", "text", "role", "occurrence", "query", "name", "description", "path", "mode", "body", "sort", "order", "language"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS)
         sub.add_argument("--request-cycle", type=int, default=argparse.SUPPRESS)
@@ -281,12 +303,16 @@ def _parser() -> argparse.ArgumentParser:
         for name in ("limit", "offset", "depth"):
             sub.add_argument("--" + name, type=int, default=argparse.SUPPRESS)
         sub.add_argument("--pinned", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
+        sub.add_argument("--peek", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
     return parser
 
 
 def _request(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "call":
-        return _object(_loads(_read_stdin()) if args.json in (None, "-") else _argument_json(args.json))
+        request = _object(_loads(_read_stdin()) if args.json in (None, "-") else _argument_json(args.json))
+        if hasattr(args, "scope"):
+            request["scope"] = args.scope
+        return request
     json_fields = ("source", "value", "config", "files", "comment_styles")
     text_fields = ("text", "body")
     stdin_used = False
@@ -299,8 +325,8 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
             stdin_used = True
         return (_loads(_read_stdin()) if raw == "-" else _argument_json(raw)) if is_json else _text(raw)
 
-    request = {} if args.json is None else _object(input_value(args.json, True))
-    excluded = ("command", "state", "project_dir", "json", *json_fields, *text_fields)
+    request = {} if args.command == "fold" or args.json is None else _object(input_value(args.json, True))
+    excluded = ("command", "state", "project_dir", "json", "raw", *json_fields, *text_fields)
     request.update({key: value for key, value in vars(args).items() if key not in excluded})
     for key in json_fields + text_fields:
         if hasattr(args, key):
@@ -310,7 +336,7 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
         request["requestCycle"] = request.pop("request_cycle")
     if "expand_mode" in request:
         request["expandMode"] = request.pop("expand_mode")
-    if args.command == "put" and "text" not in request:
+    if args.command in ("put", "fold") and "text" not in request:
         request["text"] = input_value("-", False)
     return request
 
@@ -506,9 +532,63 @@ def _annotate_project(path: str, language: str, apply: bool,
             "changedFiles": sum(plan[2] != plan[3] for plan in plans)}
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = _parser()
+def _ctxf_arguments(argv: list[str]) -> list[str]:
+    """Insert the default fold command after any leading shared options."""
+    commands = {"rpc", "mcp", "call", *ACTIONS, "annotate-functions"}
+    index = 0
+    while index < len(argv):
+        option = argv[index]
+        if option in commands or option in ("-h", "--help"):
+            return argv
+        if option in ("--state", "--project-dir", "--scope"):
+            if index + 1 >= len(argv):
+                return argv  # Let argparse explain the missing option value.
+            index += 2
+        elif any(option.startswith(name + "=") for name in ("--state", "--project-dir", "--scope")):
+            index += 1
+        else:
+            break
+    return [*argv[:index], "fold", *argv[index:]]
+
+
+def _raw_read(client: Client, request: dict) -> str:
+    """Collect all pages before writing stdout, unless a range was requested."""
+    if "limit" in request:
+        return client.call(request)["text"]
+    parts = []
+    offset = request.get("offset", 0)
+    identity = None
+    while True:
+        page = client.call({**request, "offset": offset, "limit": 24000})
+        current = (page["id"], page["sha256"], page["totalChars"])
+        if identity is not None and identity != current:
+            raise FoldingError("storage", "Archive changed during recovery")
+        identity = current
+        if page["offset"] != offset:
+            raise FoldingError("storage", "Invalid recovery page")
+        parts.append(page["text"])
+        following = page["nextOffset"]
+        if following is None:
+            if offset + len(page["text"]) != page["totalChars"]:
+                raise FoldingError("storage", "Incomplete recovery page")
+            return "".join(parts)
+        if following != offset + len(page["text"]) or following <= offset:
+            raise FoldingError("storage", "Invalid recovery continuation")
+        offset = following
+
+
+def _write_raw(text: str) -> None:
+    sys.stdout.buffer.write(text.encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+
+def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
+    parser = _parser(ctxf=ctxf)
+    if ctxf:
+        argv = _ctxf_arguments(list(sys.argv[1:] if argv is None else argv))
     args = parser.parse_args(argv)
+    if ctxf and args.command in ("rpc", "mcp") and hasattr(args, "scope"):
+        parser.error("--scope belongs to each RPC/MCP request, not the server command")
     if args.command == "annotate-functions":
         try:
             target = Path(args.path)
@@ -525,22 +605,64 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if not args.state:
         parser.error("--state is required")
+    raw_output = args.command == "fold" or (args.command == "read" and args.raw)
+
+    def failure(response: dict) -> int:
+        if raw_output:
+            sys.stderr.write(_json(response) + "\n")
+            sys.stderr.flush()
+        else:
+            _emit(response)
+        return 1
+
     try:
         with Client(args.state, project_dir=args.project_dir) as client:
             if args.command == "rpc":
                 return serve_rpc(client, sys.stdin.buffer)
             if args.command == "mcp":
                 return serve_mcp(client, sys.stdin.buffer)
-            response = _call(client, _request(args))
+            request = _request(args)
+            if ctxf:
+                request.setdefault("scope", getattr(args, "scope", "default"))
+            if args.command == "read" and args.raw:
+                _write_raw(_raw_read(client, request))
+                return 0
+            response = _call(client, request)
+            if "error" in response:
+                return failure(response)
+            if args.command == "fold":
+                if args.json:
+                    _emit(response["result"])
+                else:
+                    _write_raw(response["result"]["text"])
+                return 0
             _emit(response)
-            return 1 if "error" in response else 0
+            return 0
     except (FoldingError, InputError) as exc:
-        _emit({"error": _error(exc)})
-        return 1
+        return failure({"error": _error(exc)})
     except BrokenPipeError:
+        # A short buffered write may fail again during Python's exit flush.
+        # Redirect the descriptor so closing a downstream pipe stays silent.
+        try:
+            sink = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(sink, sys.stdout.fileno())
+            finally:
+                os.close(sink)
+        except (OSError, ValueError):
+            pass
         return 0
     except KeyboardInterrupt:
         return 130
     except Exception:
-        _emit({"error": {"code": "internal_error", "message": "Unable to open or operate the context archive"}})
-        return 1
+        return failure({"error": {"code": "internal_error", "message": "Unable to open or operate the context archive"}})
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Compatibility entry point with explicit state and JSON management output."""
+    return _run_cli(argv)
+
+
+def ctxf_main(argv: list[str] | None = None) -> int:
+    """Pipe-friendly entry point with a persistent default archive and namespace."""
+    return _run_cli(argv, ctxf=True)

@@ -255,6 +255,13 @@ impl Client {
         result
     }
 
+    /// Immediately fold explicitly marked text through the shared Python archive.
+    pub fn fold(&self, scope: &str, text: &str, options: Value) -> Result<Value> {
+        let mut request = options_object(options)?;
+        request.insert("text".into(), json!(text));
+        self.action("fold", scope, request)
+    }
+
     /// Store text. Options may include `role`, `source`, or other engine fields.
     pub fn put(&self, scope: &str, text: &str, options: Value) -> Result<Value> {
         let mut request = options_object(options)?;
