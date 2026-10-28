@@ -162,6 +162,7 @@ test('reusing an already folded projection counts as a folded replay, not guide-
     const context = { protocol: 'chat', model: 'fixture', session: 'projected-replay', cwd, options: { delayRequests: 0 }, state: {} };
     const first = await onRequest(body, context);
     await onResponse({}, { ...context, success: true, request: first });
+    const firstDelta = (await new Store(directory).readStats()).metrics.estimatedTokenDelta;
     const next = await onRequest(first, context);
     assert.deepEqual(next, first);
     await onResponse({}, { ...context, success: true, request: next });
@@ -170,5 +171,31 @@ test('reusing an already folded projection counts as a folded replay, not guide-
     assert.equal(metrics.successfulFoldedRequests, 2);
     assert.equal(metrics.guideOnlyRequests, 0);
     assert.equal(metrics.replayRequests, 1);
+    assert.equal(metrics.estimatedTokenDelta, firstDelta, 'an unchanged projection has zero additional token delta');
+  });
+});
+
+test('new folds do not recount the gross savings of older regions in the same request', async () => {
+  await fixture(async (directory, cwd) => {
+    const body = { tools: [{ type: 'function', function: { name: 'exec_command' } }],
+      messages: [{ role: 'assistant', content: annotated('first', 'Completed work. '.repeat(500)) },
+        { role: 'user', content: 'Continue.' }] };
+    const context = { protocol: 'chat', model: 'fixture', session: 'mixed-replay', cwd,
+      options: { delayRequests: 0 }, state: {} };
+    const store = new Store(directory);
+    await onRequest(body, context);
+    const firstGross = BigInt((await store.readStats()).metrics.foldedTokensEstimated);
+    const nextInput = { ...body, messages: [...body.messages,
+      { role: 'assistant', content: annotated('second', 'New completed work. '.repeat(100)) }] };
+    const next = await onRequest(nextInput, context) as Record<string, unknown>;
+    const clean = withoutGuidance(withoutBudget(next, 'chat'), 'chat');
+    const newOnly = { ...nextInput, messages: [...nextInput.messages.slice(0, -1),
+      ...(clean.messages as unknown[]).slice(-1)] };
+    const newGross = BigInt(estimateTokens(nextInput) - estimateTokens(newOnly));
+    assert.ok(newGross > 0n, 'the new region actually folded');
+    const metrics = (await store.readStats()).metrics;
+    assert.equal(BigInt(metrics.foldedTokensEstimated), firstGross + newGross);
+    assert.equal(metrics.itemsFolded, 2);
+    assert.equal(metrics.foldBatchesApproved, 2);
   });
 });
