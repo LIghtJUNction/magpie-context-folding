@@ -42,29 +42,22 @@ async function command(directory: string, args: string[], input?: string, enviro
   return { stdout, stderr, code };
 }
 
-test('CLI reads bounded pages without unfolding, supports explicit restore and full export', async () => {
+test('CLI defaults to a bounded query and exports paginated exact text explicitly with no added newline and supports JSON/range/pipe export/config', async () => {
   await fixture(async (store, scope, directory, text) => {
     await writeFile(join(directory, '.context-folding.toml'), '[folding]\nenabled = false\n');
     const config = await command(directory, ['config']);
     assert.equal(config.code, 0);
     assert.equal(JSON.parse(config.stdout).config.folding.enabled, false);
     assert.ok(!config.stdout.includes('hidden'));
-    const read = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    const bounded = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    assert.equal(bounded.stdout, text.slice(0, 1200));
+    const read = await command(directory, ['read', '--scope', scope, '--id', 'a', '--full']);
     assert.equal(read.code, 0, read.stderr);
-    assert.match(read.stderr, /--offset 4000/);
-    assert.equal(read.stdout, text.slice(0, 4000));
+    assert.equal(read.stderr, '');
+    assert.equal(read.stdout, text);
     assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
-    assert.equal((await load(store, scope)).groups?.find(group => group.id === 'outer')?.enabled, true);
-    const all = await command(directory, ['read', '--scope', scope, '--id', 'a', '--all']);
-    assert.equal(all.code, 0, all.stderr);
-    assert.equal(all.stderr, '');
-    assert.equal(all.stdout, text);
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
-    const json = await command(directory, ['read', '--scope', scope, '--id', 'a', '--json']);
-    assert.equal(JSON.parse(json.stdout).text, text.slice(0, 4000));
-    assert.equal(JSON.parse(json.stdout).nextOffset, 4000);
-    assert.equal(json.stderr, '');
-    assert.equal(JSON.parse(json.stdout).kept, false);
+    const json = await command(directory, ['read', '--scope', scope, '--id', 'a', '--json', '--full']);
+    assert.equal(JSON.parse(json.stdout).text, text);
     const range = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '11', '--limit', '11', '--json']);
     assert.equal(range.code, 0);
     assert.equal(JSON.parse(range.stdout).text, text.slice(11, 22));
@@ -74,14 +67,20 @@ test('CLI reads bounded pages without unfolding, supports explicit restore and f
     const peek = await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', '-', '--peek']);
     assert.equal(peek.stdout, text);
     assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
-    const restored = await command(directory, ['read', '--scope', scope, '--id', 'a', '--limit', '11', '--restore']);
-    assert.equal(restored.code, 0, restored.stderr);
-    assert.equal(restored.stdout, text.slice(0, 11));
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
-    assert.equal((await load(store, scope)).groups?.find(group => group.id === 'outer')?.enabled, false);
     const destination = join(directory, 'destination');
     assert.equal((await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', destination])).code, 0);
     assert.equal(await readFile(destination, 'utf8'), text);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
+    assert.equal((await load(store, scope)).groups?.find(group => group.id === 'outer')?.enabled, true);
+    const all = await command(directory, ['read', '--scope', scope, '--id', 'a', '--all']);
+    assert.equal(all.stdout, text);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
+    const restored = await command(directory, ['read', '--scope', scope, '--id', 'a', '--restore']);
+    assert.equal(restored.code, 0, restored.stderr);
+    assert.equal(restored.stdout, text);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
+    assert.equal((await load(store, scope)).groups?.find(group => group.id === 'outer')?.enabled, false);
+
     for (const action of ['status', 'list', 'stats']) {
       const result = await command(directory, [action, '--scope', scope, '--json']);
       assert.equal(result.code, 0);
@@ -108,22 +107,22 @@ test('malformed input and filesystem errors never echo supplied secrets', async 
 
 test('raw CLI pages preserve Unicode pairs and pagination always advances', async () => {
   await fixture(async (store, scope, directory) => {
-    const text = 'a'.repeat(3999) + '🙂' + 'tail';
+    const text = 'a'.repeat(1199) + '🙂' + 'tail';
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.entries[0]!.text = text;
     });
     const first = await command(directory, ['read', '--scope', scope, '--id', 'a']);
     assert.equal(first.code, 0, first.stderr);
-    assert.equal(first.stdout, 'a'.repeat(3999));
-    assert.match(first.stderr, /--offset 3999/);
-    const second = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '3999', '--limit', '1']);
+    assert.equal(first.stdout, 'a'.repeat(1199));
+    assert.match(first.stderr, /--offset 1199/);
+    const second = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '1199', '--limit', '1']);
     assert.equal(second.code, 0, second.stderr);
     assert.equal(second.stdout, '🙂');
-    assert.match(second.stderr, /--offset 4001/);
-    const last = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '4001']);
+    assert.match(second.stderr, /--offset 1201/);
+    const last = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '1201']);
     assert.equal(last.code, 0, last.stderr);
     assert.equal(first.stdout + second.stdout + last.stdout, text);
-    const invalid = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '4000']);
+    const invalid = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '1200']);
     assert.equal(invalid.code, 1);
     assert.equal(invalid.stdout, '');
     assert.match(invalid.stderr, /Unicode/);

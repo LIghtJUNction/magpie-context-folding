@@ -1,8 +1,7 @@
-"""Opt-in Claude Code plugin hooks; archive only text already returned by Read.
+"""Opt-in Claude Code Read hook; inspect archived source through bounded queries.
 
-Recovery prints archived data. It never substitutes Edit/Write inputs or grants
-permissions. Only complete Python reads are supported: partial source cannot
-prove lexical context, and other languages have no lexer here.
+Only complete Python reads are supported: partial source cannot prove lexical
+context. The older explicit expand command remains for manual compatibility.
 """
 from __future__ import annotations
 
@@ -119,9 +118,11 @@ def fold(event: dict, archive: Client, scope: str, *, selectors: list[str] | Non
         region = selected[folded["id"]]
         first, last = region["startLine"], region["endLine"]
         payload = text[region["start"]:region["end"]]
-        notice = (f"[context-folding: original lines {first}-{last} hidden; NOT SOURCE; "
-                  f"blank lines below are placeholders; expand before editing: "
-                  f"python3 {shlex.quote(str(Path(__file__).resolve().parents[2] / 'scripts/claude-read.py'))} expand {recovery} {region['id']}]")
+        script = shlex.quote(str(Path(__file__).resolve().parents[2] / 'scripts/claude-read.py'))
+        ref_id = folded["reference"][8:-2]
+        notice = (f"[context-folding: lines {first}-{last} folded; NOT SOURCE; "
+                  f"blank lines preserve numbering; inspect: python3 {script} read {ref_id}; "
+                  f"snapshot={recovery} region={region['id']}]")
         # Preserve every original newline byte. Host numbering remains truthful
         # for all visible source after each placeholder, including CRLF input.
         replacement = notice + "".join(re.findall(r"\r\n|\r|\n", payload))
@@ -160,7 +161,7 @@ def expand(root: Path, identifier: str, region_id: str | list[str] | None = None
     with client(root, token, cwd) as archive:
         parts, offset = [], 0
         while True:
-            result = archive.read(token, identifier, mode="original", offset=offset, limit=24000)
+            result = archive.read(token, identifier, offset=offset, limit=24000)
             parts.append(result["text"])
             offset = result["nextOffset"]
             if offset is None:
@@ -188,10 +189,32 @@ def expand(root: Path, identifier: str, region_id: str | list[str] | None = None
     return response
 
 
+def inspect(root: Path, command: list[str]) -> int:
+    """Use the same ctxf paginated query formatter with the host-bound scope."""
+    if not command or command[0] not in ("list", "grep", "read", "meta"):
+        raise ValueError("Expected list, grep, read or meta")
+    if any(arg in ("--state", "--project-dir", "--scope")
+           or arg.startswith(("--state=", "--project-dir=", "--scope="))
+           for arg in command[1:]):
+        raise ValueError("Host-bound archive settings cannot be overridden")
+    token = os.environ.get(ENV, "")
+    if not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise ValueError("No host session binding; start a session with the plugin enabled")
+    record = root / (token + ".json")
+    fd = os.open(record, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd) as stream:
+        cwd = json.load(stream)["cwd"]
+    from .cli import ctxf_main
+    return ctxf_main(["--state", str(root / (token + ".sqlite3")), "--project-dir", cwd,
+                      "--scope", token, *command])
+
+
 def main() -> int:
     command = sys.argv[1:]
     try:
         root = private_root()
+        if command and command[0] in ("list", "grep", "read", "meta"):
+            return inspect(root, command)
         if command and command[0] == "expand":
             parser = argparse.ArgumentParser(prog="claude-read.py expand")
             parser.add_argument("identifier")
@@ -204,7 +227,7 @@ def main() -> int:
             print(json.dumps(expand(root, options.identifier, regions, options.expand_mode), ensure_ascii=False))
             return 0
         if command not in (["start"], ["hook"]):
-            raise ValueError("Expected start, hook, or expand ID")
+            raise ValueError("Expected start, hook, list, grep, read, meta or legacy expand ID")
         event = json.load(sys.stdin)
         if command == ["start"]:
             if event.get("hook_event_name") == "SessionStart":
@@ -221,7 +244,7 @@ def main() -> int:
             print(json.dumps(output, ensure_ascii=False))
         return 0
     except Exception as error:
-        if command and command[0] == "expand":
+        if command and command[0] in ("expand", "list", "grep", "read", "meta"):
             print(json.dumps({"error": str(error)}), file=sys.stderr)
             return 1
         # No updatedToolOutput means the host retains the original response.

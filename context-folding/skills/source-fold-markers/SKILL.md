@@ -1,24 +1,27 @@
 ---
 name: source-fold-markers
-description: Add explicit source folding comments around completed code while keeping useful declarations visible. Use when authoring or editing source for the context-folding reader.
+description: Add explicit, optionally nested source-folding comments while keeping useful declarations visible. Use when authoring or editing source for the context-folding reader.
 ---
 
 # Source fold markers
 
-Mark useful, completed implementation regions with whole-line comments in the file's language:
+Use whole-line comments in the source language:
 
 ```rust
-// Decode the validated frame; errors are returned to the caller.
+// Decode the validated frame.
 // @context-fold begin decode-frame
 let header = read_header(input)?;
+// @context-fold begin payload
 let payload = read_payload(input, header.length)?;
+validate_payload(&payload)?;
+// @context-fold end payload
 // @context-fold end decode-frame
 ```
 
-Use the same non-whitespace label and comment delimiters for both markers. Leave a short description and necessary declarations outside. Preserve the source's indentation and line endings. Do not nest, cross, leave empty regions, insert markers in strings, annotate trivial one-line code, or obscure work still needed for the next decision.
+Match each label and comment shell. Close inner regions before outer ones. Leave necessary declarations, active decisions and short descriptions outside; preserve indentation and line endings. Do not cross pairs, place markers in strings or annotate trivial content just to create a reference.
 
-Annotations are the only folding permission. The reader does not infer foldable functions from their size, AST, age or token pressure. A compact view uses a generated `[[cf:v2:HASH]]` reference; the source file stays complete. Read the actual reference or expand a named region when its details are needed. Do not guess hashes or write folded views over real source.
+Only annotations permit folding. The system saves exact originals and creates hashes; it does not choose functions by size, AST, age or token pressure. Parent views retain child references. Use list/meta to discover children, grep for relevant evidence, and bounded read for selected lines. These queries do not unfold history. Never write compact views back into real source.
 
-`annotate-functions` is an optional, explicit batch editing command for Python/JS/TS. Preview its proposed changes, respect repository edit scope, and validate the resulting program. It is separate from reading: discovery alone never adds comments or folds unmarked functions. For language-aware source adapters, Python comments are tokenized and JS/TS comments use the optional parser; generic explicit text has no universal language lexer. Avoid generic projection when marker-looking text inside literals is ambiguous.
+`annotate-functions` is an explicit source-editing helper. Preview requested changes, respect edit scope and validate the program. Python uses comment tokens; JS/TS uses optional parser support. Generic literal parsing has no universal lexer and can misread marker-shaped text inside multiline strings.
 
-A host must integrate request projection for the default delayed fold. Source-only post-tool hooks cannot later replace history; without lifecycle information they preserve full text. Use the [context-folding guide](../context-folding/SKILL.md) for the concise marker and recovery workflow.
+For the concise query workflow, see [context-folding](../context-folding/SKILL.md). A host must supply request replay for delayed source projection; a one-shot post-tool hook does not add that lifecycle.

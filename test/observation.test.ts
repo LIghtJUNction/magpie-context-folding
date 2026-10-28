@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { onRequest, onResponse } from '../src/context.hooks.js';
 import { Store, digest } from '../src/store.js';
+import { visibility } from '../src/visibility.js';
+import { collectReport } from '../src/report.js';
 import type { Protocol } from '../src/protocol.js';
-import { bodyFor, fixture, progress } from './helpers.js';
+import { bodyFor, fixture, marked, progress } from './helpers.js';
 
 type Decision = {
   reason: string; beforeBytes: number; afterBytes: number;
@@ -112,5 +114,30 @@ test('a new request without old history reports no current folds while preservin
     const archived = await store.transaction(scope, false, 64 * 1024 * 1024, state => state.entries);
     assert.equal(archived.length, 1);
     assert.ok(archived[0]!.folded);
+  });
+});
+
+
+test('net-savings fallback is observed as the final unfolded request and retains its reason', async () => {
+  await fixture(async ({ store, scope, context }) => {
+    const input = bodyFor('chat', marked('x'.repeat(1500)));
+    const ctx = { ...context, options: { delayRequests: 0, minSavingsTokens: 0,
+      recoveryCommand: 'command-' + 'x'.repeat(3000) }, state: {} };
+    const output = await onRequest(input, ctx);
+    const decision = await latest(store, scope);
+    assert.equal(decision.reason, 'insufficient-net-savings');
+    assert.equal(decision.foldedRegions, 0);
+    assert.equal(decision.beforeBytes, bytes(input));
+    assert.equal(decision.afterBytes, bytes(output));
+    assert.ok(decision.afterBytes > decision.beforeBytes, 'retained guidance overhead is visible');
+    assert.ok(!JSON.stringify(output).includes('[[cf:v2:'));
+    await onResponse({}, { ...ctx, success: true, request: output });
+    const visible = await visibility({ scope });
+    assert.equal(visible.selection, 'session');
+    if (visible.selection !== 'session') throw new Error('Expected session observation');
+    assert.equal(visible.request?.reason, 'insufficient-net-savings');
+    assert.equal(visible.request?.status, 'confirmed');
+    assert.match((await collectReport(scope)).sessions[0]!.reason, /净收益不足/);
+    assert.equal((await store.readStats(scope)).metrics.itemsFolded, 0);
   });
 });

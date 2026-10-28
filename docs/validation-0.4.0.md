@@ -1,8 +1,33 @@
-# 0.4.0 注释主动折叠验收记录
+# 0.4.0 主动折叠与有界检索历史验收记录
+
+本页保留 0.4.0 及 PR #8 分支当时的行为和测试回执，不代表 0.5.0 整合版本的最终验收。当前行为以[根 README](../README.md)、[注释协议](annotation-protocol.md)与[本地传输协议](../context-folding/docs/TRANSPORT.md)为准；MCP 服务和窗口预算配置已移除。
+
+## 历史结果（2026-10-28，PR #8 分支）
+
+**本节描述 PR #8 当时的嵌套查询实现；下方更早记录中的全量恢复和 read 后 keep 语义属于更早版本。当前整合版本的 CLI 合同及验证结果需分别查阅和重新核实。**
+
+- 源码注释与 Assistant 普通文本同用成对的 `@context-fold begin/end LABEL`，合法嵌套形成持久父子树。历史消息保持原角色，折叠仅替换文本。父节点的查询视图保留子引用，不自动装入子正文。
+- `read`、`list`、`grep`、`meta` 是纯查询，不修改 keep、出现状态或历史投影。read 默认 1,200 字符、单次最多 24,000；list/grep 默认 10 项；grep 使用字面匹配，默认递归遍历节点视图，单条片段最多 160 字符。支持 `--lines A:B`、`--offset`、`--limit`、`--depth`、`--recursive` 与 `--json`。
+- `ctxf` 从 UTF-8 stdin 接收内容，输出完整折叠后的文本。当时还提供 MCP 的 `fold/list/grep/read/meta/status` 六项入口；该服务已在 0.5.0 移除，当前使用 CLI 或 SDK 的本地 JSON Lines RPC。旧显式原文恢复接口仅留作兼容，不出现在 Agent 默认工作流。
+- Pi Agent 工具已由自动恢复全文改为 `context_folding_query`；Claude Read 插件提示使用同一有界查询入口。根 Magpie 宿主只修改可编辑请求内容，不改变外部提供商的 compaction 行为。
+
+| 检查 | PR #8 当时执行结果 |
+| --- | --- |
+| 根 Bun 测试，含 Harbor bridge 子进程 | **187 通过，0 失败，22 个测试文件**（Harbor 子进程在获准运行环境验证） |
+| 根 TypeScript 类型检查、构建 | 均通过 |
+| Python 完整套件 | **163 通过，0 失败，0 跳过** |
+| TypeScript SDK 编译和真实 Python 核心测试 | 编译通过；**8 通过，0 失败** |
+| Pi 适配器集成 | **7 通过，0 失败，1 跳过**（缺真实 Pi 宿主包） |
+| Claude 适配器 | 5 项通过，已计入 Python 套件 |
+| Git 补丁空白检查 | `git diff --check` 通过 |
+
+真实 Magpie、Rust、.NET 与实际安装的 Pi 宿主仍未运行；尚无真实模型任务质量、Token 账单节约、计费或默认 compaction 的实验结论。Harbor bridge 测试证明本项目的投影/查询/统计连接运行，但不是完整 Harbor 模型基准任务评分。
+
+## 历史：首次重构与最初 ctxf 管道验收
 
 验证日期：2026-10-28。此记录对应本次源码重构，不表示 npm 已发布，也不继承旧三档策略的性能或账单结论。
 
-## 本次行为
+## 当时行为
 
 Agent 在普通文本或源码注释中输出成对的 `@context-fold begin/end LABEL`。宿主保存正文，默认等待一次不同的历史请求，然后以正文 SHA-256 的短引用替换视图。预算只报告估算使用量和容量，不触发选材。旧 `mark`、三档模式、被动重复检测、自动摘要和成本审批路径已移除；旧归档仍可恢复。
 
@@ -47,7 +72,7 @@ git diff --check
 
 Node 的测试启动器在本次环境中只显示文件级计数，因此直接执行两个 `.test.mjs` 文件核对实际子项与跳过数量。TypeScript SDK 的实际核心用例验证首轮和重试保留、下一周期折叠、新 occurrence 独立等待、v2 精确恢复、读回保护、旧引用兼容，以及拒绝已删除的 `mark` 后连接仍可继续使用。
 
-## 尚未实跑
+## 当时尚未实跑
 
 | 检查 | 原因和实际边界 |
 | --- | --- |
@@ -61,7 +86,9 @@ Node 的测试启动器在本次环境中只显示文件级计数，因此直接
 
 根网关的源码过滤是保守词法扫描，独立 Python 核心使用 Python tokenizer 和可选 JS/TS Tree-sitter。复杂或不确定的网关源码保留原样；其他语言的多行字符串仍有字面标记误识别限制，详见[注释协议](annotation-protocol.md)。
 
-## ctxf 管道与 MCP 追加验证
+## 历史：ctxf 管道与 MCP 追加验证
+
+以下 MCP 结果只记录旧版服务的验收；当前版本已删除该服务，不能用作安装或调用说明。
 
 同日追加独立 Python 命令 `ctxf` 与共享 `fold` action。此次未修改根 Magpie 插件实现；上表的根 TypeScript/Bun 结果来自首次重构验证。Python 与 SDK 的最新计数如下：
 

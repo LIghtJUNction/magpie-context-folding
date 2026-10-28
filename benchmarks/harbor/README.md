@@ -12,7 +12,7 @@
 | `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；只提供容器里的 `exec_command` 和完整 `read_file`；当前 trial 原文通过终端中的 CLI 按需查看。 |
 | `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse`，恢复由真实 CLI 子进程完成。没有另写压缩算法。 |
 | baseline | 完整历史，使用同一基础任务提示与终端工具；没有插件专属工具或手工教学。 |
-| folding | 同一基础提示、工具与模型参数；实际钩子自动注入短规则，默认延迟一个请求，指导和 CLI 回查开销全部计入请求，预算提示默认关闭。 |
+| folding | 同一基础提示、工具与模型参数；实际钩子自动注入短规则，默认延迟一个请求，指导和 CLI 回查开销全部计入请求，不配置或注入上下文预算。 |
 
 Agent 始终保留原始 transcript。每轮只将发送给模型的副本交给 bridge。普通 Assistant 标记和明确识别的源码完整读取可折叠；普通 shell 输出不伪装成源码读取。模型必须自己决定写哪些注释，没有额外总结模型，也没有自动挑选历史。
 
@@ -46,6 +46,8 @@ npm run bench:harbor -- smoke
 | `nop` | 不做任务，应失败，reward = 0；这是评分器的负向控制。 |
 | `ScriptedSmokeAgent` + baseline | 确定性脚本通过，历史不折叠。 |
 | `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实延迟折叠、精确 CLI 查阅，查看后历史继续保持折叠。 |
+
+归档查询通过相同的 CLI 子进程执行 `read`、`list`、`grep`、`meta`、`status`，只允许当前 trial 的 scope 与归档目录。嵌套查询返回当前节点的视图，子节点保持短引用；按需继续读取子节点，不展开原历史。
 
 脚本 Agent 直接使用仓库中公开的 oracle，并不测模型解题能力。它不会连接模型服务，token/费用保持未知，不伪造为零。命令会检查所有预期 trial 的实际结果，不能只因 Harbor 进程退出码为 0 就判通过。
 

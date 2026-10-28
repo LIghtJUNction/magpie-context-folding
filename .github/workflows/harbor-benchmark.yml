@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'context-folding/**'
       - 'benchmarks/harbor/**'
       - 'scripts/host-smoke.py'
       - 'package.json'
@@ -16,6 +17,28 @@ permissions:
   contents: read
 
 jobs:
+  python-core:
+    name: Python core and source parsers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - run: uv sync --project context-folding --frozen --extra javascript --python 3.12
+      - name: Require the optional source parsers before running the full suite
+        run: uv run --project context-folding --no-sync python -c "import tree_sitter, tree_sitter_javascript, tree_sitter_typescript"
+      - name: Run all Python core tests
+        run: uv run --project context-folding --no-sync python -m unittest discover -s context-folding/tests -v
+
   host-smoke:
     name: Magpie HTTP host and CLI recovery
     runs-on: ubuntu-24.04

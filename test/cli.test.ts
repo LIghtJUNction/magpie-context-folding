@@ -49,14 +49,14 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     const layer = await invoke(['read', '--scope', scope, '--id', 'a', '--layer', 'layer', '--peek', '--json']);
     assert.equal(layer.code, 0);
     assert.equal(JSON.parse(layer.out).text, 'short');
-    assert.equal(JSON.parse(layer.out).kept, false);
+    assert.equal(JSON.parse(layer.out).layer, 'layer');
     const status = await invoke(['status', '--scope', scope]);
-    assert.equal(JSON.parse(status.out).folded, 0);
+    assert.equal(JSON.parse(status.out).folded, 1);
     const stats = await invoke(['stats', '--scope', scope, '--json']);
     assert.equal(stats.code, 0);
     assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 2);
     assert.equal((await invoke(['stats'])).code, 0);
-    assert.equal(JSON.parse((await invoke(['forget', '--scope', scope])).out).forgotten, true);
+    assert.equal(JSON.parse((await invoke(['forget', '--scope', scope, '--force'])).out).forgotten, true);
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 1);
   });
 });
@@ -64,11 +64,13 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
 test('CLI keeps recovery available with disabled, legacy or broken config and explains migration', async () => {
   await fixture(async (scope, directory, invoke) => {
     const config = join(directory, '.context-folding.toml');
-    await writeFile(config, '[folding]\nenabled = false\ncontext_window_tokens = 32000\n');
+    await writeFile(config, '[folding]\nenabled = false\n');
     const effective = await invoke(['config', '--project-dir', directory, '--json']);
     assert.equal(effective.code, 0);
     assert.equal(JSON.parse(effective.out).config.folding.enabled, false);
-    assert.equal(JSON.parse(effective.out).config.folding.context_window_tokens, 32000);
+    assert.deepEqual(JSON.parse(effective.out).config.folding, {
+      enabled: false, max_session_bytes: 67_108_864, delay_requests: 1, min_savings_tokens: 256,
+    });
     assert.ok(!effective.out.includes('secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
     await writeFile(config, '[folding]\nenabled = "private-secret"\n');
@@ -83,6 +85,15 @@ test('CLI keeps recovery available with disabled, legacy or broken config and ex
     assert.match(legacy.err, /removed.*@context-fold/);
     assert.ok(!legacy.err.includes('private-secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
+    for (const key of ['context_window_tokens', 'reserve_output_tokens', 'budget_hints']) {
+      await writeFile(config, `[folding]\n${key} = 32000\n`);
+      const retired = await invoke(['config']);
+      assert.equal(retired.code, 1);
+      assert.equal(retired.out, '');
+      assert.match(retired.err, /removed/);
+      assert.ok(retired.err.includes(key));
+      assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
+    }
   });
 });
 
@@ -130,5 +141,28 @@ test('CLI invalid commands and arguments use stderr, exit 1 and never leak suppl
     assert.ok(!/^mark\s|^mode\s/m.test(help.out));
     assert.match((await invoke(['mode'])).err, /removed/);
     assert.equal((await invoke(['read', '--help'])).code, 0);
+  });
+});
+
+test('CLI grep/list/meta use short content keys and read accepts bounded view lines', async () => {
+  await fixture(async (scope, _directory, invoke) => {
+    const hash = digest('原文🙂\n```ts\nexact();\n```\n').slice(0, 12);
+    const list = await invoke(['list', '--scope', scope]);
+    assert.equal(list.code, 0);
+    assert.ok(list.out.startsWith(hash + ' '));
+    assert.ok(!list.out.includes('exact();'));
+    const grep = await invoke(['grep', '--scope', scope, '--query', 'exact()']);
+    assert.equal(grep.code, 0, grep.err);
+    assert.equal(grep.out, hash + ':3:exact();\n');
+    const meta = await invoke(['meta', '--scope', scope, '--id', hash, '--json']);
+    assert.equal(meta.code, 0, meta.err);
+    const information = JSON.parse(meta.out);
+    assert.equal(information.key, hash);
+    assert.equal(information.text, undefined);
+    const line = await invoke(['read', '--scope', scope, '--id', hash, '--start-line', '3', '--end-line', '3']);
+    assert.equal(line.out, 'exact();\n');
+    const conflicting = await invoke(['read', '--scope', scope, '--id', hash, '--start-line', '3', '--offset', '0']);
+    assert.equal(conflicting.code, 1);
+    assert.equal(conflicting.out, '');
   });
 });

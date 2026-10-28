@@ -11,48 +11,56 @@ import type { VisibilitySelection } from './visibility.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
-read   --scope S --id ID [--layer ID] [--offset N] [--limit N|--all] [--restore|--peek] [--json]
-paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
-list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
-       [--order asc|desc] [--offset N] [--limit N]
+read   --scope S --id HASH [--layer ID] [--start-line N --end-line N | --offset N]
+       [--limit N | --full | --all | --restore] [--peek] [--json]
+grep   --scope S --query TEXT [--id HASH] [--no-recursive] [--limit N] [--offset N] [--json]
+list   --scope S [--id HASH] [--recursive] [--depth N] [--query TEXT]
+       [--sort chronological|size|id|version] [--order asc|desc] [--limit N] [--offset N] [--json]
+meta   --scope S --id HASH [--offset N] [--limit N] [--json]
+paste  --scope S --id HASH --path /new/file|- [--layer ID] [--offset N] [--limit N] [--json]
 status --scope S
 stats  [--scope S] [--json]
 statusline [--scope S] [--client] [--json]
 sessions [--json]
 hook   [--scope S] (Stop hook JSON on stdin; one UI notification per confirmed request)
 report --output /absolute/new.html [--scope S]
-forget --scope S (requires restored entries and group manifests)
+forget --scope S [--force]
 config [--project-dir PATH]
 
 Archive commands accept --state-dir PATH to select the Magpie archive explicitly.
-read writes at most 4000 characters by default; --limit selects a page and --all reads the rest.
-Reading leaves the archive folded; --restore also keeps the original visible in future requests.
-paste --path - exports the full exact text unless --limit selects a page.
-Other archive commands and config write JSON.
-paste persists keep and restores all ancestor groups; --peek leaves folding unchanged.
-Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
-Folding is requested with @context-fold begin/end annotations, not a CLI command.
+read returns at most 1200 UTF-16 units of one view; nested children remain references.
+--full exports the complete selected view; --all exports the complete original layer by default.
+With --offset, --full/--all export from that offset to the end of the selected layer.
+--layer original selects the exact archived bytes; neither export recursively expands stored references.
+--restore returns the complete original and keeps the selected subtree visible in future requests.
+Ordinary read/paste never change folding state. paste defaults to the complete one-layer view.
+grep/list return 10 short results by default; meta returns sizes and direct child IDs.
 statusline is read-only; without a scope/client binding it shows explicitly global totals.
 --client matches stdin session_id only when exactly one gateway scope has the same identity.
 MAGPIE_CONTEXT_FOLDING_SCOPE supplies an explicit scope for statusline/hook.
---json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
+--json returns structured data. Diagnostics go to stderr; errors exit 1.`;
 
 const string = { type: 'string' } as const;
 const boolean = { type: 'boolean' } as const;
 const common = { json: boolean, help: boolean };
 const archive = { ...common, 'state-dir': string };
-const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean };
+const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean,
+  'start-line': string, 'end-line': string };
 const options: Record<string, ParseArgsConfig['options']> = {
-  read: { ...archive, ...range, all: boolean, restore: boolean },
+  read: { ...archive, ...range, all: boolean, full: boolean, restore: boolean },
   paste: { ...archive, ...range, path: string },
-  list: { ...archive, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
+  list: { ...archive, scope: string, id: string, depth: string, recursive: boolean, query: string,
+    sort: string, order: string, offset: string, limit: string },
+  grep: { ...archive, scope: string, id: string, query: string, recursive: boolean, 'no-recursive': boolean,
+    'case-sensitive': boolean, offset: string, limit: string },
+  meta: { ...archive, scope: string, id: string, offset: string, limit: string },
   status: { ...archive, scope: string },
   stats: { ...archive, scope: string },
   statusline: { ...archive, scope: string, client: boolean },
   sessions: { ...archive },
   hook: { help: boolean, scope: string, 'state-dir': string },
   report: { help: boolean, output: string, scope: string, 'state-dir': string },
-  forget: { ...archive, scope: string },
+  forget: { ...archive, scope: string, force: boolean },
   config: { ...common, 'project-dir': string },
 };
 class UsageError extends Error {}
@@ -70,7 +78,12 @@ async function main(): Promise<void> {
   try { values = parseArgs({ args: argv, options: options[command], strict: true, allowPositionals: false }).values; }
   catch { throw new UsageError('Invalid command options; use --help'); }
   if (values.help) { console.log(usage); return; }
-  if (values.all && values.limit !== undefined) throw new UsageError('Choose --all or --limit, not both');
+  if ((values.all || values.full) && values.limit !== undefined) throw new UsageError('Choose a complete export or --limit, not both');
+  if (values.all && values.full) throw new UsageError('Choose --all for original bytes or --full for the selected view');
+  if (values.restore && (values.limit !== undefined || values.offset !== undefined || values['start-line'] !== undefined
+    || values['end-line'] !== undefined || (values.layer !== undefined && values.layer !== 'original'))) {
+    throw new UsageError('--restore requires the complete original without range or view options');
+  }
   if (values.restore && values.peek) throw new UsageError('Choose --restore or --peek, not both');
   if (values['state-dir'] !== undefined) {
     const directory = values['state-dir'];
@@ -144,34 +157,37 @@ async function main(): Promise<void> {
   }
   const args: Record<string, unknown> = { action: command };
   for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || key === 'json' || key === 'help' || key === 'all' || key === 'restore' || key === 'state-dir') continue;
-    if (['offset', 'limit', 'depth'].includes(key)) {
+    if (value === undefined || ['json', 'help', 'all', 'full', 'restore', 'state-dir'].includes(key)) continue;
+    if (['offset', 'limit', 'depth', 'start-line', 'end-line'].includes(key)) {
       if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
         throw new UsageError('Expected a nonnegative integer for range/depth options');
       }
-      args[key] = Number(value);
-    } else args[key] = value;
+      args[key === 'start-line' ? 'startLine' : key === 'end-line' ? 'endLine' : key] = Number(value);
+    } else if (key === 'no-recursive') { if (value) args.recursive = false; }
+    else args[key === 'case-sensitive' ? 'caseSensitive' : key] = value;
   }
   const stdoutRead = command === 'read' || (command === 'paste' && values.path === '-');
   if (stdoutRead) {
     const request: Record<string, unknown> = { ...args, action: 'read' };
     delete request.path;
-    if (command === 'read') request.peek = values.restore !== true;
+    request.peek = values.restore !== true;
+    if (values.restore || (values.all && values.layer === undefined)) request.layer = 'original';
     const page = async (input: Record<string, unknown>) => {
       const result = JSON.parse(await execute(input)) as {
-        error?: string; id: string; text: string; nextOffset: number | null; sha256: string; totalChars: number;
+        error?: string; id: string; text: string; nextOffset: number | null; sha256: string; viewSha256: string; totalChars: number;
       };
       if (result.error) throw new UsageError(result.error);
       return result;
     };
-    const fullRead = values.all === true || command === 'paste';
-    const result = await page({ ...request, limit: args.limit ?? (fullRead ? 24000 : 4000) });
+    const full = values.full === true || values.all === true || values.restore === true || (command === 'paste' && args.limit === undefined);
+    if (full && (args.startLine !== undefined || args.endLine !== undefined)) throw new UsageError('Full export cannot combine with a line range');
+    const result = await page({ ...request, limit: args.limit ?? (full ? 24000 : 1200) });
     request.id = result.id;
     const chunks = [result.text];
     let nextOffset = result.nextOffset;
-    while (fullRead && args.limit === undefined && nextOffset !== null) {
+    while (full && args.limit === undefined && nextOffset !== null) {
       const next = await page({ ...request, peek: true, offset: nextOffset, limit: 24000 });
-      if (next.sha256 !== result.sha256 || next.totalChars !== result.totalChars) {
+      if (next.viewSha256 !== result.viewSha256 || next.totalChars !== result.totalChars) {
         throw new UsageError('Context archive changed during reading; retry request');
       }
       chunks.push(next.text);
@@ -182,13 +198,20 @@ async function main(): Promise<void> {
     if (values.json) console.log(JSON.stringify(result));
     else {
       await Bun.write(Bun.stdout, result.text);
-      if (nextOffset !== null) console.error(`More: --offset ${nextOffset} (use --all for the rest)`);
+      if (nextOffset !== null) console.error(`More: --offset ${nextOffset} (use --full for the rest of this view)`);
     }
     return;
   }
-  const result = JSON.parse(await execute(args)) as { error?: string };
+  const result = JSON.parse(await execute(args)) as { error?: string; entries?: { id: string; key: string; label?: string; depth: number; chars: number; childCount: number }[];
+    matches?: { id: string; key: string; line: number; text: string }[]; nextOffset?: number | null };
   if (result.error) throw new UsageError(result.error);
-  console.log(JSON.stringify(result));
+  if (!values.json && result.entries && command === 'list') {
+    for (const item of result.entries) console.log('  '.repeat(item.depth) + item.key + ' ' + (item.label ?? '') + ' (' + item.chars + ' chars, ' + item.childCount + ' children)');
+    if (result.nextOffset !== null) console.log('nextOffset=' + result.nextOffset);
+  } else if (!values.json && result.matches && command === 'grep') {
+    for (const item of result.matches) console.log(item.key + ':' + item.line + ':' + item.text);
+    if (result.nextOffset !== null) console.log('nextOffset=' + result.nextOffset);
+  } else console.log(JSON.stringify(result));
   // @context-fold end main-5a1db74d0b
 }
 
