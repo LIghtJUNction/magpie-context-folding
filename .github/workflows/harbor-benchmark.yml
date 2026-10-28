@@ -58,6 +58,7 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
       - name: Install the pinned Magpie CLI and isolation tools
         shell: bash
         run: |

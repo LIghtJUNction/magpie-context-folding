@@ -14,14 +14,14 @@ const folded = (body: Record<string, unknown>, protocol: Protocol) => extractSpa
 
 test('guidance keeps an independent summary above details and folds completed stages early', () => {
   const text = guidanceText(options);
-  assert.match(text, /Actively manage context with folding; do not wait for pressure/);
-  assert.match(text, /first write a concise, current summary outside the markers/);
-  assert.match(text, /block immediately below it/);
-  assert.match(text, /Keep conclusions, constraints, failures, decisions and next steps visible above\/outside/);
-  assert.match(text, /A task-wide outer block is optional/);
-  assert.match(text, /little extra byte reduction over milestone-only folding/);
-  assert.match(text, /an unclosed pair cannot fold/);
-  assert.match(text, /If the host reports compaction/);
+  assert.match(text, /Actively fold completed stages/);
+  assert.match(text, /Write a concise current summary outside each block/);
+  assert.match(text, /close lengthy supporting details below/);
+  assert.match(text, /Keep conclusions, constraints, failures and next steps visible/);
+  assert.match(text, /Task-wide blocks are optional/);
+  assert.match(text, /little extra savings over milestone blocks/);
+  assert.match(text, /open pairs cannot fold/);
+  assert.match(text, /After compaction, restate known status outside/);
 });
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
