@@ -2,6 +2,9 @@
   "hooks": {
     "SessionStart": [{
       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/claude-read.py\" start", "timeout": 10}]
+    }, {
+      "matcher": "compact",
+      "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/post-compact.py\"", "timeout": 10}]
     }],
     "PostToolUse": [{
       "matcher": "Read",

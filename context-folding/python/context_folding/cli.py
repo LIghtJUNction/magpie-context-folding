@@ -262,6 +262,9 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
     if ctxf:
         parser.add_argument("--scope", default=argparse.SUPPRESS, help="Persistent archive namespace (default: default)")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("post-compact",
+                        help="Print the post-compaction reminder for a host to inject; no archive access",
+                        description="Print a fixed UTF-8 reminder. The host must call this after compaction and inject stdout into the next model context.")
     for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
         sub = commands.add_parser(command)
         if command == "annotate-functions":
@@ -534,7 +537,7 @@ def _annotate_project(path: str, language: str, apply: bool,
 
 def _ctxf_arguments(argv: list[str]) -> list[str]:
     """Insert the default fold command after any leading shared options."""
-    commands = {"rpc", "mcp", "call", *ACTIONS, "annotate-functions"}
+    commands = {"rpc", "mcp", "call", *ACTIONS, "annotate-functions", "post-compact"}
     index = 0
     while index < len(argv):
         option = argv[index]
@@ -587,6 +590,10 @@ def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
     if ctxf:
         argv = _ctxf_arguments(list(sys.argv[1:] if argv is None else argv))
     args = parser.parse_args(argv)
+    if args.command == "post-compact":
+        from .post_compaction import POST_COMPACTION_REMINDER
+        _write_raw(POST_COMPACTION_REMINDER + "\n")
+        return 0
     if ctxf and args.command in ("rpc", "mcp") and hasattr(args, "scope"):
         parser.error("--scope belongs to each RPC/MCP request, not the server command")
     if args.command == "annotate-functions":

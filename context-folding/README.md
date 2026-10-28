@@ -181,6 +181,32 @@ The Pi adapter handles successful single-text Python reads; the Claude adapter a
 
 A host that wants delayed folding must retain exact source observations and call the core again with the same `occurrence` and a later `requestCycle` when constructing the model request. The independent MCP server cannot add that hook itself.
 
+### Post-compaction reminder
+
+The Claude plugin registers a separate `SessionStart` hook with the `compact` matcher. After automatic or manual compaction, it adds one fixed reminder through `hookSpecificOutput.additionalContext`: use matching whole-line folding markers during real work, close each completed phase, keep conclusions/constraints/next steps outside, and continue the original task. Automatic fallback compaction is treated as feedback to use proactive folding more effectively; manual `/compact` is not treated as proof of agent failure.
+
+Load the source plugin in Claude Code (Python 3.10+ must be available):
+
+```sh
+claude --plugin-dir /absolute/path/magpie-context-folding/context-folding
+```
+
+For an existing installation, update the plugin source and start a new Claude session to load the new hook configuration. The reminder is independent of the read-recovery binding and archive: it works without `CLAUDE_ENV_FILE` or a writable state directory. It does not read transcripts or repeat the compression summary. Other session-start reasons and malformed inputs produce no reminder. Each matching hook invocation emits one reminder; it does not poll or retain a cross-process event ledger.
+
+The [Claude hook contract](https://code.claude.com/docs/en/hooks#sessionstart) makes `SessionStart(source="compact")` the context-injection point. `PostCompact` is a completed-compaction notification, but its documented output does not add model context, so this implementation uses the post-compaction `SessionStart` event.
+
+Other hosts can obtain the same prompt through a CLI-only command:
+
+```sh
+ctxf post-compact
+# Without a tool installation or archive, from the repository root:
+PYTHONPATH=context-folding/python python3 -m context_folding post-compact
+```
+
+This writes only the UTF-8 reminder to stdout, does not read stdin, and requires no state or scope. The host must call it **after compaction** and insert stdout into the next model context; running it alone does not register a hook. It is not an MCP/archive action. Use either a manually configured reminder hook or the bundled hook for the same event to avoid duplicate delivery.
+
+Conversation folding still requires the [Magpie request plugin](../README.md) or an equivalent host request adapter. The Claude read adapter alone only handles source reads; the reminder cannot make it fold earlier assistant messages. Installing the root Magpie npm package does not install this Python CLI or register Claude hooks, and [Magpie's documented gateway hooks](https://usemagpie.ai/docs/plugins#async-gateway-request-hooks) do not expose a native compaction-completed event. The reminder encourages proactive folding; it cannot guarantee that a host will never compact or reconstruct text already removed by compaction.
+
 ## References used in edits
 
 `resolve` accepts a complete JSON value and expands stored references in string values, not keys. It returns original text; it does not read the current source, authorize an action, or execute commands.

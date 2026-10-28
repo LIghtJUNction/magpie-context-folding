@@ -109,6 +109,20 @@ Python 用 `#`，JavaScript/TypeScript 用 `//`，也可使用对应语言的完
 
 网关对 Python 和 JavaScript/TypeScript 使用保守词法过滤，排除字符串里的伪标记；遇到 f-string、无法可靠区分的模板插值或 JSX 等复杂结构时保留该份源码。独立 Python 核心使用 Python tokenizer 和可选的 JS/TS Tree-sitter 语法分析，能力范围不同。其他语言仍使用整行字面协议，不能保证排除多行字符串中的伪标记。
 
+### 4. 压缩后提醒 Agent 主动折叠
+
+项目的 Claude Code 适配器已注册 `SessionStart` 的 `compact` hook：宿主压缩完成、重新装入上下文时，注入一条固定提醒。提醒把自动兜底压缩作为主动折叠使用不足的反馈，要求 Agent 在后续真实任务中及时输出并闭合成对标记，将结论、约束和待办留在外面，然后继续原任务。手动 `/compact` 同样收到操作提醒，但不会被断言为 Agent 失误。
+
+从源码加载适配器：
+
+```sh
+claude --plugin-dir /absolute/path/magpie-context-folding/context-folding
+```
+
+其他宿主可在压缩完成后调用 `ctxf post-compact`，将 stdout 插入下一轮模型上下文；该命令只输出提醒，不读写归档，也不会自行注册 hook。`ctxf` 需要单独安装 Python 包。完整接入方式见[压缩后提醒](context-folding/README.md#post-compaction-reminder)。
+
+对话的自动折叠仍由 Magpie 请求插件或等效适配器执行。仅安装根 Magpie 插件不会注册 Claude hook；单独安装 Claude 的 Read 适配器也不会自动折叠对话历史。[Magpie 现有网关接口](https://usemagpie.ai/docs/plugins#async-gateway-request-hooks)不提供客户端压缩完成事件。[Claude 的 `SessionStart(compact)`](https://code.claude.com/docs/en/hooks#sessionstart)才支持把这条提醒送进模型上下文，因此这里使用压缩后的会话事件。提醒不能保证宿主永远不压缩，也不能重建已经丢失的原文。
+
 ## 短哈希与恢复
 
 系统按实际折叠正文的 UTF-8 字节计算 SHA-256，引用为 `[[cf:v2:<hash>]]`，通常显示前 12 位，遇到冲突时延长。外层标记不计入正文；正文末尾的一个物理换行保留在引用外，以便精确恢复。哈希随正文变化，同名标记的不同内容不会指向同一个快照。旧引用仍恢复当时的原文，不会偷偷改成磁盘上的最新文件。
