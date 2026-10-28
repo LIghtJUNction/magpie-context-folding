@@ -1,0 +1,23 @@
+schema_version = "1.4"
+artifacts = ["/app/ledger.py", "/app/output"]
+
+[metadata]
+category = "synthetic-coding-smoke"
+description = "Deterministic ledger repair; an integration smoke task, not a published leaderboard benchmark."
+suite_version = "1.0.0"
+
+[agent]
+timeout_sec = 180.0
+user = "agent"
+
+[verifier]
+timeout_sec = 60.0
+user = "root"
+environment_mode = "separate"
+
+[environment]
+network_mode = "no-network"
+cpus = 1
+memory_mb = 512
+storage_mb = 1024
+workdir = "/app"
