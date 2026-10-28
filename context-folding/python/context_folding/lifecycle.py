@@ -100,6 +100,8 @@ def _graph(snapshot):
             refs = _ids(item.get("children", [])) if is_group else set()
             if not is_group and "annotation" in item:
                 refs.update(_ids(list({region["archiveId"] for region in item["annotation"]["regions"]})))
+            if not is_group and "foldChildren" in item:
+                refs.update(_ids(list({child["id"] for child in item["foldChildren"]})))
             version = item.get("version", {})
             if not isinstance(version, dict):
                 _fail("Invalid lifecycle snapshot")

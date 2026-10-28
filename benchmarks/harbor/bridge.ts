@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { isAbsolute } from 'node:path';
 import { onRequest, onResponse } from '../../src/context.hooks.js';
 import { execute } from '../../src/tool.js';
+import { statistics } from '../../src/statistics.js';
 
 type RecordValue = Record<string, unknown>;
 type Mode = 'baseline' | 'folding';
@@ -101,6 +102,11 @@ export class FoldingBridge {
       requireCondition(input.args.scope === undefined || input.args.scope === this.scope,
         'scope_mismatch', 'Recovery is restricted to this trial');
       const result: unknown = JSON.parse(await execute({ ...input.args, scope: this.scope }));
+      if (input.args.action === 'status' && record(result) && !('error' in result)) {
+        // Harbor needs completion counters for measurement; the normal Agent
+        // status response intentionally omits verbose accounting metadata.
+        return { ...result, metrics: (await statistics(this.scope)).metrics };
+      }
       return result;
     }
     if (input.op === 'close') {

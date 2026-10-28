@@ -35,23 +35,18 @@ async function fixture(run: (store: Store, scope: string, directory: string) => 
 const load = (store: Store, scope: string) => store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
 
 for (const action of ['read', 'paste']) for (const layer of ['original', 'layer']) {
-  test(`${action} ${layer} keeps recovered content expanded and restores legacy ancestors`, async () => {
+  test(`${action} ${layer} queries content without changing entries or ancestors`, async () => {
     await fixture(async (store, scope, directory) => {
+      const before = await load(store, scope);
       const path = join(directory, 'out');
       const result = await call({ action, scope, id: 'a', layer, ...(action === 'paste' ? { path } : {}) });
       assert.equal(result.error, undefined);
-      assert.equal(result.kept, true);
       if (action === 'paste') assert.equal(await readFile(path, 'utf8'), layer === 'original' ? 'a🙂 original\n' : 'short');
       else assert.equal(result.text, layer === 'original' ? 'a🙂 original\n' : 'short');
       const state = await load(store, scope);
-      assert.equal(state.entries[0]!.mark.disposition, 'keep');
-      assert.equal(state.entries[0]!.manual, true);
-      assert.equal(state.entries[0]!.version!.automatic, false);
-      assert.equal(state.entries[0]!.folded, undefined);
-      assert.equal(state.entries[0]!.occurrences!.first!.folded, undefined);
-      assert.equal(state.entries[0]!.layers[0]!.text, 'short');
-      assert.ok(state.groups!.every(group => !group.enabled && group.folded === undefined));
-      assert.equal(state.metrics.itemsRestored, 3);
+      assert.deepEqual(state.entries, before.entries);
+      assert.deepEqual(state.groups, before.groups);
+      assert.equal(state.metrics.itemsRestored, 0);
     });
   });
 }
@@ -59,8 +54,8 @@ for (const action of ['read', 'paste']) for (const layer of ['original', 'layer'
 test('peek read and paste leave annotations, marks, occurrences and folded groups unchanged', async () => {
   await fixture(async (store, scope, directory) => {
     const before = await load(store, scope);
-    assert.equal((await call({ action: 'read', scope, id: 'a', layer: 'layer', peek: true })).kept, false);
-    assert.equal((await call({ action: 'paste', scope, id: 'a', path: join(directory, 'peek'), peek: true })).kept, false);
+    assert.equal((await call({ action: 'read', scope, id: 'a', layer: 'layer', peek: true })).text, 'short');
+    assert.equal((await call({ action: 'paste', scope, id: 'a', path: join(directory, 'peek'), peek: true })).error, undefined);
     const after = await load(store, scope);
     assert.deepEqual(after.entries, before.entries);
     assert.deepEqual(after.groups, before.groups);
@@ -110,7 +105,7 @@ test('ambiguous hash prefixes are rejected atomically and exact legacy IDs take 
   });
 });
 
-test('identical hash/content aliases resolve together and remain expanded after recovery', async () => {
+test('identical hash/content aliases resolve without changing folded state', async () => {
   await fixture(async (store, scope) => {
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       const alias = structuredClone(state.entries[0]!);
@@ -122,8 +117,8 @@ test('identical hash/content aliases resolve together and remain expanded after 
     assert.equal((await call({ action: 'read', scope, id: hash.slice(0, 12) })).text, 'a🙂 original\n');
     const state = await load(store, scope);
     for (const entry of state.entries.filter(entry => entry.annotation?.sha256 === hash)) {
-      assert.equal(entry.mark.disposition, 'keep');
-      assert.equal(entry.folded, undefined);
+      assert.equal(entry.mark.disposition, 'foldable');
+      assert.equal(entry.folded, 'short');
     }
   });
 });
@@ -133,8 +128,8 @@ test('legacy group manifests and previous layers remain available', async () => 
     const manifest = await call({ action: 'read', scope, id: 'inner' });
     assert.deepEqual(JSON.parse(manifest.text).children, ['a', 'b']);
     const state = await load(store, scope);
-    assert.ok(state.groups!.every(group => !group.enabled && group.folded === undefined));
-    assert.equal(state.metrics.itemsRestored, 2);
+    assert.ok(state.groups!.every(group => group.enabled && group.folded !== undefined));
+    assert.equal(state.metrics.itemsRestored, 0);
     const layer = await call({ action: 'read', scope, id: 'a', layer: 'layer', peek: true });
     assert.equal(layer.previousId, 'original');
     assert.equal(layer.text, 'short');
@@ -142,14 +137,14 @@ test('legacy group manifests and previous layers remain available', async () => 
   });
 });
 
-test('forget requires restored entries and groups, then removes recovery data', async () => {
+test('forget requires explicit force while references still depend on originals', async () => {
   await fixture(async (store, scope) => {
-    assert.match((await call({ action: 'forget', scope })).error, /without peek/);
+    assert.match((await call({ action: 'forget', scope })).error, /force=true/);
     for (const id of ['a', 'b', 'c']) await call({ action: 'read', scope, id });
     const status = await call({ action: 'status', scope });
-    assert.equal(status.folded, 0);
+    assert.equal(status.folded, 5);
     assert.equal(status.operations, undefined);
-    assert.equal((await call({ action: 'forget', scope })).forgotten, true);
+    assert.equal((await call({ action: 'forget', scope, force: true })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
     assert.ok((await call({ action: 'read', scope, id: 'a' })).error);
   });
@@ -181,11 +176,11 @@ test('invalid reads do not mutate archives; bounds and filesystem failures keep 
 
 test('tool exposes recovery/inspection only and rejects removed mode/mark actions', async () => {
   const { args } = (await ContextFoldingPlugin()).tool.context_folding;
-  assert.deepEqual(args.oneOf.map(schema => schema.properties.action.const).sort(), ['forget', 'list', 'paste', 'read', 'stats', 'status']);
+  assert.deepEqual(args.oneOf.map(schema => schema.properties.action.const).sort(), ['forget', 'grep', 'list', 'meta', 'paste', 'read', 'stats', 'status']);
   for (const action of ['read', 'paste']) {
     const schema = args.oneOf.find(schema => schema.properties.action.const === action)!;
-    const peek = (schema.properties as Record<string, { default?: unknown }>).peek!;
-    assert.equal(peek.default, false);
+    const layer = (schema.properties as Record<string, { default?: unknown }>).layer!;
+    assert.equal(layer.default, 'view');
     assert.equal(schema.additionalProperties, false);
   }
   await fixture(async (store, scope) => {

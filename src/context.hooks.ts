@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ConfigError, loadOptions } from './config.js';
 import { appendBudget, estimateTokens, withoutBudget } from './budget.js';
-import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
+import { containsRegion, outermost, parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
 import { extractSpans, recoveryToolName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
@@ -59,7 +59,7 @@ function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] 
       // Marker order survives earlier replacements in the same message; byte
       // offsets and content-derived span IDs do not.
       result.push({ region, role, occurrence: fingerprint([region.sha256, region.label,
-        occurrenceIdentity(body, origin), region.origin.ordinal, origin.source ?? null]) });
+        region.origin.path.map(item => [occurrenceIdentity(body, byId.get(item.id)!), item.ordinal]), origin.source ?? null]) });
     }
   };
   const history = protocol === 'responses' ? body.input : protocol === 'gemini' ? body.contents : body.messages;
@@ -123,37 +123,94 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       snapshot.cycle = cycle;
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
-      const proposed: { region: Region; reference: string }[] = [];
       const found = candidates(body, spans, ctx.protocol);
-      // Allocate references against the entire batch so collision handling is
-      // independent of parse order. Full hashes and original text stay in storage.
+      const resolved = new Map<Region, Entry>();
+      const valid = new Map<Region, boolean>();
+      // A reference is reusable only as the complete body of a legitimate nested
+      // child, and only when its original is unambiguous in this exact scope.
+      const validate = (region: Region): boolean => {
+        if (valid.has(region)) return valid.get(region)!;
+        if (region.referenceHash) {
+          const matches = snapshot.entries.filter(entry => entry.annotation?.sha256.startsWith(region.referenceHash!));
+          const first = matches[0];
+          const ok = !!first && matches.every(entry => entry.annotation!.sha256 === first.annotation!.sha256 && entry.text === first.text);
+          if (ok) resolved.set(region, first!);
+          valid.set(region, ok);
+          return ok;
+        }
+        let visible = region.text;
+        let ok = true;
+        for (const child of [...region.children].reverse()) {
+          if (!validate(child.region)) ok = false;
+          visible = visible.slice(0, child.start) + visible.slice(child.end);
+        }
+        ok &&= !/\[\[cf:/.test(visible);
+        valid.set(region, ok);
+        return ok;
+      };
+      for (const { region } of found) validate(region);
       const hashes = new Set([...byHash.keys(), ...snapshot.entries.map(entry => entry.id),
-        ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256)]);
-      let newlyFolded = 0;
-      let waiting = 0;
-      for (const { region, occurrence, role } of found) {
-        const ref = reference(shortHash(region.sha256, hashes));
+        ...(snapshot.groups ?? []).map(group => group.id),
+        ...found.filter(item => valid.get(item.region) && !item.region.referenceHash).map(item => item.region.sha256)]);
+      const references = new Map(found.map(({ region }) => [region,
+        reference(shortHash(resolved.get(region)?.annotation?.sha256 ?? region.sha256, hashes))]));
+      const worthwhile = new Set(found.filter(({ region }) => {
+        if (!valid.get(region) || region.referenceHash) return false;
         const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
           spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
-        const after = region.slices.length * Buffer.byteLength(JSON.stringify(ref));
-        if (after >= before) continue;
+        return region.slices.length * Buffer.byteLength(JSON.stringify(references.get(region)!)) < before;
+      }).map(item => item.region));
+      const needed = new Set<Region>();
+      const retain = (region: Region) => {
+        if (needed.has(region)) return;
+        needed.add(region);
+        for (const child of region.children) retain(child.region);
+      };
+      for (const region of worthwhile) retain(region);
+      const roles = new Map(found.map(item => [item.region, item.role]));
+      const archive = (region: Region): Entry => {
+        const old = resolved.get(region);
+        if (old) return old;
+        const children = region.children.map(child => ({ id: archive(child.region).id, label: child.region.label,
+          start: child.start, end: child.end }));
         let entry = byHash.get(region.sha256);
         if (!entry) {
-          entry = { id: region.sha256, role, text: region.text, annotation: { sha256: region.sha256, label: region.label },
+          entry = { id: region.sha256, role: roles.get(region)!, text: region.text,
+            annotation: { sha256: region.sha256, label: region.label, ...(children.length ? { children } : {}) },
             mark: { disposition: 'unmarked' }, layers: [], occurrences: {} } satisfies Entry;
           snapshot.entries.push(entry);
           byHash.set(region.sha256, entry);
-        } else if (entry.text !== region.text) throw new Error('Annotation content hash mismatch');
+        } else {
+          if (entry.text !== region.text) throw new Error('Annotation content hash mismatch');
+          if (children.length && !entry.annotation!.children) entry.annotation!.children = children;
+          else if (children.length && JSON.stringify(entry.annotation!.children) !== JSON.stringify(children)) {
+            throw new Error('Annotation child structure changed');
+          }
+        }
+        resolved.set(region, entry);
+        return entry;
+      };
+      for (const region of needed) archive(region);
+      const proposed: { region: Region; reference: string }[] = [];
+      let newlyFolded = 0;
+      let waiting = 0;
+      for (const { region, occurrence } of found) {
+        if (!needed.has(region) || region.referenceHash) continue;
+        const entry = resolved.get(region)!;
         const occurrences = entry.occurrences ??= {};
         let observed = occurrences[occurrence];
-        // Reappearing history gets a new grace period. The content hash alone
-        // can never make a freshly read occurrence immediately disappear.
         if (!observed || observed.lastSeen < previousCycle) observed = occurrences[occurrence] = { firstSeen: cycle, lastSeen: cycle };
         observed.lastSeen = cycle;
-        if (entry.mark.disposition === 'keep') continue;
+        if (!worthwhile.has(region) || entry.mark.disposition === 'keep') continue;
         if (cycle - observed.firstSeen < options.delayRequests) { waiting++; continue; }
-        proposed.push({ region, reference: ref });
-        entry.folded = ref;
+        proposed.push({ region, reference: references.get(region)! });
+      }
+      const selected = outermost(proposed);
+      for (const { region, occurrence } of found) {
+        if (!needed.has(region) || region.referenceHash || !selected.some(item => item.region === region || containsRegion(item.region, region))) continue;
+        const entry = resolved.get(region)!;
+        entry.folded = references.get(region)!;
+        const observed = entry.occurrences![occurrence]!;
         if (!observed.folded) { newlyFolded++; observed.folded = true; }
       }
       // Occurrence metadata is a short-lived cursor; originals and old references
@@ -163,17 +220,17 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           if (occurrence.lastSeen < previousCycle) delete entry.occurrences[key];
         }
       }
-      const replacements = replaceRegions(spans, proposed);
+      const replacements = replaceRegions(spans, selected);
       const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
         [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
           [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
-      const hasFolded = proposed.length > 0 || existingReferences.length > 0;
+      const hasFolded = selected.length > 0 || existingReferences.length > 0;
       const projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
       const result = appendBudget(projected, ctx.protocol, { ...budgetOptions, scope });
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
-        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length };
+        cycle, waiting, foldedRegions: selected.length, replayedReferences: existingReferences.length };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
         foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(projected))),

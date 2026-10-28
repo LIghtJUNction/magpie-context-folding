@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Context Folding RPC v2",
-  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI, MCP and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls.",
+  "description": "Local ordered UTF-8 JSON Lines RPC over the shared Python archive. Run ctxf rpc. Read/list/grep/meta return bounded node views without changing fold/keep state. The root schema retains compatibility actions; $defs.mcpRequest restricts the public MCP tool to six actions. State is selected outside requests and API scope is required. Core validation remains authoritative.",
   "type": "object",
   "required": [
     "action",
@@ -14,6 +14,8 @@
         "fold",
         "put",
         "list",
+        "grep",
+        "meta",
         "read",
         "render",
         "restore",
@@ -66,20 +68,26 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "deprecated": true,
+      "description": "Compatibility field; not part of the public MCP query workflow. Queries do not unfold history or set keep."
     },
     "expand": {
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "deprecated": true,
+      "description": "Compatibility field; not part of the public MCP query workflow. Queries do not unfold history or set keep."
     },
     "expandMode": {
       "type": "string",
       "enum": [
         "single",
         "recursive"
-      ]
+      ],
+      "deprecated": true,
+      "description": "Compatibility field; not part of the public MCP query workflow. Queries do not unfold history or set keep."
     },
     "files": {
       "type": "array",
@@ -90,7 +98,8 @@
       }
     },
     "id": {
-      "type": "string"
+      "type": "string",
+      "description": "Archive ID or unambiguous content-hash prefix in the selected scope."
     },
     "ids": {
       "type": "array",
@@ -108,17 +117,22 @@
       "type": "array",
       "items": {
         "type": "string"
-      }
+      },
+      "deprecated": true,
+      "description": "Compatibility field; not part of the public MCP query workflow. Queries do not unfold history or set keep."
     },
     "value": {},
     "query": {
-      "type": "string"
+      "type": "string",
+      "description": "Literal search text for grep; matching happens inside the archive."
     },
     "path": {
       "type": "string"
     },
     "mode": {
-      "type": "string"
+      "type": "string",
+      "deprecated": true,
+      "description": "Compatibility field; not part of the public MCP query workflow. Queries do not unfold history or set keep."
     },
     "config": {
       "type": "object"
@@ -131,16 +145,20 @@
     },
     "limit": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "Read characters (default 1200, max 24000), or list/grep/meta items (default 10, max 100)."
     },
     "offset": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Result index for list/grep/meta; Unicode code-point offset in a read node view."
     },
     "depth": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 8
+      "maximum": 64,
+      "default": 1,
+      "description": "List traversal depth; descendant IDs remain independently queryable."
     },
     "sort": {
       "type": "string",
@@ -175,7 +193,30 @@
       "maximum": 9007199254740991
     },
     "peek": {
-      "type": "boolean"
+      "type": "boolean",
+      "deprecated": true,
+      "description": "Compatibility field; not part of the public MCP query workflow. Queries do not unfold history or set keep."
+    },
+    "startLine": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inclusive 1-based node-view start line; incompatible with offset."
+    },
+    "endLine": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inclusive node-view end line; incompatible with offset."
+    },
+    "recursive": {
+      "type": "boolean",
+      "description": "Traverse descendant node views internally, with visited-node deduplication. Grep defaults to true; list defaults to false."
+    },
+    "context": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "default": 0,
+      "description": "Neighboring grep lines; each returned snippet is bounded."
     }
   },
   "additionalProperties": true,
@@ -183,24 +224,165 @@
     {
       "if": {
         "properties": {
-          "action": { "const": "fold" }
+          "action": {
+            "const": "fold"
+          }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       },
       "then": {
-        "required": ["text"]
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "read",
+              "meta"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "grep"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "minLength": 1
+          },
+          "recursive": {
+            "default": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "grep",
+              "meta"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "limit": {
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "read"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "limit": {
+            "maximum": 24000
+          }
+        },
+        "not": {
+          "allOf": [
+            {
+              "required": [
+                "offset"
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "startLine"
+                  ]
+                },
+                {
+                  "required": [
+                    "endLine"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "list"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "recursive": {
+            "default": false
+          }
+        }
       }
     }
   ],
   "$defs": {
     "foldReference": {
       "type": "object",
-      "required": ["id", "label", "sha256", "reference", "archiveId"],
+      "required": [
+        "id",
+        "label",
+        "sha256",
+        "reference",
+        "archiveId"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$",
-          "description": "Complete body SHA-256; usable with read in the same state and scope."
+          "description": "Complete original-body SHA-256; accepted by read/grep/meta in the same archive and scope."
         },
         "label": {
           "type": "string",
@@ -224,7 +406,11 @@
     },
     "foldResult": {
       "type": "object",
-      "required": ["scope", "text", "references"],
+      "required": [
+        "scope",
+        "text",
+        "references"
+      ],
       "properties": {
         "scope": {
           "type": "string",
@@ -237,8 +423,10 @@
         },
         "references": {
           "type": "array",
-          "items": { "$ref": "#/$defs/foldReference" },
-          "description": "Only bodies folded by this call; existing literal references are left intact."
+          "items": {
+            "$ref": "#/$defs/foldReference"
+          },
+          "description": "Top-level references in this folded view. Discover nested children through list/meta; existing reference literals are not new folds."
         }
       },
       "additionalProperties": true
@@ -280,43 +468,368 @@
           "additionalProperties": false
         }
       ]
+    },
+    "nodeMetadata": {
+      "type": "object",
+      "required": [
+        "id",
+        "childCount"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "reference": {
+          "type": "string"
+        },
+        "chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "childCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "listResult": {
+      "type": "object",
+      "required": [
+        "entries",
+        "nextOffset"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nodeMetadata"
+          }
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "metaResult": {
+      "type": "object",
+      "required": [
+        "id",
+        "sha256",
+        "chars",
+        "bytes",
+        "childCount",
+        "children",
+        "nextOffset"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "childCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string"
+          }
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "readResult": {
+      "type": "object",
+      "required": [
+        "id",
+        "text",
+        "offset",
+        "nextOffset",
+        "totalChars",
+        "sha256",
+        "viewSha256",
+        "childCount"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "description": "Bounded node view with direct child references retained."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "totalChars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalLines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 of exact original body bytes."
+        },
+        "viewSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 of the complete node view, before pagination."
+        },
+        "childCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "grepLine": {
+      "type": "object",
+      "required": [
+        "line",
+        "text"
+      ],
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "textOffset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Start of this snippet within the view line, in Unicode code points."
+        }
+      },
+      "additionalProperties": true
+    },
+    "grepResult": {
+      "type": "object",
+      "required": [
+        "matches",
+        "nextOffset"
+      ],
+      "properties": {
+        "matches": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/grepLine"
+              }
+            ],
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "context": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/grepLine"
+                }
+              }
+            }
+          }
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "mcpRequest": {
+      "allOf": [
+        {
+          "$ref": "#"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "action",
+        "scope"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "fold",
+            "list",
+            "grep",
+            "read",
+            "meta",
+            "status"
+          ]
+        },
+        "scope": {
+          "$ref": "#/properties/scope"
+        },
+        "text": {
+          "$ref": "#/properties/text"
+        },
+        "language": {
+          "$ref": "#/properties/language"
+        },
+        "commentStyles": {
+          "$ref": "#/properties/commentStyles"
+        },
+        "id": {
+          "$ref": "#/properties/id"
+        },
+        "query": {
+          "$ref": "#/properties/query"
+        },
+        "offset": {
+          "$ref": "#/properties/offset"
+        },
+        "limit": {
+          "$ref": "#/properties/limit"
+        },
+        "depth": {
+          "$ref": "#/properties/depth"
+        },
+        "startLine": {
+          "$ref": "#/properties/startLine"
+        },
+        "endLine": {
+          "$ref": "#/properties/endLine"
+        },
+        "recursive": {
+          "$ref": "#/properties/recursive"
+        },
+        "context": {
+          "$ref": "#/properties/context"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "examples": [
     {
       "action": "fold",
-      "scope": "example",
-      "text": "<!-- @context-fold begin result -->\nCompleted evidence that can be recovered through its content hash.\n<!-- @context-fold end result -->"
+      "scope": "task",
+      "text": "<!-- @context-fold begin parent -->\nSummary.\n<!-- @context-fold begin child -->\nDetailed evidence long enough to replace with a reference.\n<!-- @context-fold end child -->\n<!-- @context-fold end parent -->"
     },
     {
       "action": "fold",
-      "scope": "example",
+      "scope": "task",
       "text": ""
     },
     {
-      "action": "read-source",
-      "scope": "example",
-      "text": "# @context-fold begin result\ncompleted evidence\n# @context-fold end result",
-      "language": "python",
-      "occurrence": "read-1",
-      "requestCycle": 0
+      "action": "list",
+      "scope": "task",
+      "id": "ACTUAL_HASH",
+      "depth": 2,
+      "limit": 5
     },
     {
-      "action": "read-source",
-      "scope": "example",
-      "id": "ENTRY_ID",
-      "occurrence": "read-1",
-      "requestCycle": 1
+      "action": "meta",
+      "scope": "task",
+      "id": "ACTUAL_HASH"
+    },
+    {
+      "action": "grep",
+      "scope": "task",
+      "id": "ACTUAL_HASH",
+      "query": "timeout",
+      "limit": 3
     },
     {
       "action": "read",
-      "scope": "example",
-      "id": "CONTENT_HASH_PREFIX"
+      "scope": "task",
+      "id": "ACTUAL_HASH",
+      "startLine": 1,
+      "endLine": 4,
+      "limit": 240
     },
     {
-      "action": "resolve",
-      "scope": "example",
-      "value": "[[cf:v2:CONTENT_HASH_PREFIX]]"
+      "action": "status",
+      "scope": "task"
     }
   ]
 }

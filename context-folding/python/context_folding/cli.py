@@ -18,48 +18,37 @@ from .core import Client, FoldingError
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-ACTIONS = ("fold", "put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
+ACTIONS = ("fold", "put", "list", "read", "grep", "meta", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
+# The user-facing MCP contract is deliberately much smaller than the legacy
+# local RPC API. Search/inspection never promotes archived text into context.
+MCP_ACTIONS = ("fold", "list", "grep", "read", "meta", "status")
+CTXF_QUERY_ACTIONS = ("list", "grep", "read", "meta")
 TOOL_SCHEMA = {
     "type": "object",
     "required": ["action", "scope"],
     "properties": {
-        "action": {"type": "string", "enum": list(ACTIONS)},
+        "action": {"type": "string", "enum": list(MCP_ACTIONS)},
         "scope": {"type": "string", "minLength": 1, "maxLength": 200},
         "text": {"type": "string"},
         "language": {"type": "string"},
         "occurrence": {"type": "string", "minLength": 1, "maxLength": 200},
         "requestCycle": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "commentStyles": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["start"], "properties": {"start": {"type": "string", "minLength": 1, "maxLength": 64}, "end": {"type": "string", "maxLength": 64}}, "additionalProperties": False}},
-        "keep": {"type": "array", "items": {"type": "string"}},
-        "expand": {"type": "array", "items": {"type": "string"}},
-        "expandMode": {"type": "string", "enum": ["single", "recursive"]},
-        "files": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object"}},
         "id": {"type": "string"},
-        "ids": {"type": "array", "items": {"type": "string"}},
-        "role": {"type": "string"},
-        "source": {"type": "object"},
-        "protected": {"type": "array", "items": {"type": "string"}},
-        "value": {},
         "query": {"type": "string"},
-        "path": {"type": "string"},
-        "mode": {"type": "string"},
-        "config": {"type": "object"},
-        "body": {"type": "string"},
-        "description": {"type": "string"},
-        "limit": {"type": "integer", "minimum": 1},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 24000},
         "offset": {"type": "integer", "minimum": 0},
-        "depth": {"type": "integer", "minimum": 0, "maximum": 8},
-        "sort": {"type": "string", "enum": ["chronological", "size", "id", "version"]},
-        "order": {"type": "string", "enum": ["asc", "desc"]},
-        "name": {"type": "string"},
-        "pinned": {"type": "boolean"},
-        "peek": {"type": "boolean"},
+        "depth": {"type": "integer", "minimum": 0, "maximum": 64},
+        "recursive": {"type": "boolean"},
+        "context": {"type": "integer", "minimum": 0, "maximum": 3},
+        "startLine": {"type": "integer", "minimum": 1},
+        "endLine": {"type": "integer", "minimum": 1},
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 TOOL = {
     "name": "context_folding",
-    "description": "fold immediately archives and replaces closed @context-fold begin/end regions in supplied text, returning the complete text and recoverable references. Existing references stay literal. read/resolve recover originals. Background read-source instead requires host occurrence/requestCycle for delayed projection; without a cycle the original stays visible. No automatic summaries or fold strategies.",
+    "description": "Fold explicitly annotated text; inspect archived refs with bounded list, literal grep, read and meta. Reads never expand or change active context. Nested blocks are browsable. Outputs are brief by default.",
     "inputSchema": TOOL_SCHEMA,
 }
 
@@ -180,7 +169,7 @@ class MCPServer:
                 "protocolVersion": version if version in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "context-folding", "version": "0.1.0"},
-                "instructions": "Use explicit @context-fold begin LABEL and @context-fold end LABEL comments. fold is an immediate explicit operation on supplied text; read-source is a delayed background projection requiring host occurrence/requestCycle. read recovers originals on demand. A host may call resolve only when final tool arguments actually contain fold references. This MCP server cannot intercept calls to other tools.",
+                "instructions": "Use <!-- @context-fold begin LABEL --> and <!-- @context-fold end LABEL --> to bound disposable detail. fold archives explicit closed regions immediately. References stay folded; use list, grep, bounded read, or meta to inspect (including nested blocks). Inspection never changes original messages. Token budgets are informational; decide folds yourself. The server cannot intercept other tools.",
             }
             self.initialized = True
         elif method == "ping":
@@ -195,6 +184,8 @@ class MCPServer:
             arguments = params.get("arguments", {})
             if not isinstance(arguments, dict):
                 return _rpc_error(request_id, -32602, "Tool arguments must be an object")
+            if arguments.get("action") not in MCP_ACTIONS:
+                return _rpc_error(request_id, -32602, "Unsupported MCP action")
             response = _call(self.client, arguments)
             failed = "error" in response
             result = {
@@ -254,7 +245,7 @@ def _default_state() -> str:
 
 def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ctxf" if ctxf else None,
-        description="Fold explicit comment regions from UTF-8 stdin (default: fold); originals persist for read/resolve."
+        description="Fold explicit comment regions from UTF-8 stdin (default: fold). Inspect refs with bounded list/grep/read/meta."
         if ctxf else "Local reversible context archive; no model calls.")
     parser.add_argument("--state", default=_default_state() if ctxf else None,
                         help="SQLite state file (ctxf default: CTXF_STATE or XDG data directory; also accepted after the command)")
@@ -262,7 +253,9 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
     if ctxf:
         parser.add_argument("--scope", default=argparse.SUPPRESS, help="Persistent archive namespace (default: default)")
     commands = parser.add_subparsers(dest="command", required=True)
-    for command in ("rpc", "mcp", "call", *ACTIONS, "annotate-functions"):
+    available = ("rpc", "mcp", "call", *MCP_ACTIONS) if ctxf else (
+        "rpc", "mcp", "call", *ACTIONS, "annotate-functions")
+    for command in available:
         sub = commands.add_parser(command)
         if command == "annotate-functions":
             sub.add_argument("path", help="Python/JavaScript/TypeScript source file or project directory")
@@ -282,6 +275,37 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
             sub.add_argument("--language", default=argparse.SUPPRESS)
             sub.add_argument("--comment-styles", default=argparse.SUPPRESS, help="Additional comment delimiters as JSON")
             sub.add_argument("--json", action="store_true", help="Output text and reference metadata as JSON")
+            continue
+        if ctxf and command in CTXF_QUERY_ACTIONS:
+            sub.add_argument("--scope", default=argparse.SUPPRESS)
+            sub.add_argument("--json", action="store_true", help="Output only the result object as compact JSON")
+            sub.add_argument("--id", default=argparse.SUPPRESS, help="Archive ref hash or ID")
+            sub.add_argument("--limit", type=int, default=argparse.SUPPRESS, help="Maximum characters or entries per page")
+            sub.add_argument("--offset", type=int, default=argparse.SUPPRESS, help="Zero-based offset into this view")
+            if command == "grep":
+                sub.add_argument("positional_query", nargs="?", metavar="PATTERN", help="Literal text to search")
+                sub.add_argument("positional_id", nargs="?", metavar="ID", help="Optional subtree root")
+                sub.add_argument("--query", default=argparse.SUPPRESS)
+                sub.add_argument("--context", type=int, default=argparse.SUPPRESS, help="Surrounding lines, 0–3")
+                sub.add_argument("--recursive", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS,
+                                 help="Search child refs recursively (default: yes)")
+            else:
+                sub.add_argument("positional_id", nargs="?", metavar="ID" if command != "list" else "ROOT",
+                                 help="Ref hash or ID; optional for list")
+            if command == "list":
+                sub.add_argument("--depth", type=int, default=argparse.SUPPRESS, help="Nested levels, 0–64 (default: 1)")
+                sub.add_argument("--recursive", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS,
+                                 help="Traverse all nested levels (output remains paginated)")
+            if command == "read":
+                sub.add_argument("--lines", default=argparse.SUPPRESS, metavar="A:B",
+                                 help="One-based, inclusive line range from the folded view")
+                sub.add_argument("--raw", action="store_true", help="Bounded plain-text view (already the default)")
+                sub.add_argument("--peek", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS,
+                                 help="Compatibility option; reads never change fold state")
+            continue
+        if ctxf and command == "status":
+            sub.add_argument("--scope", default=argparse.SUPPRESS)
+            sub.add_argument("--json", action="store_true", help="Compact status JSON (default)")
             continue
         sub.add_argument("--json", metavar="JSON", help="Request object; '-' reads JSON stdin")
         if command == "call":
@@ -325,9 +349,27 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
             stdin_used = True
         return (_loads(_read_stdin()) if raw == "-" else _argument_json(raw)) if is_json else _text(raw)
 
-    request = {} if args.command == "fold" or args.json is None else _object(input_value(args.json, True))
-    excluded = ("command", "state", "project_dir", "json", "raw", *json_fields, *text_fields)
+    request = {} if args.command == "fold" or isinstance(args.json, bool) or args.json is None else _object(input_value(args.json, True))
+    excluded = ("command", "state", "project_dir", "json", "raw", "lines", "positional_id", "positional_query", *json_fields, *text_fields)
     request.update({key: value for key, value in vars(args).items() if key not in excluded})
+    if hasattr(args, "positional_id") and args.positional_id is not None:
+        if "id" in request and request["id"] != args.positional_id:
+            raise InputError("invalid_request", "Conflicting IDs")
+        request["id"] = args.positional_id
+    if hasattr(args, "positional_query") and args.positional_query is not None:
+        if "query" in request and request["query"] != args.positional_query:
+            raise InputError("invalid_request", "Conflicting grep patterns")
+        request["query"] = args.positional_query
+    if hasattr(args, "lines"):
+        if "offset" in request:
+            raise InputError("invalid_request", "--lines cannot be combined with --offset")
+        parts = args.lines.split(":")
+        if len(parts) != 2 or not all(part.isascii() and part.isdecimal() for part in parts):
+            raise InputError("invalid_request", "--lines must be A:B with positive line numbers")
+        start, end = map(int, parts)
+        if start < 1 or end < start or end > 100000000:
+            raise InputError("invalid_request", "--lines must be a positive ascending range")
+        request.update({"startLine": start, "endLine": end})
     for key in json_fields + text_fields:
         if hasattr(args, key):
             request["commentStyles" if key == "comment_styles" else key] = input_value(getattr(args, key), key in json_fields)
@@ -534,7 +576,7 @@ def _annotate_project(path: str, language: str, apply: bool,
 
 def _ctxf_arguments(argv: list[str]) -> list[str]:
     """Insert the default fold command after any leading shared options."""
-    commands = {"rpc", "mcp", "call", *ACTIONS, "annotate-functions"}
+    commands = {"rpc", "mcp", "call", *MCP_ACTIONS}
     index = 0
     while index < len(argv):
         option = argv[index]
@@ -582,6 +624,56 @@ def _write_raw(text: str) -> None:
     sys.stdout.buffer.flush()
 
 
+def _one_line(value: Any, maximum: int = 200) -> str:
+    """Keep a single CLI record small and safe for downstream line filters."""
+    return " ".join(str(value or "").split())[:maximum]
+
+
+def _display_id(item: dict[str, Any]) -> str:
+    reference = item.get("reference", "")
+    if isinstance(reference, str) and reference.startswith("[[cf:v2:") and reference.endswith("]]"):
+        return reference[8:-2]
+    sha = item.get("sha256")
+    if isinstance(sha, str) and len(sha) == 64:
+        return sha[:12]
+    return item.get("id", "")
+
+
+def _print_ctxf_query(command: str, result: dict[str, Any], *, as_json: bool) -> None:
+    """Use a pipe-friendly, bounded view; paging metadata goes to stderr."""
+    if as_json or command == "meta":
+        _emit(result)
+    elif command == "read":
+        _write_raw(result["text"])
+    elif command == "list":
+        for entry in result["entries"]:
+            level = min(entry.get("depth", 0), 8)
+            identifier = _display_id(entry)
+            label = _one_line(entry.get("label") or entry.get("summary") or entry.get("role"), 96)
+            chars = entry.get("chars", entry.get("totalChars", 0))
+            children = entry.get("childCount", 0)
+            suffix = f"\t+{children}" if children else ""
+            sys.stdout.write(f"{'  ' * level}{identifier}\t{label}\t{chars}c{suffix}\n")
+        sys.stdout.flush()
+    elif command == "grep":
+        for hit in result.get("matches", result.get("hits", [])):
+            identifier = _display_id(hit)
+            line = hit.get("line", hit.get("lineNumber", ""))
+            excerpt = _one_line(hit.get("snippet", hit.get("excerpt", hit.get("text", ""))), 240)
+            before = sorted((part for part in hit.get("context", []) if part["line"] < line), key=lambda part: part["line"])
+            after = sorted((part for part in hit.get("context", []) if part["line"] > line), key=lambda part: part["line"])
+            for part in before:
+                sys.stdout.write(f"{identifier}-{part['line']}\t{_one_line(part['text'], 160)}\n")
+            sys.stdout.write(f"{identifier}:{line}\t{excerpt}\n")
+            for part in after:
+                sys.stdout.write(f"{identifier}-{part['line']}\t{_one_line(part['text'], 160)}\n")
+        sys.stdout.flush()
+    following = result.get("nextOffset")
+    if following is not None and not as_json:
+        sys.stderr.write(f"nextOffset={following}\n")
+        sys.stderr.flush()
+
+
 def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
     parser = _parser(ctxf=ctxf)
     if ctxf:
@@ -605,7 +697,8 @@ def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
             return 1
     if not args.state:
         parser.error("--state is required")
-    raw_output = args.command == "fold" or (args.command == "read" and args.raw)
+    raw_output = (ctxf and args.command in ("fold", "status", *CTXF_QUERY_ACTIONS)) or (
+        args.command == "read" and args.raw)
 
     def failure(response: dict) -> int:
         if raw_output:
@@ -624,6 +717,13 @@ def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
             request = _request(args)
             if ctxf:
                 request.setdefault("scope", getattr(args, "scope", "default"))
+            if ctxf and args.command in CTXF_QUERY_ACTIONS:
+                request.setdefault("limit", 1200 if args.command == "read" else 10)
+                response = _call(client, request)
+                if "error" in response:
+                    return failure(response)
+                _print_ctxf_query(args.command, response["result"], as_json=args.json)
+                return 0
             if args.command == "read" and args.raw:
                 _write_raw(_raw_read(client, request))
                 return 0
@@ -635,6 +735,9 @@ def _run_cli(argv: list[str] | None = None, *, ctxf: bool = False) -> int:
                     _emit(response["result"])
                 else:
                     _write_raw(response["result"]["text"])
+                return 0
+            if ctxf and args.command == "status":
+                _emit(response["result"])
                 return 0
             _emit(response)
             return 0

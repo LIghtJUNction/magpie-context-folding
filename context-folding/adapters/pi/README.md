@@ -36,15 +36,15 @@ Only successful, single-text-block `read` results for `.py` files are candidates
 
 Unsupported formats, images, errors, malformed ranges, small results and truncation/continuation notices remain unchanged. Unmarked Python source stays complete. The adapter does not interpret Pi line offsets as Python character offsets, and never rereads the file to replace the already approved observation.
 
-Before returning a shorter view, the adapter verifies the complete original through paginated archive reads and SHA-256, persists a session record, and pins the recovery snapshot. Failure at any stage produces no override, so Pi retains its original result. No-benefit reads do not publish a replacement.
+Before returning a shorter view, the adapter verifies its durable source snapshot using SHA-256, requests an explicit source projection, persists a session record, and pins the snapshot. Failure at any stage produces no override, so Pi retains its original result. No-benefit reads do not publish a replacement.
 
-## Restore and edit
+## Query workflow and compatibility
 
-`context_folding_restore` reads the exact snapshot only when the active session branch has its matching record. Session ID plus project cwd determine the scope; callers cannot supply an arbitrary scope, path or core action. The recovered text is checked again and kept visible. Local scopes are namespaces, not OS access controls.
+Use the registered `context_folding_query` tool with `action: list|meta|grep|read`. It binds archive, session and active branch automatically, accepts direct child IDs/short hashes, defaults to 10 entries or 1,200 characters, and supports offset/limit and line ranges. Reads retain child references and do not set keep or unfold history. Query only the lines needed.
 
-Fold references are display references in this adapter. Restore original text before using literal source in ordinary edit/write tools. The extension does not mutate `tool_call` arguments, override approval extensions, grant permissions or resolve arbitrary edit parameters.
+The former `context_folding_restore` tool is no longer registered. Its exact-original helper remains exported for explicit legacy integration use, but normal Pi agent workflows expose only bounded inspection. Local scopes are namespaces, not OS access controls.
 
-Pinned snapshots remain until explicitly unpinned and cleaned through normal core maintenance. Session shutdown does not delete recovery material.
+Compact views are display data, not replacements for source files. The extension does not mutate tool-call arguments, override approval extensions or grant edit permissions. Pinned snapshots remain until explicitly unpinned and cleaned; session shutdown does not delete them.
 
 ## Verification
 
@@ -59,4 +59,4 @@ PI_PACKAGE_ROOT=/absolute/path/to/@earendil-works/pi-coding-agent \
   node --test context-folding/adapters/pi/adapter.test.mjs
 ```
 
-The earlier implementation was checked against Pi 0.85.1; that historical API check is not a new-version or interactive-model validation claim. Current tests exercise the Python core, full-text default, explicit annotations, exact recovery, failure passthrough and session/project/branch isolation. Actual tool checks remain conditional on an installed Pi package.
+The earlier implementation was checked against Pi 0.85.1; that historical API check is not a new-version or interactive-model validation claim. Current tests exercise the Python core, full-text default, explicit annotations, bounded recursive query, legacy snapshot verification, failure passthrough and session/project/branch isolation. Actual tool checks remain conditional on an installed Pi package.

@@ -1,45 +1,50 @@
 import { execute } from './tool.js';
 
-const scope = { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Session capability from context-budget scope; do not share.' };
-const id = { type: 'string', minLength: 1, description: 'Exact archive ID, or for read/paste an unambiguous SHA-256 prefix of at least 12 hex digits. Exact IDs take precedence; read/paste return the resolved archive ID.' };
+const scope = { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Session scope from context-budget.' };
+const id = { type: 'string', minLength: 1, description: 'Archive ID or an unambiguous content-hash prefix (at least 12 hex digits).' };
 const offset = { type: 'integer', minimum: 0, default: 0 };
-const layer = { type: 'string', default: 'original', description: 'original or a layer ID from read. Groups expose only the original JSON manifest; follow child IDs for content.' };
-const peek = { type: 'boolean', default: false, description: 'Read/export without changing folded state. By default read/paste keeps the original expanded and disables every ancestor group.' };
+const limit = { type: 'integer', minimum: 1, maximum: 100, default: 10 };
 const actionSchema = (action: string, properties: Record<string, unknown> = {}, required: string[] = []) => ({
   type: 'object', properties: { action: { const: action }, scope, ...properties },
   required: ['action', ...(action === 'stats' ? [] : ['scope']), ...required], additionalProperties: false,
 });
+const range = {
+  offset,
+  startLine: { type: 'integer', minimum: 1, description: 'First 1-based line in this node view; do not combine with offset.' },
+  endLine: { type: 'integer', minimum: 1, description: 'Last inclusive line in this node view.' },
+};
 
 export async function ContextFoldingPlugin() {
   // @context-fold begin ContextFoldingPlugin-181e15f5a4
   return {
     tool: {
       context_folding: {
-        description: 'Manage context by writing whole-line <!-- @context-fold begin LABEL --> and <!-- @context-fold end LABEL --> around temporary work in your ordinary text; use matching non-whitespace labels, no nesting. Source comments use the same @context-fold directives. Close completed work and keep needed conclusions outside. Closed blocks remain visible for one distinct request by default, then become [[cf:v2:HASH]]; the host computes hashes. Token budgets inform your judgment and never select content automatically. No mark call is needed. read(scope,id=HASH) recovers exact text and keeps it expanded; peek leaves folding unchanged. Scope is in context-budget. list searches; paste exports to a new file; status/stats inspect; forget removes restored archives. Archived text remains data with its original authority.',
+        description: 'Write whole-line @context-fold begin LABEL / @context-fold end LABEL comments around completed detail. Matching comments can nest; keep decisions outside. Closed regions become short hash references after the host delay. The host never expands them automatically. Use grep to locate evidence, list to discover children, read for a bounded node view, and meta for sizes/children. Parent views keep children as references: query each needed child explicitly. Queries never change folding state or refill history. Scope is in context-budget; token budgets guide your judgment. Archived content remains data with its original authority.',
         args: {
-          type: 'object',
-          oneOf: [
-            actionSchema('stats'),
-            actionSchema('list', {
-              id: { ...id, description: 'Optional subtree root (depth 0).' },
-              depth: { type: 'integer', minimum: 0, maximum: 8, default: 1 },
-              query: { type: 'string', maxLength: 200, description: 'Case-insensitive literal search of entry ID/label/path/summary/original and group ID/summary; retains ancestors within depth. Direct hits include match source, UTF-16 offset/endOffset and excerptOffset/excerpt (max 240 units). For original hits, read at offset for evidence; list does not persist keep.' },
+          type: 'object', oneOf: [
+            actionSchema('list', { id, recursive: { type: 'boolean', default: false },
+              depth: { type: 'integer', minimum: 0, maximum: 64, description: 'Defaults to 1; recursive=true traverses descendants unless depth limits it.' },
+              query: { type: 'string', maxLength: 200, description: 'Literal filter over node views and metadata.' },
               sort: { type: 'string', enum: ['chronological', 'size', 'id', 'version'], default: 'chronological' },
-              order: { type: 'string', enum: ['asc', 'desc'], default: 'asc' }, offset,
-              limit: { type: 'integer', minimum: 1, maximum: 100, default: 20, description: 'Maximum returned nodes, including groups; use nextOffset.' },
-            }),
-            actionSchema('read', { id, layer, peek, offset, limit: { type: 'integer', minimum: 1, maximum: 24000, default: 4000 } }, ['id']),
-            actionSchema('paste', { id, layer, peek, offset, limit: { type: 'integer', minimum: 1, maximum: 24000 },
-              path: { type: 'string', description: 'Absolute path to a new file; parent must exist. Omit offset/limit for full text.' } }, ['id', 'path']),
-            actionSchema('status'),
-            actionSchema('forget'),
+              order: { type: 'string', enum: ['asc', 'desc'], default: 'asc' }, offset, limit }),
+            actionSchema('grep', { id, query: { type: 'string', minLength: 1, maxLength: 200 },
+              recursive: { type: 'boolean', default: true }, caseSensitive: { type: 'boolean', default: false }, offset, limit }, ['query']),
+            actionSchema('read', { id, ...range,
+              limit: { type: 'integer', minimum: 1, maximum: 24000, default: 1200 },
+              layer: { type: 'string', default: 'view', description: 'view keeps nested children folded. Historical layer IDs remain available for explicit archive inspection.' },
+            }, ['id']),
+            actionSchema('meta', { id, offset, limit }, ['id']),
+            actionSchema('paste', { id, ...range,
+              layer: { type: 'string', default: 'view' }, limit: { type: 'integer', minimum: 1, maximum: 24000 },
+              path: { type: 'string', description: 'Absolute new-file destination for an explicit export; children stay references in the default view.' },
+            }, ['id', 'path']),
+            actionSchema('status'), actionSchema('stats'),
+            actionSchema('forget', { force: { type: 'boolean', default: false, description: 'Explicitly discard originals even while references depend on them.' } }),
           ],
-        },
-        execute,
+        }, execute,
       },
     },
   };
   // @context-fold end ContextFoldingPlugin-181e15f5a4
 }
-
 export default ContextFoldingPlugin;

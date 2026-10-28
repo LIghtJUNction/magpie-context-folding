@@ -7,7 +7,7 @@ import { Store } from '../src/store.js';
 import type { Entry, Snapshot } from '../src/store.js';
 import { emptyMetrics } from '../src/metrics.js';
 import { execute } from '../src/tool.js';
-import { browse, latestVersions, restoreAncestors } from '../src/tree.js';
+import { browse, latestVersions } from '../src/tree.js';
 import { ContextFoldingPlugin } from '../src/index.js';
 
 const entry = (id: string, text = id): Entry => ({ id, text, role: 'tool', mark: { disposition: 'unmarked' }, layers: [] });
@@ -83,7 +83,7 @@ test('archive rejects multiple latest markers and cyclic or reversed revision ch
   });
 });
 
-test('reading a nested legacy member releases every ancestor and preserves its historical metadata', async () => {
+test('reading a nested legacy member preserves every ancestor and historical metadata', async () => {
   await fixture(async (store, scope) => {
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.groups = [group('g-one', ['a', 'b']), group('g-two', ['g-one', 'c'])];
@@ -94,14 +94,10 @@ test('reading a nested legacy member releases every ancestor and preserves its h
     const result = await call({ action: 'read', scope, id: 'a' });
     assert.equal(result.error, undefined);
     const state = await load(store, scope);
-    assert.equal(state.entries[0]?.folded, undefined);
-    assert.equal(state.entries[0]?.version?.automatic, false);
-    assert.equal(state.metrics.itemsRestored, 3);
-    assert.ok(state.groups?.every(node => !node.enabled && node.folded === undefined));
-    state.groups![1]!.folded = 'again';
-    state.groups![1]!.enabled = true;
-    assert.equal(restoreAncestors(state, 'g-one'), 1);
-    assert.equal(state.groups![1]!.enabled, false);
+    assert.equal(state.entries[0]?.folded, 'entry folded');
+    assert.equal(state.entries[0]?.version?.automatic, true);
+    assert.equal(state.metrics.itemsRestored, 0);
+    assert.ok(state.groups?.every(node => node.enabled && node.folded === 'folded'));
   });
 });
 
@@ -126,7 +122,7 @@ test('group read/paste return only the manifest and forget protects folded group
     assert.match(outsideScope.error, /Unknown context scope/);
     assert.equal(outsideScope.text, undefined);
     await call({ action: 'read', scope, id });
-    assert.equal((await call({ action: 'forget', scope })).forgotten, true);
+    assert.equal((await call({ action: 'forget', scope, force: true })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
   });
 });
@@ -227,7 +223,7 @@ test('siblings sort deterministically and compact nodes expose version status wi
   assert.equal(a.latestVersion, true);
   assert.equal(a.version?.path, '/file');
   assert.ok('summary' in a);
-  assert.equal(a.summary.length, 240);
+  assert.equal(a.summary.length, 120);
   assert.ok(!JSON.stringify(a).includes('private layer'));
   const b = version.entries.find(node => node.id === 'b')!;
   assert.ok('latestVersion' in b);
@@ -236,13 +232,13 @@ test('siblings sort deterministically and compact nodes expose version status wi
 
 test('runtime list bounds, read default and public schema stay explicit', async () => {
   await fixture(async (_store, scope) => {
-    for (const extra of [{ depth: -1 }, { depth: 9 }, { limit: 101 }, { offset: -1 }, { query: 'x'.repeat(201) }, { sort: 'invalid' }]) {
+    for (const extra of [{ depth: -1 }, { depth: 65 }, { limit: 101 }, { offset: -1 }, { query: 'x'.repeat(201) }, { sort: 'invalid' }]) {
       assert.ok((await call({ action: 'list', scope, ...extra })).error);
     }
     const read = await call({ action: 'read', scope, id: 'a' });
-    assert.equal(read.text.length, 4000);
-    assert.equal(read.nextOffset, 4000);
+    assert.equal(read.text.length, 1200);
+    assert.equal(read.nextOffset, 1200);
     const plugin = await ContextFoldingPlugin();
-    assert.equal(plugin.tool.context_folding.args.oneOf.length, 6);
+    assert.equal(plugin.tool.context_folding.args.oneOf.length, 8);
   });
 });

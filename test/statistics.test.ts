@@ -105,10 +105,10 @@ test('annotation batches count once; successful, failed and uncertain responses 
     await execute({ scope, action: 'read', id: 'missing-entry' });
     assert.equal((await call({ scope, action: 'stats' })).summary.detailViewCount, 2);
     assert.equal((await stat(join(directory, 'state.sqlite'))).size, bytesBefore);
-    assert.equal((await call({ scope, action: 'forget' })).forgotten, true);
+    assert.equal((await call({ scope, action: 'forget', force: true })).forgotten, true);
     const lifetime = await call({ action: 'stats' });
     assert.equal(lifetime.metrics.foldBatchesApproved, 1);
-    assert.equal(lifetime.metrics.itemsRestored, 2);
+    assert.equal(lifetime.metrics.itemsRestored, 0);
     assert.deepEqual(lifetime.summary, session.summary);
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);

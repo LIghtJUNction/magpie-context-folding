@@ -87,11 +87,11 @@ test('Harbor bridge drives the real delayed projection, exact recovery and compl
     assert.equal(status.result.metrics.itemsFolded, 1);
     const recovered = await call({ op: 'recover', args: { action: 'read', id: hash, limit: 24000 } });
     assert.equal(recovered.result.text, payload);
-    assert.equal(recovered.result.kept, true);
+    assert.equal('kept' in recovered.result, false);
     assert.equal(recovered.result.nextOffset, null);
 
-    const kept = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
-    assert.equal(assistantText(kept.result.body), marked());
+    const continued = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
+    assert.match(assistantText(continued.result.body), /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
     await call({ op: 'response', success: true });
   });
 });

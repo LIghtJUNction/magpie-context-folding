@@ -21,10 +21,9 @@ test('source and conversation markers share content hashes and preserve physical
   }
 });
 
-test('unclosed, unmatched, nested and mismatched blocks remain literal', () => {
+test('unclosed, unmatched and mismatched blocks remain literal', () => {
   for (const text of [
     '@context-fold begin x\nvalue', '@context-fold end x',
-    '@context-fold begin x\n@context-fold begin y\nvalue\n@context-fold end y\n@context-fold end x',
     '@context-fold begin x\nvalue\n@context-fold end y',
     '// @context-fold begin x\nvalue\n# @context-fold end x',
     '@context-fold begin x\n[[cf:v2:123456789abc]]\n@context-fold end x',
