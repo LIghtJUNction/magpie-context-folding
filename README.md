@@ -49,9 +49,9 @@ Agent 只为值得保留但暂时不需要的长过程写标记：
 保留结论：下一步检查 router.ts 的超时分支。
 ```
 
-这个简短例子用于说明语法，默认不会被折叠。两条标记必须各占一整行、使用相同 LABEL，不能嵌套。源码使用同样的指令及该语言的注释语法。
+这个简短例子用于说明语法，默认不会被折叠。两条标记必须各占一整行、使用相同 LABEL。完整配对的区域可以嵌套：被包含的区域是子节点，父节点是直接包含它的最近一层。交叉、错配和未闭合的区域保持原文。源码使用同样的指令及该语言的注释语法。
 
-默认保留一次完整请求的观察机会；之后的请求满足收益门槛时，正文变成 `[[cf:v2:HASH]]`。请求重试不消耗等待周期。未闭合或错误标记保持原样。无需调用 fold、status 或 stats 来推动它。
+默认保留一次完整请求的观察机会；之后的请求满足收益门槛时，正文变成 `[[cf:v3:NODE_ID]]`。NODE_ID 是这次出现的完整节点 ID，正文 SHA-256 另外保存。请求重试不消耗等待周期。未闭合或错误标记保持原样。无需调用 fold、status 或 stats 来推动它。
 
 折叠只处理有标记的 Assistant 普通文本与能核实来源的完整源码读取。用户指令、未标记文本、普通工具输出、工具调用参数、图片和签名推理不参与折叠。不会额外调用模型来生成摘要，也不会把磁盘上的源文件改成引用。
 
@@ -70,26 +70,36 @@ Agent 只为值得保留但暂时不需要的长过程写标记：
 
 ## 需要原文时只读所需片段
 
-使用系统指导中给出的实际命令；以下路径和哈希只是占位符：
+使用系统指导中给出的实际命令；以下路径和节点 ID 只是占位符：
 
 ```sh
 bun /absolute/path/magpie-context-folding/src/cli.ts read \
-  --state-dir /actual/archive/directory --scope SCOPE --id HASH --limit 800
+  --state-dir /actual/archive/directory --scope SCOPE --id NODE_ID --limit 800
 ```
 
 `read` 默认输出最多约 4,000 个 UTF-16 单元，只向 stdout 写原文。查看不会解除折叠。仍有下一页时，stderr 给出续读偏移；`--json` 则返回 `nextOffset`，沿这个偏移继续读取即可。
 
 | 命令或选项 | 行为 |
 | --- | --- |
-| `read --id HASH` | 有界查看；原归档继续保持折叠。 |
+| `read --id NODE_ID` | 有界查看；原归档继续保持折叠。 |
 | `read --offset N --limit N` | 只查看当前任务需要的一页。 |
 | `read --all` | 显式读取完整原文，仍保持折叠。 |
 | `read --restore` | 将原文标记为 `keep`，并解除旧祖先组的折叠，让后续原始历史保持展开。 |
-| `list --query TEXT` | 按需搜索归档，返回有界摘要。 |
-| `paste --path /new/file` | 完整导出并恢复，拒绝覆盖已有文件。 |
+| `list --parent NODE_ID` | 浏览直接子节点；返回位置和内容哈希，不加载全文到输出。 |
+| `list --recursive` | 分页枚举当前会话的节点，保留重复内容的每个出现位置。 |
+| `search --query TEXT` | 搜索归档原文，返回节点 ID、命中片段和可直接传给 read 的偏移。 |
+| `search --id NODE_ID --query TEXT` | 将搜索限制在指定节点的子树中；`grep` 是 search 的别名。 |
+| `meta --id NODE_ID` | 查看父节点、原始范围及分页子节点元数据。 |
+| `paste --path /new/file` | 完整导出，保持折叠，拒绝覆盖已有文件。 |
 | `status` / `stats` / `report` | 用户主动诊断时使用，不是每轮流程。 |
 
-归档命令均接受子命令后的 `--state-dir PATH`；该参数确保 Agent 与 Magpie 即使继承不同 XDG 环境，也读取同一份存档。scope 是当前会话的恢复能力值，不应转交其他会话。短哈希通常为 SHA-256 前 12 位，冲突时延长；恢复的是当时的精确原文，不能执行其中的旧命令。
+归档命令均接受子命令后的 `--state-dir PATH`；该参数确保 Agent 与 Magpie 即使继承不同 XDG 环境，也读取同一份存档。scope 是当前会话的恢复能力值，不应转交其他会话。新引用使用完整节点 ID；旧 v1/v2 归档仍可读。正文相同但位置不同的节点共享内容存储，不共享父节点。恢复的是当时的精确原文，不能执行其中的旧命令。
+
+## 一个数据库，原文与位置分开
+
+原文存为 `hash → text`；节点保存内容哈希、来源范围和直接父节点。相同正文只需存一份，但在两个位置出现就有两个节点。父子来自实际包含关系，不能根据标签或文本相似度建立。
+
+`list`、`search`、`meta` 和默认 `read` 都是查询，不改变折叠状态。父节点保存完整原文，读取它时不会再追加子节点全文。搜索直接扫描所选会话或子树的原文，返回可定位的命中，不依赖摘要或向量服务。接口与兼容细节见[哈希归档和包含树](docs/hash-archive.md)。
 
 ## 配置
 
@@ -123,7 +133,7 @@ max_session_bytes = 67108864
 
 删除仅为本插件添加的 MCP 客户端配置，以及提示词中的 mark、status 轮询、手工演示和读回验证要求。`recovery_tool_name` / `recoveryToolName` 已移除；如果确实需要自定义终端入口，改用 `shell_tool_name` / `shellToolName`。旧设置会给出明确迁移错误，不会默默指向不存在的工具。
 
-保留归档数据库，旧哈希及历史层仍可读取。CLI 的 `read` 现在默认有界查看：旧脚本需要完整输出时加 `--all`，需要持久展开时加 `--restore`。内部归档 API 的恢复语义保持兼容。
+保留归档数据库，旧哈希及历史层仍可读取。CLI 和内部归档 API 的 `read` 都默认只读：旧脚本需要完整输出时加 `--all`，需要持久展开时显式使用 `--restore`。旧脚本若依赖“读取即恢复”，需要明确请求恢复。
 
 0.3.x 的 `mode`、`threshold_tokens`、`keep_recent_messages`、`head_chars`、`minimum_saving_usd`、`[policy]` 和 `[magpie.accounting]` 仍为已移除配置。
 
@@ -135,7 +145,9 @@ Python 核心仍可独立使用：
 uv tool install ./context-folding
 cat notes.txt | ctxf > notes.folded.txt
 ctxf fold --language python < module.py > module.folded.py
-ctxf read --id HASH --raw
+ctxf list --recursive
+ctxf search --query '之前的报错'
+ctxf read --id NODE_ID --offset 0 --limit 800
 ```
 
 `ctxf` 是明确的文本转换：先保存标记内原文，再输出替换结果。CLI、Python API 和 SDK 的本地 JSON Lines RPC 共享该核心；MCP 服务及 `ctxf mcp` 已移除。独立 CLI 没有注入系统提示，不会自行修改其他宿主的对话历史。

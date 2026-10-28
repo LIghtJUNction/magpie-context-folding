@@ -80,6 +80,14 @@ fn convenience_methods_preserve_fields_and_reuse_process() {
         json!({"action":"list", "scope":"s"})
     );
     assert_eq!(
+        client.search("s", "needle🙂", json!({"action": "wrong", "scope": "wrong", "query": "wrong", "id": "parent", "limit": 1})).unwrap()["request"],
+        json!({"action":"search", "scope":"s", "query":"needle🙂", "id":"parent", "limit":1})
+    );
+    assert_eq!(
+        client.meta("s", "entry", json!({"action": "wrong", "id": "wrong", "offset": 1})).unwrap()["request"],
+        json!({"action":"meta", "scope":"s", "id":"entry", "offset":1})
+    );
+    assert_eq!(
         client.call(json!({
             "action": "read-source", "scope": "s", "text": "# source",
             "occurrence": "read-1", "requestCycle": 0
@@ -279,13 +287,15 @@ fn installed_core_delays_annotations_and_recovers_exact_source() {
     assert_eq!(client.call(request(0, "read-1")).unwrap()["text"], text);
     let folded = client.call(request(1, "read-1")).unwrap();
     let view = folded["text"].as_str().unwrap();
-    assert!(view.contains("[[cf:v2:"));
+    assert!(view.contains("[[cf:v3:"));
     assert_eq!(client.call(request(2, "read-2")).unwrap()["text"], text);
     let resolved = client.resolve("real", json!({"content": view})).unwrap();
     assert_eq!(resolved["value"]["content"], text);
     let id = first["id"].as_str().unwrap();
     assert_eq!(client.read("real", id, json!({})).unwrap()["text"], text);
-    assert_eq!(client.call(request(3, "read-1")).unwrap()["text"], text);
+    assert!(client.call(request(3, "read-1")).unwrap()["text"].as_str().unwrap().contains("[[cf:v3:"));
+    client.call(json!({"action":"restore", "scope":"real", "id":id})).unwrap();
+    assert_eq!(client.call(request(4, "read-1")).unwrap()["text"], text);
     assert!(matches!(client.call(json!({
         "action": "mark", "scope": "real", "id": id,
         "disposition": "foldable", "summary": "obsolete"
@@ -318,16 +328,66 @@ fn installed_core_folds_submitted_text_and_returns_recoverable_references() {
     assert_eq!(folded["references"].as_array().unwrap().len(), 1);
     let reference = &folded["references"][0];
     assert_eq!(reference["label"], "evidence");
-    assert_eq!(reference["id"], reference["sha256"]);
+    assert_ne!(reference["id"], reference["sha256"]);
+    assert_eq!(reference["id"], reference["nodeId"]);
+    assert_eq!(reference["id"], reference["archiveId"]);
+    assert_eq!(reference["sha256"], reference["contentHash"]);
     let id = reference["id"].as_str().unwrap();
     assert_eq!(id.len(), 64);
     let literal = reference["reference"].as_str().unwrap();
-    assert!(literal.starts_with("[[cf:v2:"));
+    assert_eq!(literal, format!("[[cf:v3:{id}]]"));
     assert_eq!(folded["text"], format!("{prefix}{literal}{suffix}"));
     let resolved = client.resolve("fold-test", folded["text"].clone()).unwrap();
     assert_eq!(resolved["value"], text);
     assert_eq!(client.read("fold-test", id, json!({})).unwrap()["text"], body);
     assert!(matches!(client.read("another-scope", id, json!({})), Err(Error::Remote { .. })));
+    client.close().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn installed_core_queries_distinct_occurrences_without_expanding() {
+    let Some(core_path) = std::env::var_os("CONTEXT_FOLDING_REAL_CORE_PATH") else {
+        eprintln!("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH");
+        return;
+    };
+    let directory = marker().with_extension("dir");
+    std::fs::create_dir(&directory).unwrap();
+    let mut cfg = Config::new(directory.join("archive.sqlite"));
+    cfg.env.insert(OsString::from("PYTHONPATH"), core_path);
+    let client = Client::with_config(cfg).unwrap();
+    let body = format!("intro🙂 Needle 中文 end\n{}", "saved detail\n".repeat(20).trim_end());
+    let region = |label| format!("<!-- @context-fold begin {label} -->\n{body}\n<!-- @context-fold end {label} -->");
+    let text = format!("<!-- @context-fold begin parent -->\n{}\n{}\n<!-- @context-fold end parent -->", region("first"), region("second"));
+    let folded = client.fold("tree", &text, json!({"sourceId":"conversation:42"})).unwrap();
+    assert_eq!(folded["references"].as_array().unwrap().len(), 1);
+    let parent_id = folded["references"][0]["id"].as_str().unwrap();
+    let children = client.list("tree", json!({"parentId":parent_id})).unwrap();
+    let entries = children["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_ne!(entries[0]["id"], entries[1]["id"]);
+    assert_eq!(entries[0]["sha256"], entries[1]["sha256"]);
+    assert_eq!(entries[0]["parentId"], parent_id);
+    assert_eq!(entries[1]["parentId"], parent_id);
+    let before = client.meta("tree", parent_id, json!({"limit":1})).unwrap();
+    assert_eq!(before["children"].as_array().unwrap().len(), 1);
+    assert_eq!(before["nextOffset"], 1);
+    let tail = client.meta("tree", parent_id, json!({"offset":1,"limit":1})).unwrap();
+    assert_eq!(tail["children"].as_array().unwrap().len(), 1);
+    assert!(tail["nextOffset"].is_null());
+    let search = client.search("tree", "Needle 中文", json!({"id":parent_id,"caseSensitive":true})).unwrap();
+    let hits: Vec<_> = search["matches"].as_array().unwrap().iter()
+        .filter(|hit| hit["id"] == entries[0]["id"] || hit["id"] == entries[1]["id"])
+        .collect();
+    assert_eq!(hits.len(), 2);
+    for hit in hits {
+        assert_eq!(hit["offsetUnit"], "unicode-code-points");
+        let page = client.read("tree", hit["id"].as_str().unwrap(), json!({"offset":hit["offset"],"limit":"Needle 中文".chars().count()})).unwrap();
+        assert_eq!(page["text"], "Needle 中文");
+    }
+    assert_eq!(client.meta("tree", parent_id, json!({"limit":1})).unwrap(), before);
+    assert_eq!(client.fold("tree", &text, json!({"sourceId":"conversation:42"})).unwrap()["references"][0]["id"], parent_id);
+    assert!(matches!(client.meta("other-scope", parent_id, json!({})), Err(Error::Remote { .. })));
     client.close().unwrap();
     std::fs::remove_dir_all(directory).unwrap();
 }

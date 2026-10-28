@@ -43,8 +43,6 @@ class AnnotationTests(unittest.TestCase):
         function = "def work():\n    return 3\n"
         damaged = (
             "# @context-fold begin open\n",
-            "# @context-fold begin outer\n# @context-fold begin inner\n"
-            "# @context-fold end inner\n# @context-fold end outer\n",
             "# @context-fold begin broken\n# @context-fold end wrong\n# @context-fold end broken\n",
             "# @context-fold begin\n",
             "# @context-fold end orphan\n",

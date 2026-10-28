@@ -152,6 +152,15 @@ export class ContextFoldingClient implements AsyncDisposable {
   list<T = unknown>(scope: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'list', scope }, signal);
   }
+  /** Search original text. Match offsets use Python Unicode code points. */
+  search<T = unknown>(scope: string, query: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
+    return this.call<T>({ ...fields, action: 'search', scope, query }, signal);
+  }
+  /** Inspect one occurrence and a page of its direct children without expanding it. */
+  meta<T = unknown>(scope: string, id: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
+    return this.call<T>({ ...fields, action: 'meta', scope, id }, signal);
+  }
+  /** Read a page of original text without changing folding state. */
   read<T = unknown>(scope: string, id: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'read', scope, id }, signal);
   }

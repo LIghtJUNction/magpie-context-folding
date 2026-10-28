@@ -1,4 +1,4 @@
-"""Sibling region expansion replaces the removed nested-fold contract."""
+"""Sibling and nested region expansion preserve exact archived originals."""
 from pathlib import Path
 import tempfile
 import unittest
@@ -33,11 +33,13 @@ class ExpansionTests(unittest.TestCase):
                 self.client.read_source("s", text=source_document(), **fields)
             self.assertEqual(before, self.client._db.execute("SELECT data FROM scopes").fetchall())
 
-    def test_nested_markers_preserve_all_text(self):
+    def test_nested_markers_archive_parent_and_contained_children(self):
         source = "// @context-fold begin outer\n" + source_document() + "// @context-fold end outer\n"
         view = self.client.read_source("s", text=source, limit=24000)
-        self.assertEqual(view["text"], source)
-        self.assertEqual(view["foldedRegions"], [])
+        self.assertEqual([region["name"] for region in view["foldedRegions"]], ["outer"])
+        self.assertEqual(self.client.resolve("s", view["text"])["value"], source)
+        parent = view["foldedRegions"][0]["id"]
+        self.assertEqual([node["label"] for node in self.client.list("s", parentId=parent)["entries"]], ["left", "right"])
 
 
 if __name__ == "__main__":

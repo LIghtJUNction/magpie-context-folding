@@ -269,7 +269,7 @@ impl Client {
         self.action("put", scope, request)
     }
 
-    /// Read an archived entry. Options are passed through to the engine.
+    /// Read original text without changing folding state. Offsets count Unicode code points.
     pub fn read(&self, scope: &str, id: &str, options: Value) -> Result<Value> {
         let mut request = options_object(options)?;
         request.insert("id".into(), json!(id));
@@ -278,6 +278,20 @@ impl Client {
 
     pub fn list(&self, scope: &str, options: Value) -> Result<Value> {
         self.action("list", scope, options_object(options)?)
+    }
+
+    /// Search original text. Match offsets can be passed directly to `read`.
+    pub fn search(&self, scope: &str, query: &str, options: Value) -> Result<Value> {
+        let mut request = options_object(options)?;
+        request.insert("query".into(), json!(query));
+        self.action("search", scope, request)
+    }
+
+    /// Inspect one occurrence and a page of its direct children without expanding it.
+    pub fn meta(&self, scope: &str, id: &str, options: Value) -> Result<Value> {
+        let mut request = options_object(options)?;
+        request.insert("id".into(), json!(id));
+        self.action("meta", scope, request)
     }
 
     pub fn render(&self, scope: &str, ids: &[&str], protected: &[&str]) -> Result<Value> {

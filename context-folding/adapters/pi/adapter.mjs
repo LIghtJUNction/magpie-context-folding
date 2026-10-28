@@ -87,5 +87,8 @@ export async function restoreOriginal(call, ctx, id) {
   if (!record) throw new Error('Snapshot unavailable in the active session branch');
   const text = await readAll(call, scope, id, 'original');
   if (digest(text) !== record.data.sha256) throw new Error('Snapshot integrity check failed');
+  // Inspection is read-only. This user-facing restore action explicitly keeps
+  // the verified snapshot visible in subsequent projections.
+  await call({ action: 'restore', scope, id });
   return text;
 }

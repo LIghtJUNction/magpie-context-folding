@@ -41,7 +41,7 @@ class FoldTests(unittest.TestCase):
 
     def snapshot(self):
         row = self.client._db.execute("SELECT data FROM scopes WHERE scope='s'").fetchone()
-        return json.loads(row[0]) if row else None
+        return self.client._decode(json.loads(row[0])) if row else None
 
     def test_shared_fold_is_immediate_full_length_and_recoverable(self):
         before = "visible preface\r\n" * 2500
@@ -49,15 +49,16 @@ class FoldTests(unittest.TestCase):
         source = before + block() + after
         result = self.client.fold("s", source)
         sha = digest(BODY)
-        reference = f"[[cf:v2:{sha[:12]}]]"
+        reference = result["references"][0]["reference"]
+        self.assertRegex(reference, r"^\[\[cf:v3:[a-f0-9]{64}\]\]$")
         self.assertEqual(result["text"], before + block(reference) + after)
         self.assertGreater(len(result["text"]), 24000)
         self.assertEqual(result["scope"], "s")
         self.assertEqual(len(result["references"]), 1)
         entry = result["references"][0]
-        self.assertEqual(set(entry), {"id", "label", "sha256", "reference", "archiveId"})
+        self.assertEqual(set(entry), {"id", "nodeId", "contentHash", "label", "sha256", "reference", "archiveId"})
         self.assertEqual({k: entry[k] for k in ("id", "label", "sha256", "reference")},
-                         {"id": sha, "label": "evidence", "sha256": sha, "reference": reference})
+                         {"id": entry["archiveId"], "label": "evidence", "sha256": sha, "reference": reference})
         self.assertNotIn(BODY, json.dumps(entry, ensure_ascii=False))
         self.assertEqual(self.client.read("s", sha, limit=24000)["text"], BODY)
         self.assertEqual(self.client.read("s", entry["archiveId"], limit=24000)["text"], BODY)
@@ -98,14 +99,14 @@ class FoldTests(unittest.TestCase):
             self.assertIsNone(self.snapshot())
 
     def test_utf8_savings_allow_short_chinese_payload_and_never_store_short_ascii(self):
-        source = block("汉" * 8, "chinese") + "\n" + block("short", "ascii")
+        source = block("汉" * 30, "chinese") + "\n" + block("short", "ascii")
         result = self.client.fold("s", source)
         self.assertEqual([r["label"] for r in result["references"]], ["chinese"])
         self.assertLess(len(result["text"].encode("utf-8")), len(source.encode("utf-8")))
-        self.assertEqual([entry["text"] for entry in self.snapshot()["entries"]], ["汉" * 8])
+        self.assertEqual([entry["text"] for entry in self.snapshot()["entries"]], ["汉" * 30])
         with Client(self.directory / "automatic.sqlite3", project_dir=self.directory,
                     config={"folding": {"delay_requests": 0}}) as automatic:
-            view = automatic.read_source("s", text=block("汉" * 8, "chinese"))
+            view = automatic.read_source("s", text=block("汉" * 30, "chinese"))
             self.assertEqual(len(view["foldedRegions"]), 1)
 
     def test_explicit_fold_does_not_change_background_delay_or_keep(self):
@@ -118,7 +119,8 @@ class FoldTests(unittest.TestCase):
         automatic = self.client.read_source("s", text=source, occurrence="read-1", requestCycle=1, limit=24000)
         self.assertTrue(automatic["foldedRegions"])
         self.client.read("s", folded["references"][0]["id"])
-        self.assertEqual(self.client.read_source("s", text=source, occurrence="read-1", requestCycle=2, limit=24000)["text"], source)
+        self.assertTrue(self.client.read_source("s", text=source, occurrence="read-1", requestCycle=2, limit=24000)["foldedRegions"])
+        self.client.call({"action": "restore", "scope": "s", "id": automatic["foldedRegions"][0]["id"]})
         self.assertTrue(self.client.fold("s", source)["references"], "an explicit request may fold recovered text again")
         self.assertEqual(self.client.read_source("s", text=source, occurrence="read-1", requestCycle=3, limit=24000)["text"], source)
         self.assertEqual(self.client.config["folding"]["delay_requests"], 1)
@@ -155,8 +157,10 @@ class FoldTests(unittest.TestCase):
 
         with patch("context_folding.core.hashlib.sha256", synthetic):
             result = self.client.fold("s", block(left, "left") + "\n" + block(right, "right"))
-            self.assertEqual([item["reference"] for item in result["references"]],
-                             [f"[[cf:v2:{left_hash[:14]}]]", f"[[cf:v2:{right_hash[:14]}]]"])
+            self.assertEqual([item["sha256"] for item in result["references"]], [left_hash, right_hash])
+            self.assertEqual(len({item["id"] for item in result["references"]}), 2)
+            for item in result["references"]:
+                self.assertEqual(item["reference"], f"[[cf:v3:{item['id']}]]")
             with self.assertRaises(FoldingError) as raised:
                 self.client.read("s", "1" * 12)
             self.assertEqual(raised.exception.code, "ambiguous_hash")
@@ -256,7 +260,8 @@ class CtxfProcessTests(unittest.TestCase):
             output, second_error = second.communicate(timeout=15)
             self.assertEqual((first.returncode, second.returncode), (0, 0))
             self.assertEqual((first_error, second_error), (b"", b""))
-            expected = source.replace(BODY, f"[[cf:v2:{digest(BODY)[:12]}]]").encode()
+            reference = re.search(rb"\[\[cf:v3:[a-f0-9]{64}\]\]", output).group().decode()
+            expected = source.replace(BODY, reference).encode()
             self.assertEqual(output, expected)
             self.assertGreater(len(output), 24000)
             self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", digest(BODY))), BODY.encode())

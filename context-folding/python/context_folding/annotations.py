@@ -104,12 +104,13 @@ def _python_function_header_lines(text: str) -> dict[int, int]:
 
 
 def discover_source(text: str, language: str | None = None, path: str | None = None,
-                    styles: Any = None, *, strict: bool = False) -> dict[str, Any]:
+                    styles: Any = None, *, strict: bool = False,
+                    include_reference_regions: bool = False) -> dict[str, Any]:
     """Discover only paired, whole-line annotations; never infer foldable code.
 
     Python and optional JS/TS lexers exclude marker-looking string contents.
-    Plain text and other languages use the same literal line protocol. Invalid,
-    nested or incomplete pairs leave only their uncertain range visible. Earlier
+    Plain text and other languages use the same literal line protocol. Invalid
+    or incomplete pairs leave only their uncertain range visible. Earlier
     complete regions remain eligible. Source-editing helpers use strict validation
     before inserting comments and still reject any damaged marker.
     """
@@ -145,9 +146,7 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         parser = "tree-sitter-explicit"
 
     regions = []
-    opened = None
-    invalid = False
-    depth = 0
+    opened = []
     problems = []
 
     def problem(reason: str):
@@ -166,49 +165,41 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         marker = _MARKER.fullmatch(body)
         if marker is None:
             problem("Malformed source annotation")
-            if opened is not None:
-                invalid = True
+            for frame in opened:
+                frame["invalid"] = True
             continue
         operation, name = marker.groups()
         if operation == "begin":
-            if opened is not None:
-                problem("Nested source annotations are unsupported")
-                invalid = True
-                depth += 1
-            else:
-                opened = (name, number, style)
-                invalid = False
-                depth = 1
+            opened.append({"name": name, "line": number, "style": style, "invalid": False})
             continue
-        if opened is None:
+        if not opened:
             problem("Unmatched source annotation")
             continue
-        if depth > 1:
-            # Nested content is never a candidate, including apparently valid
-            # children. Resume only after the outer region closes correctly.
-            depth -= 1
-            continue
-        if (name, style) != (opened[0], opened[2]):
+        matching = next((index for index in range(len(opened) - 1, -1, -1)
+                         if (opened[index]["name"], opened[index]["style"]) == (name, style)), None)
+        if matching != len(opened) - 1:
             problem("Unmatched source annotation")
-            invalid = True
-            continue
-        _, first, _ = opened
-        opened = None
-        depth = 0
-        if invalid or number <= first + 1:
+            for frame in opened:
+                frame["invalid"] = True
+            if matching is None:
+                continue
+        frame = opened[matching]
+        del opened[matching:]
+        first = frame["line"]
+        if frame["invalid"] or number <= first + 1:
             continue
         start, end = offsets[first], offsets[number - 1]
         payload = text[start:end]
         newline = "\r\n" if payload.endswith("\r\n") else payload[-1:] if payload.endswith(("\r", "\n")) else ""
         end -= len(newline)
         payload = text[start:end]
-        if not payload or re.search(r"\[\[cf:v[12]:", payload):
+        if not payload or (not include_reference_regions and re.search(r"\[\[cf:v[123]:", payload)):
             continue
         sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         regions.append({"id": sha256[:12], "sha256": sha256, "name": name, "kind": "explicit",
                         "start": start, "end": end, "startLine": first + 1, "endLine": number - 1,
                         "header": name, "parentId": None, "disposition": "foldable"})
-    if opened is not None:
+    if opened:
         problem("Unterminated source annotation")
     if len(regions) > 10000:
         problem("Too many source annotations")
@@ -220,6 +211,17 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         while any(other != region["sha256"] and other.startswith(region["sha256"][:length]) for other in hashes):
             length += 2
         region["id"] = region["sha256"][:length]
+    regions.sort(key=lambda region: (region["start"], -region["end"]))
+    parents = []
+    for region in regions:
+        while parents and region["start"] >= parents[-1]["end"]:
+            parents.pop()
+        if parents and region["end"] <= parents[-1]["end"]:
+            region["parentId"] = parents[-1]["id"]
+            region["parentStart"] = parents[-1]["start"]
+        else:
+            region["parentStart"] = None
+        parents.append(region)
     limitations = [reason + "; affected text preserved." for reason in problems]
     if comments is None:
         limitations.append("Literal whole-line protocol; no language parser. Marker-looking multiline strings may be misidentified.")
@@ -354,22 +356,30 @@ def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bo
         return {"text": text, "foldedRegions": []}
     expanded = select_regions(regions, [] if expand is None else expand)
     by_id = {r["id"]: r for r in regions}
+    by_start = {r["start"]: r for r in regions}
+
+    def ancestors(region):
+        seen = {region["start"]}
+        while True:
+            parent = (by_start.get(region["parentStart"]) if "parentStart" in region
+                      else by_id.get(region.get("parentId")))
+            if parent is None or parent["start"] in seen:
+                return
+            seen.add(parent["start"])
+            yield parent
+            region = parent
     # Targeted expansion reveals ancestors; keep/unmarked also protects children.
     protected = set(expanded)
     kept = {r["id"] for r in regions if r["disposition"] != "foldable"}
-    for key in expanded | kept:
-        parent = by_id[key]["parentId"]
-        while parent:
-            protected.add(parent)
-            parent = by_id[parent]["parentId"]
+    for region in regions:
+        if region["id"] in expanded | kept:
+            protected.update(parent["id"] for parent in ancestors(region))
     chunks, visible, cursor = [], [], 0
     for region in regions:
-        if region["start"] < cursor:
+        if region["start"] < cursor or region.get("alreadyFolded"):
             continue
-        parent, preserve = region["id"], keep_all
-        while parent:
-            preserve = preserve or parent in kept or (expand_mode == "recursive" and parent in expanded)
-            parent = by_id[parent]["parentId"]
+        preserve = keep_all or any(item["id"] in kept or (expand_mode == "recursive" and item["id"] in expanded)
+                                   for item in (region, *ancestors(region)))
         payload = text[region["start"]:region["end"]]
         if preserve or region["id"] in protected or len(region["reference"].encode("utf-8")) >= len(payload.encode("utf-8")):
             continue

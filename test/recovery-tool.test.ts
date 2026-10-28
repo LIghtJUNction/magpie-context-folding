@@ -81,7 +81,7 @@ function assertOriginal(body: Body, protocol: Protocol): void {
 }
 
 function assertFolded(body: Body, protocol: Protocol, _name: string): void {
-  assert.match(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text ?? '', /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
+  assert.match(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text ?? '', /\[\[cf:v3:[a-f0-9]{12,64}\]\]/);
   assert.match(JSON.stringify(body), /--scope [a-f0-9]{64}/);
 }
 

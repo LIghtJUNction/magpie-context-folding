@@ -131,7 +131,7 @@ test('lowering the quota keeps oversized snapshots recoverable while rejecting g
     const growth = { ...large, messages: [...large.messages, { role: 'assistant', content: region('additional', 'more '.repeat(1000)) }] };
     assert.deepEqual(await f.configure(2048, growth), growth);
     assert.deepEqual(f.stored(), before);
-    const recovered = await call({ action: 'read', scope: f.scope, id });
+    const recovered = await call({ action: 'read', restore: true, scope: f.scope, id });
     assert.equal(recovered.text, text);
     assert.equal(recovered.kept, true);
     assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 2048);

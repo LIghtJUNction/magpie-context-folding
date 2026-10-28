@@ -27,7 +27,7 @@ test('a projection prepared before concurrent recovery returns original input in
       const next = progress(input, 'chat');
       const pending = onRequest(next, context);
       await prepared;
-      const read = JSON.parse(await execute({ action: 'read', scope, id: digest(payload).slice(0, 12) }));
+      const read = JSON.parse(await execute({ action: 'read', restore: true, scope, id: digest(payload).slice(0, 12) }));
       assert.equal(read.kept, true);
       release();
       assert.equal(await pending, next, 'failed compare-and-swap cannot publish its stale projection');

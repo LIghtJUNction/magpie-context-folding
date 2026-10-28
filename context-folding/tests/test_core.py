@@ -132,6 +132,8 @@ class ClientIntegrationTests(unittest.TestCase):
         self.call("gc", mode="configure", config={"strength": "aggressive", "idleSeconds": 1})
         self.assertNotIn("trashedAt", self.nodes()[item["id"]])
         self.call("status")
+        self.assertNotIn("trashedAt", self.nodes()[item["id"]])
+        self.call("gc", mode="collect")
         self.assertIn("trashedAt", self.nodes()[item["id"]])
         self.call("gc", mode="restore", ids=[item["id"]])
         self.assertNotIn("trashedAt", self.nodes()[item["id"]])

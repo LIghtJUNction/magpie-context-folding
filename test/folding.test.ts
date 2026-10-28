@@ -10,7 +10,7 @@ import { bodyFor, fixture, marked, payload, progress } from './helpers.js';
 const withoutMetadata = (body: Record<string, unknown>, protocol: Protocol) => withoutGuidance(withoutBudget(body, protocol), protocol);
 
 
-const folded = (value: unknown) => JSON.stringify(value).includes('[[cf:v2:');
+const folded = (value: unknown) => JSON.stringify(value).includes('[[cf:v3:');
 const tool = async (args: unknown) => JSON.parse(await execute(args));
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
@@ -25,12 +25,12 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const next = await onRequest(nextInput, context) as Record<string, unknown>;
       assert.equal(folded(next), true);
       const texts = extractSpans(next, protocol).filter(span => span.role === 'assistant').map(span => span.text).join('');
-      assert.ok(texts.includes(`[[cf:v2:${digest(payload).slice(0, 12)}]]`));
+      assert.match(texts, /\[\[cf:v3:[a-f0-9]{64}\]\]/);
       assert.ok(texts.includes('@context-fold begin research'));
       assert.equal((await store.readStats(scope)).metrics.itemsFolded, 1);
       assert.equal(folded(await onRequest(nextInput, context)), true);
       assert.equal((await store.readStats(scope)).metrics.itemsFolded, 1, 'replay is not a new fold');
-      const recovered = await tool({ action: 'read', scope, id: digest(payload).slice(0, 12), limit: 24000 });
+      const recovered = await tool({ action: 'read', scope, id: digest(payload).slice(0, 12), limit: 24000, restore: true });
       assert.equal(recovered.text, payload);
       assert.equal(recovered.sha256, digest(payload));
       assert.equal(recovered.kept, true);
@@ -109,8 +109,7 @@ test('without a callable shell the request is unchanged and emits no metadata', 
 
 test('malformed and tiny annotated blocks remain readable', async () => {
   await fixture(async ({ context }) => {
-    for (const text of [marked('x'), '@context-fold begin x\n' + payload,
-      '@context-fold begin x\n@context-fold begin y\n' + payload + '\n@context-fold end y\n@context-fold end x']) {
+    for (const text of [marked('x'), '@context-fold begin x\n' + payload]) {
       const input = bodyFor('chat', text);
       const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
       assert.deepEqual(withoutMetadata(output, 'chat'), input);
@@ -163,6 +162,6 @@ test('earlier folding in the same message cannot restart a later block grace per
     const third = await onRequest(progress(projected, 'chat'), context) as Record<string, unknown>;
     const after = extractSpans(third, 'chat').find(span => span.role === 'assistant')!.text;
     assert.equal(after.includes('B'.repeat(2400)), false);
-    assert.equal(after.match(/\[\[cf:v2:/g)?.length, 2);
+    assert.equal(after.match(/\[\[cf:v3:/g)?.length, 2);
   });
 });

@@ -105,10 +105,11 @@ def fold(event: dict, archive: Client, scope: str, *, selectors: list[str] | Non
         return {}
     annotation = discover_source(text, "python")
     result = archive.read_source(scope, text=text, language="python", mode="folded", limit=24000,
+                                 sourceId="claude-file:" + hashlib.sha256(path.encode()).hexdigest(),
                                  expand=[] if selectors is None else selectors, expandMode=expand_mode)
     if result.get("parser") != "python-comments":
         return {}
-    selected = {r["id"]: r for r in annotation["regions"]}
+    selected = {(r["startLine"], r["endLine"]): r for r in annotation["regions"]}
     regions = result.get("foldedRegions", [])
     if not regions:
         return {}
@@ -116,12 +117,12 @@ def fold(event: dict, archive: Client, scope: str, *, selectors: list[str] | Non
     recovery = recovery or archive.put(scope, json.dumps(response, ensure_ascii=False))["id"]
     chunks, cursor = [], 0
     for folded in regions:
-        region = selected[folded["id"]]
+        region = selected[folded["startLine"], folded["endLine"]]
         first, last = region["startLine"], region["endLine"]
         payload = text[region["start"]:region["end"]]
         notice = (f"[context-folding: original lines {first}-{last} hidden; NOT SOURCE; "
                   f"blank lines below are placeholders; expand before editing: "
-                  f"python3 {shlex.quote(str(Path(__file__).resolve().parents[2] / 'scripts/claude-read.py'))} expand {recovery} {region['id']}]")
+                  f"python3 {shlex.quote(str(Path(__file__).resolve().parents[2] / 'scripts/claude-read.py'))} expand {recovery} {folded['id']}]")
         # Preserve every original newline byte. Host numbering remains truthful
         # for all visible source after each placeholder, including CRLF input.
         replacement = notice + "".join(re.findall(r"\r\n|\r|\n", payload))
@@ -178,6 +179,12 @@ def expand(root: Path, identifier: str, region_id: str | list[str] | None = None
         file = response["file"]
         regions = discover_source(file["content"], "python")["regions"]
         region = next((r for r in regions if r["id"] == region_id), None)
+        if region is None and isinstance(region_id, str) and re.fullmatch(r"[a-f0-9]{64}", region_id):
+            with client(root, token, cwd) as archive:
+                location = archive.meta(token, region_id).get("sourceRange")
+            if location and location["sourceHash"] == hashlib.sha256(file["content"].encode()).hexdigest():
+                region = next((r for r in regions if (r["start"], r["end"]) ==
+                               (location["start"], location["end"])), None)
         if region is None:
             raise ValueError("Unknown region in this Read response")
         first, last = region["startLine"], region["endLine"]

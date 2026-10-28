@@ -220,6 +220,13 @@ public sealed class Client : IAsyncDisposable
         => OperationAsync("put", scope, fields, cancellationToken, ("text", text));
     public Task<JsonElement> ListAsync(string scope, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("list", scope, fields, cancellationToken);
+    /// <summary>Search original text; match offsets count Python Unicode code points.</summary>
+    public Task<JsonElement> SearchAsync(string scope, string query, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
+        => OperationAsync("search", scope, fields, cancellationToken, ("query", query));
+    /// <summary>Inspect one occurrence and a page of its children without expanding it.</summary>
+    public Task<JsonElement> MetaAsync(string scope, string id, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
+        => OperationAsync("meta", scope, fields, cancellationToken, ("id", id));
+    /// <summary>Read original text without changing folding state.</summary>
     public Task<JsonElement> ReadAsync(string scope, string id, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("read", scope, fields, cancellationToken, ("id", id));
 

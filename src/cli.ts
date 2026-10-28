@@ -13,8 +13,11 @@ const usage = `Usage: magpie-context-folding <command> [options]
 
 read   --scope S --id ID [--layer ID] [--offset N] [--limit N|--all] [--restore|--peek] [--json]
 paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
-list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
+list   --scope S [--id ID|--parent ID] [--recursive] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
        [--order asc|desc] [--offset N] [--limit N]
+search --scope S --query TEXT [--id ID] [--no-recursive] [--offset N] [--limit N]
+grep   (alias for search)
+meta   --scope S --id ID [--offset N] [--limit N]
 status --scope S
 stats  [--scope S] [--json]
 statusline [--scope S] [--client] [--json]
@@ -29,7 +32,7 @@ read writes at most 4000 characters by default; --limit selects a page and --all
 Reading leaves the archive folded; --restore also keeps the original visible in future requests.
 paste --path - exports the full exact text unless --limit selects a page.
 Other archive commands and config write JSON.
-paste persists keep and restores all ancestor groups; --peek leaves folding unchanged.
+Queries and exports leave folding unchanged; read --restore explicitly restores enclosing folds.
 Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
 Folding is requested with @context-fold begin/end annotations, not a CLI command.
 statusline is read-only; without a scope/client binding it shows explicitly global totals.
@@ -44,8 +47,13 @@ const archive = { ...common, 'state-dir': string };
 const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean };
 const options: Record<string, ParseArgsConfig['options']> = {
   read: { ...archive, ...range, all: boolean, restore: boolean },
-  paste: { ...archive, ...range, path: string },
-  list: { ...archive, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
+  paste: { ...archive, ...range, path: string, restore: boolean },
+  list: { ...archive, scope: string, id: string, parent: string, recursive: boolean, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
+  search: { ...archive, scope: string, id: string, query: string, recursive: boolean, 'no-recursive': boolean,
+    'case-sensitive': boolean, 'ignore-case': boolean, offset: string, limit: string },
+  grep: { ...archive, scope: string, id: string, query: string, recursive: boolean, 'no-recursive': boolean,
+    'case-sensitive': boolean, 'ignore-case': boolean, offset: string, limit: string },
+  meta: { ...archive, scope: string, id: string, offset: string, limit: string },
   status: { ...archive, scope: string },
   stats: { ...archive, scope: string },
   statusline: { ...archive, scope: string, client: boolean },
@@ -144,19 +152,22 @@ async function main(): Promise<void> {
   }
   const args: Record<string, unknown> = { action: command };
   for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || key === 'json' || key === 'help' || key === 'all' || key === 'restore' || key === 'state-dir') continue;
+    if (value === undefined || key === 'json' || key === 'help' || key === 'all' || key === 'state-dir') continue;
     if (['offset', 'limit', 'depth'].includes(key)) {
       if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
         throw new UsageError('Expected a nonnegative integer for range/depth options');
       }
       args[key] = Number(value);
-    } else args[key] = value;
+    } else if (key === 'no-recursive') { if (value) args.recursive = false; }
+    else if (key === 'ignore-case') { if (value) args.caseSensitive = false; }
+    else args[key === 'parent' ? 'parentId' : key === 'case-sensitive' ? 'caseSensitive' : key] = value;
   }
   const stdoutRead = command === 'read' || (command === 'paste' && values.path === '-');
   if (stdoutRead) {
     const request: Record<string, unknown> = { ...args, action: 'read' };
     delete request.path;
-    if (command === 'read') request.peek = values.restore !== true;
+    request.peek = values.restore !== true;
+    request.restore = values.restore === true;
     const page = async (input: Record<string, unknown>) => {
       const result = JSON.parse(await execute(input)) as {
         error?: string; id: string; text: string; nextOffset: number | null; sha256: string; totalChars: number;
@@ -170,7 +181,7 @@ async function main(): Promise<void> {
     const chunks = [result.text];
     let nextOffset = result.nextOffset;
     while (fullRead && args.limit === undefined && nextOffset !== null) {
-      const next = await page({ ...request, peek: true, offset: nextOffset, limit: 24000 });
+      const next = await page({ ...request, peek: true, restore: false, offset: nextOffset, limit: 24000 });
       if (next.sha256 !== result.sha256 || next.totalChars !== result.totalChars) {
         throw new UsageError('Context archive changed during reading; retry request');
       }

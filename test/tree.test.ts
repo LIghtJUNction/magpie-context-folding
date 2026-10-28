@@ -46,10 +46,10 @@ test('legacy grouped historical versions retain their exact version links', asyn
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.groups = [group('legacy-group', ['a', 'b'], 'old version')];
     });
-    const read = await call({ action: 'read', scope, id: 'a' });
+    const read = await call({ action: 'read', restore: true, scope, id: 'a' });
     assert.equal(read.version.path, '/source.ts');
     assert.equal(read.latestVersion, false);
-    const latest = await call({ action: 'read', scope, id: 'c' });
+    const latest = await call({ action: 'read', restore: true, scope, id: 'c' });
     assert.equal(latest.version.previousId, 'a');
     assert.equal(latest.latestVersion, true);
   });
@@ -83,7 +83,7 @@ test('archive rejects multiple latest markers and cyclic or reversed revision ch
   });
 });
 
-test('reading a nested legacy member releases every ancestor and preserves its historical metadata', async () => {
+test('explicitly restoring a nested legacy member releases every ancestor and preserves its historical metadata', async () => {
   await fixture(async (store, scope) => {
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.groups = [group('g-one', ['a', 'b']), group('g-two', ['g-one', 'c'])];
@@ -91,7 +91,7 @@ test('reading a nested legacy member releases every ancestor and preserves its h
       state.entries[0]!.folded = 'entry folded';
       state.entries[0]!.version = { series: 'series', number: 1, kind: 'similar', automatic: true };
     });
-    const result = await call({ action: 'read', scope, id: 'a' });
+    const result = await call({ action: 'read', restore: true, scope, id: 'a' });
     assert.equal(result.error, undefined);
     const state = await load(store, scope);
     assert.equal(state.entries[0]?.folded, undefined);
@@ -112,20 +112,20 @@ test('group read/paste return only the manifest and forget protects folded group
       state.groups = [group(id, ['a', 'b'], 'bounded summary')];
     });
     const manifest = { id, summary: 'bounded summary', children: ['a', 'b'] };
-    const read = await call({ action: 'read', scope, id });
+    const read = await call({ action: 'read', restore: true, scope, id });
     assert.deepEqual(JSON.parse(read.text), manifest);
     assert.ok(read.totalChars < 500);
-    assert.ok((await call({ action: 'read', scope, id, layer: 'missing' })).error);
+    assert.ok((await call({ action: 'read', restore: true, scope, id, layer: 'missing' })).error);
     const path = join(directory, 'manifest.json');
     assert.equal((await call({ action: 'paste', scope, id, path })).error, undefined);
     assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), manifest);
     await store.transaction(scope, false, 64 * 1024 * 1024, state => { state.groups![0]!.folded = 'active'; });
     assert.ok((await call({ action: 'forget', scope })).error);
     assert.equal((await load(store, scope)).groups?.length, 1);
-    const outsideScope = await call({ action: 'read', scope: '0'.repeat(64), id });
+    const outsideScope = await call({ action: 'read', restore: true, scope: '0'.repeat(64), id });
     assert.match(outsideScope.error, /Unknown context scope/);
     assert.equal(outsideScope.text, undefined);
-    await call({ action: 'read', scope, id });
+    await call({ action: 'read', restore: true, scope, id });
     assert.equal((await call({ action: 'forget', scope })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
   });
@@ -134,9 +134,9 @@ test('group read/paste return only the manifest and forget protects folded group
 test('tree depth, subtree and pagination bound every returned node', () => {
   const state = snapshot();
   assert.deepEqual(browse(state, { depth: 0 }).entries.map(node => node.id), ['g-two', 'd']);
-  assert.deepEqual(browse(state).entries.map(node => [node.id, node.depth]), [['g-two', 0], ['g-one', 1], ['c', 1], ['d', 0]]);
+  assert.deepEqual(browse(state).entries.map(node => [node.id, node.depth]), [['g-two', 0], ['d', 0]]);
   assert.deepEqual(browse(state, { depth: 8 }).entries.map(node => node.id), ['g-two', 'g-one', 'a', 'b', 'c', 'd']);
-  const subtree = browse(state, { id: 'g-one' });
+  const subtree = browse(state, { id: 'g-one', depth: 1 });
   assert.deepEqual(subtree.entries.map(node => [node.id, node.parentId, node.depth]), [['g-one', 'g-two', 0], ['a', 'g-one', 1], ['b', 'g-one', 1]]);
   const page = browse(state, { depth: 8, limit: 2 });
   assert.equal(page.entries.length, 2);
@@ -216,9 +216,9 @@ test('siblings sort deterministically and compact nodes expose version status wi
   state.entries[0]!.mark = { disposition: 'foldable', summary: 'summary'.repeat(100) };
   state.entries[0]!.layers = [{ id: 'layer', previousId: 'original', text: 'private layer' }];
   state.entries[0]!.folded = 'private layer';
-  assert.deepEqual(browse(state, { id: 'g-one', sort: 'id', order: 'desc' }).entries.map(node => node.id), ['g-one', 'b', 'a']);
-  assert.deepEqual(browse(state, { id: 'g-one', sort: 'size' }).entries.map(node => node.id), ['g-one', 'b', 'a']);
-  const version = browse(state, { id: 'g-one', sort: 'version' });
+  assert.deepEqual(browse(state, { id: 'g-one', depth: 1, sort: 'id', order: 'desc' }).entries.map(node => node.id), ['g-one', 'b', 'a']);
+  assert.deepEqual(browse(state, { id: 'g-one', depth: 1, sort: 'size' }).entries.map(node => node.id), ['g-one', 'b', 'a']);
+  const version = browse(state, { id: 'g-one', depth: 1, sort: 'version' });
   assert.deepEqual(version.entries.map(node => node.id), ['g-one', 'b', 'a']);
   const a = version.entries.find(node => node.id === 'a')!;
   assert.ok('layers' in a);
@@ -236,10 +236,10 @@ test('siblings sort deterministically and compact nodes expose version status wi
 
 test('runtime list bounds and read default stay explicit without model tools', async () => {
   await fixture(async (_store, scope) => {
-    for (const extra of [{ depth: -1 }, { depth: 9 }, { limit: 101 }, { offset: -1 }, { query: 'x'.repeat(201) }, { sort: 'invalid' }]) {
+    for (const extra of [{ depth: -1 }, { depth: 65 }, { limit: 101 }, { offset: -1 }, { query: 'x'.repeat(201) }, { sort: 'invalid' }]) {
       assert.ok((await call({ action: 'list', scope, ...extra })).error);
     }
-    const read = await call({ action: 'read', scope, id: 'a' });
+    const read = await call({ action: 'read', restore: true, scope, id: 'a' });
     assert.equal(read.text.length, 4000);
     assert.equal(read.nextOffset, 4000);
     const plugin = await ContextFoldingPlugin();

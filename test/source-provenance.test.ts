@@ -42,7 +42,8 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const first = await onRequest(input, context) as Record<string, unknown>;
       assert.equal(toolText(first, protocol), source);
       const compact = await onRequest(progress(input, protocol), context) as Record<string, unknown>;
-      const expected = source.replace(code, `[[cf:v2:${digest(code).slice(0, 12)}]]`);
+      const ref = toolText(compact, protocol).match(/\[\[cf:v3:[a-f0-9]{64}\]\]/)![0];
+      const expected = source.replace(code, ref);
       assert.equal(toolText(compact, protocol), expected);
       const fresh = readBody(protocol, source, 'read-2');
       assert.equal(toolText(await onRequest(fresh, context) as Record<string, unknown>, protocol), source);
@@ -103,10 +104,10 @@ test('duplicate reads mature identically when history contains an earlier projec
       { role: 'tool', tool_call_id: 'read-2', content: source });
     const compact = await onRequest(twice, context) as Record<string, unknown>;
     const firstTools = extractSpans(compact, 'chat').filter(span => span.role === 'tool');
-    assert.match(firstTools[0]!.text, /\[\[cf:v2:/);
+    assert.match(firstTools[0]!.text, /\[\[cf:v3:/);
     assert.equal(firstTools[1]!.text, source);
     const third = await onRequest(progress(compact, 'chat'), context) as Record<string, unknown>;
     const nextTools = extractSpans(third, 'chat').filter(span => span.role === 'tool');
-    assert.ok(nextTools.every(span => span.text.includes('[[cf:v2:')));
+    assert.ok(nextTools.every(span => span.text.includes('[[cf:v3:')));
   });
 });

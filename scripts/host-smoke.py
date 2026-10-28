@@ -257,14 +257,20 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                     time.sleep(0.05)
                 return output
 
-            def read_all(scope: str, original: str) -> None:
+            def node_reference(text: str) -> tuple[str, str]:
+                identifiers = set(re.findall(r"\[\[cf:v3:([a-f0-9]{64})\]\]", text))
+                assert len(identifiers) == 1, "expected one occurrence reference"
+                identifier = identifiers.pop()
+                return f"[[cf:v3:{identifier}]]", identifier
+
+            def read_all(scope: str, node_id: str, original: str) -> None:
                 expected_hash = sha256(original)
                 parts: list[str] = []
                 offset = 0
                 while True:
                     page = call({"scope": scope, "action": "read", "peek": True,
-                                 "id": expected_hash[:12], "offset": offset, "limit": 5000})
-                    assert page["id"] == expected_hash and page["sha256"] == expected_hash, "content hash changed"
+                                 "id": node_id, "offset": offset, "limit": 5000})
+                    assert page["id"] == node_id and page["sha256"] == expected_hash, "node or content hash changed"
                     assert page["offset"] == offset and page["totalChars"] == utf16_length(original), "read pagination metadata changed"
                     assert page["kept"] is False, "peek changed persistent expansion"
                     parts.append(page["text"])
@@ -318,7 +324,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             advanced = advance(closed, "A distinct request after the completed work.")
             folded, scope, folded_budget = send(advanced)
             assert scope is not None, "folded text has no CLI recovery scope"
-            reference = f"[[cf:v2:{sha256(original)[:12]}]]"
+            reference, node_id = node_reference(folded["messages"][3]["content"])
             expected = copy.deepcopy(advanced)
             expected["messages"][3]["content"] = prefix + reference
             expected["messages"][5]["content"] = reference + suffix
@@ -332,15 +338,24 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert replayed == expected, "replaying a projected request duplicated guidance or re-folded a reference"
             status = call({"scope": scope, "action": "status"})
             assert status["entries"] == 1 and status["metrics"]["itemsFolded"] == 1, "retry created duplicate archives or folds"
-            read_all(scope, original)
-            call({"scope": "0" * 64, "action": "read", "peek": True, "id": sha256(original)[:12]}, expect_error=True)
+            meta = call({"scope": scope, "action": "meta", "id": node_id})
+            assert meta["sha256"] == sha256(original) and meta["parentId"] is None, "archive metadata changed"
+            listing = call({"scope": scope, "action": "list", "recursive": True})
+            assert [entry["id"] for entry in listing["entries"]] == [node_id], "enumeration lost the occurrence"
+            hits = call({"scope": scope, "action": "search", "query": "middle-evidence-0030"})
+            match = hits["matches"][0]
+            assert match["id"] == node_id, "search returned a different occurrence"
+            found = call({"scope": scope, "action": "read", "id": node_id, "offset": match["offset"], "limit": 20})
+            assert found["text"].startswith("middle-evidence-0030"), "search offsets do not address the original"
+            read_all(scope, node_id, original)
+            call({"scope": "0" * 64, "action": "read", "peek": True, "id": node_id}, expect_error=True)
             exported = directory / "original.txt"
-            pasted = call({"scope": scope, "action": "paste", "peek": True, "id": sha256(original)[:12], "path": str(exported)})
+            pasted = call({"scope": scope, "action": "paste", "peek": True, "id": node_id, "path": str(exported)})
             assert exported.read_bytes() == original.encode("utf-8"), "paste changed original bytes"
             assert pasted["sha256"] == sha256(original) and "text" not in pasted, "paste metadata changed"
-            call({"scope": scope, "action": "paste", "peek": True, "id": sha256(original)[:12], "path": str(exported)}, expect_error=True)
+            call({"scope": scope, "action": "paste", "peek": True, "id": node_id, "path": str(exported)}, expect_error=True)
             assert exported.read_bytes() == original.encode("utf-8"), "paste overwrote an existing file"
-            kept = call({"scope": scope, "action": "read", "id": sha256(original)[:12], "limit": 1, "restore": True})
+            kept = call({"scope": scope, "action": "read", "id": node_id, "limit": 1, "restore": True})
             assert kept["kept"] is True, "explicit --restore did not persist expansion"
             assert send(advanced)[0] == advanced, "read did not expand all slices of the original"
             later = advance(advanced, "Another request must keep recovered text visible.")
@@ -349,7 +364,12 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert other_scope is None and other == closed, "new-session grace failed"
             other_folded, other_scope, _ = send(advanced, "host-smoke-other")
             assert other_scope is not None and other_scope != scope, "session isolation failed"
-            assert other_folded == expected, "persistent expansion leaked across sessions"
+            other_reference, other_node_id = node_reference(other_folded["messages"][3]["content"])
+            assert other_node_id != node_id, "node identities leaked across scopes"
+            other_expected = copy.deepcopy(expected)
+            other_expected["messages"][3]["content"] = prefix + other_reference
+            other_expected["messages"][5]["content"] = other_reference + suffix
+            assert other_folded == other_expected, "persistent expansion leaked across sessions"
 
             source_path = directory / "worker.ts"
             source_payload = "\r\n".join(f'  perform("中文😀", {index});' for index in range(100))
@@ -371,10 +391,11 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert source_first == source_input
             assert send(source_input, "host-smoke-source")[0] == source_input, "Read retry consumed the grace period"
             source_next = advance(source_input, "Review the annotated source next.")
-            source_expected = copy.deepcopy(source_next)
-            source_expected["messages"][2]["content"] = source_text.replace(source_payload, f"[[cf:v2:{sha256(source_payload)[:12]}]]")
             source_folded, source_scope, _ = send(source_next, "host-smoke-source")
             assert source_scope is not None
+            source_reference, source_node_id = node_reference(source_folded["messages"][2]["content"])
+            source_expected = copy.deepcopy(source_next)
+            source_expected["messages"][2]["content"] = source_text.replace(source_payload, source_reference)
             assert source_folded == source_expected, "source comments did not use the same hash and delay contract"
             assert source_path.read_bytes() == source_text.encode("utf-8"), "folding changed the source file"
             fresh = source_body(source_text, "read-2")
@@ -385,12 +406,15 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             changed = source_body(changed_text, "read-3")
             assert send(changed, "host-smoke-source")[0] == changed
             changed_next = advance(changed, "Review the changed source next.")
+            changed_folded = send(changed_next, "host-smoke-source")[0]
+            changed_reference, changed_node_id = node_reference(changed_folded["messages"][2]["content"])
+            assert changed_node_id != source_node_id, "source update reused the old occurrence node"
             changed_expected = copy.deepcopy(changed_next)
-            changed_expected["messages"][2]["content"] = changed_text.replace(changed_payload, f"[[cf:v2:{sha256(changed_payload)[:12]}]]")
-            assert send(changed_next, "host-smoke-source")[0] == changed_expected, "source update did not receive a new content hash"
+            changed_expected["messages"][2]["content"] = changed_text.replace(changed_payload, changed_reference)
+            assert changed_folded == changed_expected, "source update did not receive a new occurrence reference"
             assert source_path.read_bytes() == changed_text.encode("utf-8"), "folding changed updated source bytes"
-            read_all(source_scope, source_payload)
-            read_all(source_scope, changed_payload)
+            read_all(source_scope, source_node_id, source_payload)
+            read_all(source_scope, changed_node_id, changed_payload)
             unmarked = source_body(changed_payload, "read-4")
             assert send(unmarked, "host-smoke-source")[0] == unmarked
             unmarked_next = advance(unmarked, "Unmarked source must remain complete.")
@@ -401,9 +425,9 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 "provider": "local synthetic HTTP fixture; no external model was called",
                 "checks": [
                     "local CLI recovery without MCP", "open annotations stay visible", "first closed observation and identical retries stay visible",
-                    "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
+                    "distinct requests fold explicit annotations", "occurrence references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
                     "one concise system guidance; budgets disabled by default", "projection replay does not duplicate guidance or archives",
-                    "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
+                    "paginated byte-for-byte Unicode/CRLF recovery", "read-only enumeration, metadata and original-text search", "exclusive paste without text echo", "unknown scope refused",
                     "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
                     "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
                     "source files remain unchanged by folding", "unmarked source stays visible",

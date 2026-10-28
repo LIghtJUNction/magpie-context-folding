@@ -14,17 +14,16 @@ test('source and conversation markers share content hashes and preserve physical
       assert.equal(regions.length, 1);
       assert.equal(regions[0]!.text, payload);
       assert.equal(regions[0]!.sha256, digest(payload));
-      const ref = reference(shortHash(regions[0]!.sha256, [regions[0]!.sha256]));
+      const ref = reference(regions[0]!.sha256);
       const output = replaceRegions(parts, [{ region: regions[0]!, reference: ref }]).get('a')!;
       assert.equal(output.replace(ref, payload), text);
     }
   }
 });
 
-test('unclosed, unmatched, nested and mismatched blocks remain literal', () => {
+test('unclosed, unmatched and mismatched blocks remain literal', () => {
   for (const text of [
     '@context-fold begin x\nvalue', '@context-fold end x',
-    '@context-fold begin x\n@context-fold begin y\nvalue\n@context-fold end y\n@context-fold end x',
     '@context-fold begin x\nvalue\n@context-fold end y',
     '// @context-fold begin x\nvalue\n# @context-fold end x',
     '@context-fold begin x\n[[cf:v2:123456789abc]]\n@context-fold end x',

@@ -7,6 +7,7 @@ import { Store } from '../src/store.js';
 import { collectReport } from '../src/report.js';
 import { escapeHtml, renderReport } from '../src/report-html.js';
 import { onRequest, onResponse } from '../src/context.hooks.js';
+import { execute } from '../src/tool.js';
 
 const cli = join(import.meta.dir, '..', 'src', 'cli.ts');
 async function fixture(run: (directory: string, scope: string, invoke: (args: string[]) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
@@ -130,6 +131,48 @@ test('report excludes folded entries covered by nested groups and retains indepe
   });
 });
 
+test('report counts independent v3 occurrence trees and stays unchanged by archive queries', async () => {
+  await fixture(async directory => {
+    const block = (label: string, text: string) => `@context-fold begin ${label}\n${text}\n@context-fold end ${label}`;
+    const parent = 'completed evidence '.repeat(400) + '\n' + block('middle', block('leaf', 'needle🙂'));
+    const context = { protocol: 'chat', model: 'fixture', session: 'report-v3-tree', cwd: directory,
+      options: { delayRequests: 0 }, state: {} };
+    const input = { tools: [{ type: 'function', function: { name: 'exec_command' } }], messages: [
+      { role: 'assistant', content: block('first', parent) + '\n' + block('second', parent) },
+      { role: 'user', content: 'Continue.' },
+    ] };
+    const store = new Store(join(directory, 'state'));
+    const scope = await store.scopeFor(JSON.stringify([context.session, '', '', directory]));
+    const output = await onRequest(input, context);
+    assert.equal(JSON.stringify(output).match(/\[\[cf:v3:[a-f0-9]{64}\]\]/g)?.length, 2);
+    await onResponse({}, { ...context, success: true, request: output });
+    const nodes = await store.inspect(scope, snapshot => structuredClone(snapshot.entries));
+    assert.equal(nodes.length, 6);
+    assert.equal(nodes.filter(node => node.folded !== undefined).length, 6);
+    const roots = nodes.filter(node => node.annotation?.parentId === null);
+    assert.equal(roots[0]!.annotation!.sha256, roots[1]!.annotation!.sha256);
+    assert.notEqual(roots[0]!.id, roots[1]!.id);
+    const before = await readFile(join(directory, 'state', 'state.sqlite'));
+    const report = await collectReport(scope);
+    assert.equal(report.sessions[0]!.entries, 6);
+    assert.equal(report.sessions[0]!.foldedEntries, 2, 'count occurrences without recounting covered descendants');
+    assert.equal(report.sessions[0]!.observation?.foldedRegions, 2);
+    assert.match(renderReport(report), /也不代表请求节省量/);
+    for (const request of [
+      { action: 'read', id: roots[0]!.id }, { action: 'meta', id: roots[0]!.id },
+      { action: 'list', recursive: true }, { action: 'search', query: 'needle' },
+    ]) assert.equal(JSON.parse(await execute({ ...request, scope })).error, undefined);
+    assert.deepEqual((await collectReport(scope)).sessions, report.sessions);
+    assert.deepEqual(await readFile(join(directory, 'state', 'state.sqlite')), before);
+
+    const leaf = nodes.find(node => node.annotation?.label === 'leaf')!;
+    assert.equal(JSON.parse(await execute({ action: 'read', scope, id: leaf.id, restore: true })).error, undefined);
+    const restored = await collectReport(scope);
+    assert.equal(restored.sessions[0]!.foldedEntries, 1, 'restoring one leaf releases that occurrence tree only');
+    assert.equal(restored.sessions[0]!.observation?.foldedRegions, 2, 'last request observation is separate from current archive state');
+  });
+});
+
 test('report leads with unverified benefit for estimates and conditional cost bounds', async () => {
   await fixture(async (directory, scope) => {
     const unverified = renderReport(await collectReport(scope));
@@ -215,7 +258,7 @@ test('real annotation projection reports full request sizes, response state and 
     const store = new Store(join(directory, 'state'));
     const scope = await store.scopeFor(JSON.stringify([context.session, '', '', directory]));
     const output = await onRequest(input, context);
-    assert.match(JSON.stringify(output), /\[\[cf:v2:[a-f0-9]+\]\]/);
+    assert.match(JSON.stringify(output), /\[\[cf:v3:[a-f0-9]{64}\]\]/);
     const report = await collectReport(scope);
     const session = report.sessions[0]!;
     const beforeBytes = Buffer.byteLength(JSON.stringify(input));
@@ -283,7 +326,7 @@ test('request reports distinguish grace periods, absent current folds and unsucc
 
     const nextInput = { ...input, messages: [...input.messages, { role: 'user', content: 'A different next request.' }] };
     const folded = await onRequest(nextInput, context);
-    assert.match(JSON.stringify(folded), /\[\[cf:v2:/);
+    assert.match(JSON.stringify(folded), /\[\[cf:v3:[a-f0-9]{64}\]\]/);
     await onResponse({}, { ...context, success: false, request: folded });
     const failed = await collectReport(scope);
     assert.equal(failed.sessions[0]!.observation?.status, 'failed');
