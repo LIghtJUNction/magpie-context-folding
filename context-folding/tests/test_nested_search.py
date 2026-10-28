@@ -63,6 +63,48 @@ class NestedSearchTests(unittest.TestCase):
         self.assertEqual(self.client.resolve("s", outer["reference"])["value"], bodies["outer"])
         self.assertEqual(self.client.read("s", outer["id"])["text"], parent["text"])
 
+    def test_twelve_nested_layers_recurse_page_search_and_resolve_exactly(self):
+        newline = "\r\n"
+        bodies = {}
+        body = ("最深の内容 needle 🌌\r\n" + "deep payload 🧪 " * 80).rstrip()
+        bodies["layer11"] = body
+        text = block("layer11", body, newline)
+        for depth in range(10, -1, -1):
+            label = f"layer{depth}"
+            body = (f"見出し {label} 🪷" + newline + text + newline
+                    + f"終端 {label} " + "周辺データ " * 8).rstrip()
+            bodies[label] = body
+            text = block(label, body, newline)
+
+        folded = self.client.fold("s", text)
+        self.assertEqual([row["label"] for row in folded["references"]], ["layer0"])
+        outer = folded["references"][0]
+        first = self.client.list("s", id=outer["id"], recursive=True, limit=5)
+        rows = first["entries"]
+        self.assertEqual([row["label"] for row in rows], [f"layer{i}" for i in range(5)])
+        self.assertEqual([row["depth"] for row in rows], list(range(5)))
+        self.assertEqual(first["total"], 12)
+        self.assertEqual(first["nextOffset"], 5)
+        all_rows = self.client.list("s", id=outer["id"], recursive=True, limit=20)["entries"]
+        remainder = self.client.list("s", id=outer["id"], recursive=True, offset=5, limit=7)
+        self.assertEqual(remainder["entries"], all_rows[5:12])
+        self.assertIsNone(remainder["nextOffset"])
+        self.assertEqual([row["depth"] for row in all_rows], list(range(12)))
+        self.assertEqual([row["label"] for row in all_rows], [f"layer{i}" for i in range(12)])
+
+        page = self.client.read("s", outer["id"], limit=24000)
+        self.assertIn(all_rows[1]["reference"], page["text"])
+        self.assertIn("\r\n", page["text"])
+        bounded = self.client.read("s", outer["id"], limit=60)
+        self.assertEqual(bounded["text"], page["text"][:60])
+        self.assertEqual(bounded["nextOffset"], 60)
+        tail = self.client.read("s", outer["id"], offset=60, limit=24000)
+        self.assertEqual(bounded["text"] + tail["text"], page["text"])
+        hits = self.client.grep("s", "needle", id=outer["id"], recursive=True, limit=20)["matches"]
+        self.assertTrue(hits)
+        self.assertEqual({hit["id"] for hit in hits}, {all_rows[-1]["id"]})
+        self.assertEqual(self.client.resolve("s", outer["reference"])["value"], bodies["layer0"])
+
     def test_closed_children_survive_unclosed_or_malformed_parent(self):
         child = block("child", "complete child payload " * 30)
         unclosed = "@context-fold begin outer\n" + child

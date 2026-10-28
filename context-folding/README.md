@@ -1,121 +1,177 @@
-# ctxf — fold once, query small
+# ctxf — Context Folding
 
-Write explicit folding comments, keep the resulting references in context, and inspect the archive only as needed. Queries do not unfold history or set `keep`. Nested regions stay navigable through child references.
+A local text-folding command and persistent archive for **explicit folding comments**. The agent writes a matching `@context-fold begin LABEL` / `@context-fold end LABEL` pair. An explicit `fold` call saves the marked body and immediately returns its short hash reference. The separate `read-source` integration retains delayed projection at host request boundaries.
 
-The CLI, Python API, JSON Lines RPC and Rust/TypeScript/C# bridges use one Python engine and the selected SQLite archive. They make no model calls or network requests. The separate [Magpie plugin](../README.md) uses its own store; references must be queried in the backend that created them. The root plugin source is 0.5.0 and has not been published to npm; this Python package remains 0.1.0 in the matching checkout.
+The `ctxf` CLI, Python API, JSON Lines RPC and Rust/TypeScript/C# bridges all use this same Python engine and SQLite archive. They make no model calls or network requests. This package is separate from the [Magpie request plugin](../README.md): installing it does not intercept another tool or rewrite a host's history.
 
-## Install and use
+The root plugin is published on npm as [magpie-context-folding](https://www.npmjs.com/package/magpie-context-folding) at version 0.4.0. This standalone package remains version 0.1.0; use the matching repository checkout for the contract described here.
 
-Python 3.10+ is required; 3.10 also needs `tomli`. From the repository root:
+Claude Code's `SessionStart` hook adds a short folding reminder after `source=compact`. It does not read the archive or write state, and it stays silent for startup, resume and clear events.
+
+## Install and run
+
+Python 3.10+ is required. Python 3.11+ uses the standard library; Python 3.10 additionally requires `tomli`. Install the command from the repository root:
 
 ```sh
 uv tool install ./context-folding
-cat notes.txt | ctxf > notes.folded.txt
-ctxf list
-ctxf meta HASH
-ctxf list HASH --depth 2
-ctxf grep timeout HASH --limit 3
-ctxf read HASH --lines 4:9
+cat notes.txt | ctxf
+ctxf fold < notes.txt > notes.folded.txt
+ctxf fold --json < notes.txt
 ```
 
-Replace `HASH` with an actual reference or returned ID. For development, use `uv sync --project context-folding`, then prefix commands with `uv run --project context-folding`.
+For development without a tool installation, run `uv sync --project context-folding` and prefix commands with `uv run --project context-folding`, for example `uv run --project context-folding ctxf fold < notes.txt`. The old `context-folding` executable and `python -m context_folding` retain their explicit command/state arguments and JSON management output. They call the same engine; `ctxf` adds the pipe-friendly defaults. Only this Python package installs `ctxf`.
 
-`ctxf` defaults to `fold`: UTF-8 stdin to complete folded text on stdout, without an added newline. `ctxf fold --json` returns `{scope,text,references}`. Empty and unmarked text pass through. Only a shorter UTF-8 representation is published, after originals have been committed.
+`ctxf` defaults to scope `default` and a persistent state file selected in this order: `--state`, `CTXF_STATE`, then `$XDG_DATA_HOME/context-folding/archive.sqlite3` or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. `--state` and `--scope` may appear before or after single-operation commands such as `fold` and `read`. RPC calls supply their own scopes. Use the same state and scope when recovering a reference from another process or interface.
 
-Default state is `CTXF_STATE`, otherwise `$XDG_DATA_HOME/context-folding/archive.sqlite3` or `~/.local/share/context-folding/archive.sqlite3`. Override it with `--state`. Scope defaults to `default`; `--scope` separates tasks. Queries use the same state and scope as folding. State is a file, not a directory; new files are private and persist after process exit. API/RPC calls always supply a stable scope of 1–200 characters explicitly. The scope is a local namespace, not authentication; file and process permissions remain the host's responsibility.
+`--state` is a SQLite **file path**, not a directory. New files use mode 0600 and newly created parent directories use mode 0700. Keep the archive in a persistent private directory; closing a client does not delete it. SDK clients select their state file explicitly.
 
-## Query the archive
+Every API/RPC request supplies a stable `scope` of 1–200 characters; the CLI default does not remove that API requirement. The scope is a local namespace, not authentication. File/process permissions remain the host's responsibility. Do not reuse another application's scope to recover its data.
 
-| Command | Default result |
-| --- | --- |
-| `ctxf list [ID]` | Up to 10 directory entries; `--depth` controls subtree traversal. |
-| `ctxf meta ID` | Compact JSON: original hash/size and a bounded list of child IDs. |
-| `ctxf grep PATTERN [ID]` | Up to 10 literal matches, recursively searched inside the archive. |
-| `ctxf read ID` | Up to 1200 characters from this node's view; child bodies remain references. |
-| `ctxf status` | Short archive status. |
+## Immediate text folding
 
-Use `read --lines A:B` for inclusive, 1-based view lines, or `--offset` / `--limit` for a character slice. Do not combine line selection with an offset. `grep --context 1` includes neighboring lines; `--no-recursive` stays at the selected node. Search snippets are capped at 160 characters per line. `list --depth` defaults to 1 and allows 0–64; list/grep limits default to 10 and allow up to 100. `list --recursive` traverses descendants in pages; use a small limit or explicit depth.
-
-`--json` returns the bare structured result for these commands. Default read/list/grep output is concise, pipeable text. A truncated query prints only `nextOffset=N` on stderr; stdout remains data. `read --raw` is a compatibility alias for the same bounded text output. It never drains every page automatically.
-
-```sh
-ctxf list --json | jq -r '.entries[].id'
-ctxf grep timeout HASH --limit 5 | rg parser
-ctxf read HASH --lines 4:9 | sed -n '1,3p'
-```
-
-`read`, `grep`, `list` and `meta` do not change fold/keep state or rewrite history. Query the next page or a child only when needed. Original `sha256` and `viewSha256` are different: the former covers archived bytes; the latter covers the node view containing child references. Line numbers and offsets refer to the view. Python offsets count Unicode code points, including through C# and TypeScript; Magpie uses UTF-16 units.
-
-## Markers and nesting
-
-Use whole-line matching comments. Text may use HTML comments; source uses the language's comment shell:
+For notes or assistant-authored text, use whole-line HTML comments:
 
 ```text
 <!-- @context-fold begin investigation -->
-Current layer's explanation.
-<!-- @context-fold begin trace -->
-Detailed observations that can be searched without putting them back into history.
-<!-- @context-fold end trace -->
+Completed observations, comparisons and intermediate details that can be recovered later.
 <!-- @context-fold end investigation -->
-Active decisions and next steps remain outside.
+The decision and next step stay outside the marked region.
 ```
 
-Legal nesting forms a parent/child tree. `fold` publishes top-level references; discover descendants with `list` or `meta`, or search them with recursive `grep`. Unclosed, crossed or malformed regions remain visible without invalidating earlier complete regions. No function, old version or similar text is selected automatically.
+`cat notes.txt | ctxf` and `ctxf fold < notes.txt` read UTF-8 text from stdin and write the complete folded text to stdout. They do not paginate or append a newline. Unmarked text and empty input pass through; malformed, mismatched or unclosed regions remain visible, while correctly matched nested regions are supported. A body stays visible when its reference would not reduce its UTF-8 byte length. Original bodies are committed to the archive before references are returned.
 
-References use `[[cf:v2:HASH]]`, normally the first 12 SHA-256 hex digits, lengthened on collisions. Hashes cover exact original body UTF-8 bytes, excluding the outer marker lines and one final physical newline retained beside the reference. A parent hash covers its original child text. Content changes create new snapshots; old references still identify old content.
+`ctxf fold --json` instead returns the core result object with `scope`, `text` and `references`. Each reference includes `id` and `sha256` as the complete body SHA-256, `label`, the short `[[cf:v2:…]]` `reference`, and the backing `archiveId`. This list describes bodies folded by this call; it does not duplicate their text or reinterpret existing reference literals.
 
-`fold` API fields are `scope`, `text` (empty is valid), and optional `language` / `commentStyles`. It is an explicit immediate conversion, independent of automatic projection's enabled/delay/keep settings. Archive quotas and integrity checks still apply. The result includes top-level `references` with full-SHA `id`, `sha256`, `label`, short `reference` and `archiveId`. Query results use archive IDs; inputs also accept unambiguous content-hash prefixes.
+```sh
+ctxf fold --scope investigation --json < notes.txt
+ctxf read --scope investigation --id ACTUAL_RETURNED_HASH --raw > original-body.txt
+```
+
+`read --raw` follows all pages and writes the original body without an added newline. Ordinary `read` retains its JSON envelope and pagination. To reconstruct the complete marked input, `resolve` replaces references in the folded text; reading one reference returns just that marked body. Keep the returned hash and scope rather than calculating them manually.
+
+The shared API operation is `{"action":"fold","scope":"example","text":"..."}`. Python exposes `client.fold(scope, text, **options)`; SDKs expose corresponding thin wrappers. `text` is required and may be empty. Optional `language` and `commentStyles` use the parser rules below. Explicit `fold` performs the requested conversion immediately, even when automatic projection is disabled, delayed or protected by `keep`; quota and archive safety limits still apply. It does not alter those automatic-projection settings.
 
 ## Source annotations and compact reads
 
-Python uses real `#` comment tokens. JS/JSX/TS/TSX uses optional Tree-sitter grammars:
+Use whole-line comments in the source language:
+
+```python
+# @context-fold begin parse-options
+options = parse_options(input_text)
+validate_options(options)
+# @context-fold end parse-options
+```
+
+Both labels must match. No hash is written by the agent. The core discovers **only explicit comments**; it no longer selects Python functions, classes, older file versions or similar text for folding. Unmarked source remains complete. Malformed, mismatched, unclosed or nested markers preserve the affected range, including nested children. Earlier independently closed regions remain eligible: starting a new unfinished region does not unfold a completed one. An orphan end marker remains literal text.
+
+Folded views retain the marker lines and replace the body with `[[cf:v2:<hash>]]`. The hash is SHA-256 of the body's exact UTF-8 bytes, excluding marker lines and the final physical newline retained beside the reference. The visible prefix starts at 12 hex digits and lengthens on collisions. Source changes produce a new snapshot; old references continue to recover old content.
+
+### Delay requires a host request cycle
+
+The default `folding.delay_requests = 1` means that the first complete observation remains visible. The host must supply both:
+
+- `occurrence`: a stable identifier for this appearance in retained history. A new file read needs a new value, even for identical text.
+- `requestCycle`: a nonnegative, monotonically advancing request-cycle number. Retries reuse the same number.
+
+Reproject the same occurrence when constructing a later request. The core does not advance time merely because an RPC call was repeated.
+
+```python
+from context_folding import Client
+
+text = (
+    "# @context-fold begin investigation\n"
+    + "# Completed investigation detail.\n" * 40
+    + "# @context-fold end investigation\n"
+)
+with Client("/absolute/private/archive.sqlite") as client:
+    source = dict(text=text, language="python", occurrence="read-1")
+    first = client.read_source("example", **source, requestCycle=0)
+    assert first["text"] == text
+    retry = client.read_source("example", **source, requestCycle=0)
+    assert retry["text"] == text
+    later = client.read_source("example", **source, requestCycle=1)
+    restored = client.resolve("example", {"content": later["text"]})
+    assert restored["value"]["content"] == text
+    original = client.read("example", first["id"])
+    assert original["text"] == text  # Also keeps this source visible.
+```
+
+Without both cycle fields, the default returns original text and reports `host-request-cycle-required`. Explicitly setting `delay_requests = 0` permits immediate folding of complete annotations. A one-shot post-tool hook cannot implement delayed history replacement; see the adapter limits below.
+
+### Input, recovery and selection
+
+`annotate` and `read-source` accept exactly one of UTF-8 `text`, an absolute regular-file `path`, or an archived `id`. A `files` array batches 1–100 source objects atomically, with outer defaults and per-file overrides. An invalid item rolls back the batch. No source read changes the file on disk.
+
+`read` returns the current folded view by default and does not change folding state. Use the explicit raw/original option when the complete original body is needed; reading original content protects the applicable source region from automatic projection. `peek: true` inspects without adding that protection. `read-source` accepts explicit `expand` and `keep` selectors by region name, region ID or `"*"`; these preserve the selected region. For a folded view, use the returned reference rather than inventing a hash. Short prefixes must identify one stored payload unambiguously.
+
+Read responses contain `text`, `sha256`, `totalChars` and `nextOffset`. Follow `nextOffset` to retrieve the complete view; the default page is 4,000 Unicode code points, with a 24,000 maximum. All Python/bridge offsets are **Unicode code points**, including when called from TypeScript or C#. The root Magpie plugin uses UTF-16 offsets; do not transfer offsets between them.
+
+A folded response also identifies its original, selected parser, limitations and folded regions. The exact original remains available independently of source-file changes. Existing v1 references and old group manifests remain recoverable, but no new `mark` or `group` operation is accepted.
+
+### Language boundaries
+
+Python uses its tokenizer to accept real `#` comments and exclude marker-shaped strings. JavaScript/JSX/TypeScript/TSX uses optional Tree-sitter grammars to identify real `//` and complete `/* … */` comments:
 
 ```sh
 uv sync --project context-folding --extra javascript
 ```
 
-Other languages use literal whole-line parsing and may misidentify marker-shaped text inside multiline strings. `commentStyles` adds literal shells, not language lexers. The Magpie gateway has a separate conservative Python/JS filter and may retain complex f-strings, JSX or ambiguous template expressions that this standalone parser can handle.
+Other languages use the literal whole-line protocol. That fallback has no language lexer, so marker-shaped text inside a multiline string can be mistaken for a comment. Supply only actual source regions intended for this protocol, or retain the original view when language-aware validation is needed.
 
-A host retaining source history can use `read-source` with both `occurrence` and `requestCycle`. The first closed observation stays complete; default delay 1 permits projection in a later cycle. Retries reuse the cycle; a fresh Read gets a new occurrence. Missing host-cycle information preserves the original. This delayed path is separate from immediate `fold` and bounded archive queries.
+The separate Magpie gateway has a conservative Python/JS lexical filter, not these language parsers. It keeps the source complete when it encounters unsupported or ambiguous constructs such as Python f-strings, JSX, or regex/division inside a template interpolation. Its verified source-read integration does not require this Python package; the parser coverage of the two paths is different. Both retain the literal-parser limitation for other languages.
 
-```python
-from pathlib import Path
-from context_folding import Client
+Built-in comment shells include `//`, `#`, `--`, `;`, `%`, `!`, `'`, `"`, `REM`, `/* … */`, `<!-- … -->`, `(* … *)`, `{- … -}`, `#| … |#` and `<# … #>`. Additional literal shells can be supplied as `commentStyles: [{"start":";;"}]`; they do not override Python/JS comment validation or add a lexer.
 
-with Client("/absolute/private/archive.sqlite") as client:
-    result = client.fold("task", Path("notes.txt").read_text(encoding="utf-8"))
-    if result["references"]:
-        parent = result["references"][0]["id"]
-        print(client.meta("task", parent))
-        print(client.grep("task", "timeout", id=parent, limit=3))
-        print(client.read("task", parent, startLine=1, endLine=4, limit=240))
+The reserved reference prefix `[[cf:` must not be treated as ordinary replaceable text. Source containing literal reference syntax is kept complete or rejected for compact projection, preserving its original meaning. Resolution expands saved payloads once, without recursively interpreting reference-looking text inside the recovered original.
+
+### Adding comments is a separate edit
+
+`annotate-functions /absolute/path` previews function-comment insertion; `--apply` explicitly writes it. This is a source maintenance command, not a prerequisite for reading or a background fold policy. It uses AST or Tree-sitter only to place requested comments safely, skips unsuitable bodies, and validates the resulting source.
+
+```sh
+uv run --project context-folding python -m context_folding annotate-functions /project/module.py
 ```
 
-`annotate-functions` remains an explicit source-editing helper under the compatibility CLI: preview before `--apply`, respect edit scope and validate the program. Reading never writes markers to disk. Do not write compact views into source files.
-
-The [Pi adapter](adapters/pi/README.md) and Claude post-tool hook see one completed Read, not later requests. Default delay therefore preserves full input. Delay 0 can produce an immediate source view. Claude's bound helper `python3 scripts/claude-read.py` exposes the same `list/grep/read/meta` queries without revealing its session binding; `expand` is retained only for explicit legacy recovery. Neither adapter implements host history replay or automatically unfolds earlier messages.
+Adding comments changes line numbers and source-text introspection. Review the preview and use normal project checks before applying. Existing comments are not silently nested to create another layer of folding. Although read projection can preserve a damaged region locally, these editing commands reject malformed, unclosed, mismatched or nested existing markers before writing any changes.
 
 ## CLI and SDK RPC
 
-`ctxf call --json JSON` accepts a complete request; omitted JSON or `--json -` reads stdin. Explicit `--scope` overrides its scope, otherwise the JSON scope is retained. Normal `ctxf read/list/grep/meta --json` selects structured output and is a boolean flag. The old `context-folding` executable and `python -m context_folding` preserve their compatibility request-input `--json JSON` option.
-
-SDK subprocesses use the same archive:
+Use `call` for complete JSON requests. `--json -` reads stdin:
 
 ```sh
-ctxf rpc --state /absolute/private/archive.sqlite3
+ctxf call \
+  --state /absolute/private/archive.sqlite --json -
 ```
 
-RPC exchanges one request and one result/error envelope per line, in order. For example:
+Here, and on existing action commands such as `read`, `--json JSON` remains a request-input option. Only the new `fold --json` is a boolean selecting JSON output.
 
-```json
-{"action":"grep","scope":"task","id":"ACTUAL_HASH","query":"timeout","limit":3}
+SDK subprocesses use the same state selection:
+
+```sh
+ctxf rpc --state /absolute/private/archive.sqlite
 ```
 
-MCP support has been removed. Remove old `ctxf mcp` client configurations and invoke CLI commands through the host shell instead. RPC is a local SDK subprocess transport; it opens no network listener and does not rewrite host history. See [TRANSPORT.md](docs/TRANSPORT.md) and [protocol.json](protocol.json).
+RPC exchanges one request and one result/error envelope per line, in order. It is the local subprocess transport used by SDKs and opens no network listener. MCP support has been removed; remove old `ctxf mcp` client configurations and invoke CLI commands through the host shell instead. See [the transport contract](docs/TRANSPORT.md) and [protocol.json](protocol.json).
 
-Legacy export, explicit recovery and lifecycle actions remain available through CLI/API/RPC for host integrations. `roots`, `pin` and `gc` retain and clean archives; they are not folding modes. Automatic collection is disabled by default. Keep originals while their references remain in use.
+Use `fold` for an immediate explicit text conversion, or `annotate` / `read-source` for retained source observations. Recovery uses `read`, `resolve`, `paste`, `list` and `status`. `put` remains an explicit archive operation; it does not select or summarize historical content. `render` only projects explicit annotations. `restore` supports old recovery data. `mark` and `group` are rejected with migration guidance.
 
-`resolve` expands references in a supplied JSON value's strings, not keys. It returns archived text without reading current source, authorizing edits or executing commands. A host resolving references into edit arguments must validate the resolved final arguments and use normal approvals and current-file checks. Missing, ambiguous or stale references must stop dispatch. The ordinary query workflow reads only needed views and leaves historical folds intact.
+Lifecycle operations (`roots`, `pin`, `gc`) remain available for the host to retain and clean its own archive. They are not compression modes. Automatic collection is disabled by default. Do not remove recovery data still referenced by a request; pins and roots are retention controls, distinct from folding permission.
+
+## Host adapters
+
+The [Pi extension](adapters/pi/README.md) and Claude `PostToolUse` hook receive a single completed read, not the host's subsequent model requests. **With the default delay they preserve full text.** An explicitly configured zero delay can expose immediate views of annotated source. No claim of delayed request replay is made for these one-shot hooks.
+
+The Pi adapter handles successful single-text Python reads; the Claude adapter accepts only its verified complete Python Read response schema. Failed, truncated, multipart or unsupported results remain unchanged. Both preserve restore paths and existing tool approval behavior. Installing either does not authorize edits or arbitrary tool-argument mutation.
+
+A host that wants delayed folding must retain exact source observations and call the core again with the same `occurrence` and a later `requestCycle` when constructing the model request. Installing the CLI alone does not add that hook.
+
+## References used in edits
+
+`resolve` accepts a complete JSON value and expands stored references in string values, not keys. It returns original text; it does not read the current source, authorize an action, or execute commands.
+
+A host may resolve a folded source reference before sending a literal edit argument to another tool. Approval and validation must cover the **resolved final arguments**. The edit tool must still compare against the current file and reject a stale or nonunique match. Missing or ambiguous references stop dispatch rather than falling through as literal edit text.
+
+Without an explicit host integration, restore original source before editing.
 
 ## Configuration
 
@@ -128,8 +184,11 @@ version = 1
 enabled = true
 delay_requests = 1
 max_session_bytes = 67108864
+reserve_output_tokens = 0
 # Shared Magpie request options (the standalone fold command does not use them):
 min_savings_tokens = 256
+budget_hints = false
+# context_window_tokens = 128000
 
 [annotations]
 enabled = true
@@ -142,14 +201,16 @@ enabled = false
 
 The core also accepts the root plugin's `[magpie]` settings (`shell_tool_name`, `recovery_command`, `gateway_timeout_ms`) so a project can share one file; those settings do not install Magpie hooks. The removed `magpie.recovery_tool_name` setting produces migration guidance. Remove old `folding.mode`, threshold/head/keep-recent controls, `[policy]` and accounting settings. They return migration errors, not a silent policy fallback.
 
-The `min_savings_tokens` setting applies to Magpie request projection; the explicit Python `fold` command keeps its byte-saving check and adds no model prompt. Model context capacity and output-reserve budgeting are not managed by this project. Remove the retired `context_window_tokens`, `reserve_output_tokens` and `budget_hints` keys; loading them returns a migration error. See the [root README](../README.md) for Magpie's estimate and its limits.
+The `min_savings_tokens` and `budget_hints` settings apply to Magpie request projection; the explicit Python `fold` command keeps its byte-saving check and adds no model prompt. The budget-related fields describe host capacity; the standalone archive does not count an unseen full model request. See the [root README](../README.md) for Magpie's estimate and its limits.
 
 ## SDKs and verification
 
-[Rust](sdks/rust/README.md), [TypeScript](sdks/typescript/README.md) and [C#](sdks/csharp/README.md) clients are subprocess bridges, not separate folding engines. Examples fold a nested region, inspect metadata, search and read a small slice. Configure an explicit archive path and Python interpreter.
+The [Rust](sdks/rust/README.md), [TypeScript](sdks/typescript/README.md) and [C#](sdks/csharp/README.md) SDKs each keep one Python subprocess alive. They transport the same core protocol; they are not independent implementations of folding. Python must remain installed at runtime. Their examples call `fold` and recover the result. Generic calls also expose `read-source` and its host-supplied request cycles.
+
+Run the Python suite from the repository root:
 
 ```sh
-uv run --project context-folding --extra javascript python -m unittest discover -s context-folding/tests -v
+uv run --project context-folding python -m unittest discover -s context-folding/tests -v
 ```
 
-The `javascript` extra installs the optional JS/TS parser dependencies so those tests run instead of skipping. Tests cover core behavior and local transports; SDK real-core tests are opt-in. These checks do not prove interactive host compaction or billing savings. Historical benchmark results remain historical evidence.
+Bridge tests exercise ordered transport, errors, Unicode, process lifecycle and actual core integration when enabled. They do not use paid model inference or prove that a real host's default compaction has been replaced. Historical counts and benchmark results from previous versions remain historical evidence.

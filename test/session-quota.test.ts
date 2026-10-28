@@ -84,6 +84,24 @@ test('read, paste and inspection preserve the request quota instead of raising i
   }
 });
 
+test('first archival records source provenance so identical replay does not grow the payload', async () => {
+  await fixture(async f => {
+    await f.configure(4096);
+    const store = new Store();
+    const load = () => store.transaction(f.scope, false, 4096, state => structuredClone(state), undefined, 'preserve');
+    const first = await load();
+    const entry = first.entries.find(entry => entry.id === id)!;
+    const ranges = entry.annotation!.observedRanges;
+    assert.equal(ranges?.length, 1, 'the first committed original already has its observed source range');
+    assert.equal(ranges[0]!.sourceHash, digest(body.messages[0]!.content));
+    assert.equal(body.messages[0]!.content.slice(ranges[0]!.start, ranges[0]!.end), text);
+    const bytes = JSON.parse(f.stored().snapshot).payloadBytes;
+    await f.configure(4096);
+    assert.deepEqual((await load()).entries, first.entries);
+    assert.equal(JSON.parse(f.stored().snapshot).payloadBytes, bytes);
+  });
+});
+
 test('request configuration can raise a quota without changing archived content', async () => {
   await fixture(async f => {
     await f.configure(4096);

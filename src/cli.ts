@@ -11,34 +11,37 @@ import type { VisibilitySelection } from './visibility.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
-read   --scope S --id HASH [--layer ID] [--start-line N --end-line N | --offset N]
+read   --scope S --id ID [--layer ID] [--start-line N --end-line N | --offset N]
        [--limit N | --full | --all | --restore] [--peek] [--json]
-grep   --scope S --query TEXT [--id HASH] [--no-recursive] [--limit N] [--offset N] [--json]
-list   --scope S [--id HASH] [--recursive] [--depth N] [--query TEXT]
-       [--sort chronological|size|id|version] [--order asc|desc] [--limit N] [--offset N] [--json]
-meta   --scope S --id HASH [--offset N] [--limit N] [--json]
-paste  --scope S --id HASH --path /new/file|- [--layer ID] [--offset N] [--limit N] [--json]
+paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
+list   --scope S [--id ID] [--recursive] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
+       [--order asc|desc] [--offset N] [--limit N]
+grep   --scope S --query TEXT [--id ID] [--no-recursive] [--case-sensitive] [--offset N] [--limit N] [--json]
+meta   --scope S --id ID [--offset N] [--limit N]
 status --scope S
 stats  [--scope S] [--json]
 statusline [--scope S] [--client] [--json]
 sessions [--json]
-hook   [--scope S] (Stop hook JSON on stdin; one UI notification per confirmed request)
+hook   [--scope S] (Stop hook JSON on stdin)
 report --output /absolute/new.html [--scope S]
 forget --scope S [--force]
 config [--project-dir PATH]
 
-Archive commands accept --state-dir PATH to select the Magpie archive explicitly.
-read returns at most 1200 UTF-16 units of one view; nested children remain references.
---full exports the complete selected view; --all exports the complete original layer by default.
-With --offset, --full/--all export from that offset to the end of the selected layer.
---layer original selects the exact archived bytes; neither export recursively expands stored references.
---restore returns the complete original and keeps the selected subtree visible in future requests.
-Ordinary read/paste never change folding state. paste defaults to the complete one-layer view.
-grep/list return 10 short results by default; meta returns sizes and direct child IDs.
+Archive commands accept --state-dir PATH to select the archive explicitly.
+read writes the complete selected view to stdout unless --limit or a line range selects a page.
+Nested children remain references. paste --path - does the same.
+--full explicitly exports the complete selected view; --all selects the original layer by default.
+--offset exports from that offset; --layer original selects exact archived text.
+--restore returns the complete original and keeps the selected subtree and enclosing folds visible.
+Ordinary read/paste leave folding unchanged; --peek explicitly requests that behavior.
+list and other archive commands write JSON; grep writes short matches unless --json is set.
 statusline is read-only; without a scope/client binding it shows explicitly global totals.
 --client matches stdin session_id only when exactly one gateway scope has the same identity.
 MAGPIE_CONTEXT_FOLDING_SCOPE supplies an explicit scope for statusline/hook.
---json returns structured data. Diagnostics go to stderr; errors exit 1.`;
+Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
+Folding is requested with Agent-authored @context-fold begin/end annotations.
+The same syntax works in conversation and valid source comments, not a CLI command.
+--json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
 
 const string = { type: 'string' } as const;
 const boolean = { type: 'boolean' } as const;
@@ -79,7 +82,7 @@ async function main(): Promise<void> {
   catch { throw new UsageError('Invalid command options; use --help'); }
   if (values.help) { console.log(usage); return; }
   if ((values.all || values.full) && values.limit !== undefined) throw new UsageError('Choose a complete export or --limit, not both');
-  if (values.all && values.full) throw new UsageError('Choose --all for original bytes or --full for the selected view');
+  if (values.all && values.full) throw new UsageError('Choose --all for original text or --full for the selected view');
   if (values.restore && (values.limit !== undefined || values.offset !== undefined || values['start-line'] !== undefined
     || values['end-line'] !== undefined || (values.layer !== undefined && values.layer !== 'original'))) {
     throw new UsageError('--restore requires the complete original without range or view options');
@@ -172,6 +175,9 @@ async function main(): Promise<void> {
     delete request.path;
     request.peek = values.restore !== true;
     if (values.restore || (values.all && values.layer === undefined)) request.layer = 'original';
+    const lineRange = args.startLine !== undefined || args.endLine !== undefined;
+    if (lineRange && (values.full || values.all)) throw new UsageError('Full export cannot combine with a line range');
+    const full = args.limit === undefined && !lineRange;
     const page = async (input: Record<string, unknown>) => {
       const result = JSON.parse(await execute(input)) as {
         error?: string; id: string; text: string; nextOffset: number | null; sha256: string; viewSha256: string; totalChars: number;
@@ -179,15 +185,13 @@ async function main(): Promise<void> {
       if (result.error) throw new UsageError(result.error);
       return result;
     };
-    const full = values.full === true || values.all === true || values.restore === true || (command === 'paste' && args.limit === undefined);
-    if (full && (args.startLine !== undefined || args.endLine !== undefined)) throw new UsageError('Full export cannot combine with a line range');
-    const result = await page({ ...request, limit: args.limit ?? (full ? 24000 : 1200) });
+    const result = await page({ ...request, limit: args.limit ?? 24000 });
     request.id = result.id;
     const chunks = [result.text];
     let nextOffset = result.nextOffset;
-    while (full && args.limit === undefined && nextOffset !== null) {
+    while (full && nextOffset !== null) {
       const next = await page({ ...request, peek: true, offset: nextOffset, limit: 24000 });
-      if (next.viewSha256 !== result.viewSha256 || next.totalChars !== result.totalChars) {
+      if (next.sha256 !== result.sha256 || next.viewSha256 !== result.viewSha256 || next.totalChars !== result.totalChars) {
         throw new UsageError('Context archive changed during reading; retry request');
       }
       chunks.push(next.text);
@@ -198,17 +202,14 @@ async function main(): Promise<void> {
     if (values.json) console.log(JSON.stringify(result));
     else {
       await Bun.write(Bun.stdout, result.text);
-      if (nextOffset !== null) console.error(`More: --offset ${nextOffset} (use --full for the rest of this view)`);
+      if (nextOffset !== null) console.error(`More: --offset ${nextOffset} (omit --limit for the rest of this view)`);
     }
     return;
   }
-  const result = JSON.parse(await execute(args)) as { error?: string; entries?: { id: string; key: string; label?: string; depth: number; chars: number; childCount: number }[];
-    matches?: { id: string; key: string; line: number; text: string }[]; nextOffset?: number | null };
+  const result = JSON.parse(await execute(args)) as { error?: string; matches?: { key: string; line: number; text: string }[];
+    nextOffset?: number | null };
   if (result.error) throw new UsageError(result.error);
-  if (!values.json && result.entries && command === 'list') {
-    for (const item of result.entries) console.log('  '.repeat(item.depth) + item.key + ' ' + (item.label ?? '') + ' (' + item.chars + ' chars, ' + item.childCount + ' children)');
-    if (result.nextOffset !== null) console.log('nextOffset=' + result.nextOffset);
-  } else if (!values.json && result.matches && command === 'grep') {
+  if (!values.json && command === 'grep' && result.matches) {
     for (const item of result.matches) console.log(item.key + ':' + item.line + ':' + item.text);
     if (result.nextOffset !== null) console.log('nextOffset=' + result.nextOffset);
   } else console.log(JSON.stringify(result));

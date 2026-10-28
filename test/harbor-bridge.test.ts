@@ -111,6 +111,21 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
   });
 });
 
+test('Harbor terminal wrapper drives real folding without a dummy shell declaration', async () => {
+  await withBridge(async ({ call }) => {
+    const body = { ...shellBody(), tools: [{ type: 'function', function: { name: 'terminal',
+      parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } }] };
+    const first = await call({ op: 'project', mode: 'folding', body });
+    assert.equal(first.ok, true);
+    assert.match(first.result.scope, /^[a-f0-9]{64}$/);
+    await call({ op: 'response', success: true });
+    const next = await call({ op: 'project', mode: 'folding', body: progress(body, 'chat') });
+    assert.match(assistantText(next.result.body), /\[\[cf:v2:[0-9a-f]+\]\]/);
+    assert.deepEqual(next.result.body.tools, body.tools);
+    await call({ op: 'response', success: true });
+  });
+});
+
 test('Harbor baseline remains byte-identical and never creates a folding archive', async () => {
   await withBridge(async ({ directory, call }) => {
     const body = shellBody();

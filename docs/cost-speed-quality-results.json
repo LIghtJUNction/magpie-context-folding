@@ -1,0 +1,317 @@
+{
+  "model": "codex/gpt-6-luna",
+  "trials": [
+    {
+      "trial": "01-baseline-full",
+      "disclosure": "full",
+      "verified": false,
+      "completion": "max-turns",
+      "score": {
+        "passed": 4,
+        "total": 6,
+        "checks": {
+          "offset_transfer": true,
+          "ordinary_read": true,
+          "nested_resolve": true,
+          "missing_shell": true,
+          "force_forget": false,
+          "child_recovery": false
+        }
+      },
+      "requests": 10,
+      "verification_message_bytes": 27180,
+      "input_tokens": 275618,
+      "cached_input_tokens": 231808,
+      "output_tokens": 1759,
+      "wall_seconds": 81.57533537098789,
+      "model_wall_seconds": 51.4442386039882,
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "4d545fd3f2909b5016d1223ab9292587fcfd8ff3447dce9cade748446fc448b2",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "error": null
+    },
+    {
+      "trial": "01-baseline-summary",
+      "disclosure": "summary",
+      "verified": false,
+      "completion": "error",
+      "score": null,
+      "requests": 1,
+      "verification_message_bytes": 219,
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "wall_seconds": 205.42689910100307,
+      "model_wall_seconds": null,
+      "model_reported": [
+        "unknown"
+      ],
+      "source_snapshot_sha256": "4d545fd3f2909b5016d1223ab9292587fcfd8ff3447dce9cade748446fc448b2",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "error": "Model HTTP 502; not retried"
+    },
+    {
+      "trial": "02-baseline-full",
+      "disclosure": "full",
+      "verified": false,
+      "completion": "final",
+      "score": {
+        "passed": 4,
+        "total": 6,
+        "checks": {
+          "offset_transfer": true,
+          "ordinary_read": true,
+          "nested_resolve": true,
+          "missing_shell": true,
+          "force_forget": false,
+          "child_recovery": false
+        }
+      },
+      "requests": 7,
+      "verification_message_bytes": 27180,
+      "input_tokens": 137293,
+      "cached_input_tokens": 105856,
+      "output_tokens": 1652,
+      "wall_seconds": 121.21516066099866,
+      "model_wall_seconds": 92.92015599395381,
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "4d545fd3f2909b5016d1223ab9292587fcfd8ff3447dce9cade748446fc448b2",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "error": null
+    },
+    {
+      "trial": "02-baseline-summary",
+      "disclosure": "summary",
+      "verified": false,
+      "completion": "max-turns",
+      "score": null,
+      "requests": 10,
+      "verification_message_bytes": 219,
+      "input_tokens": 171498,
+      "cached_input_tokens": 141056,
+      "output_tokens": 843,
+      "wall_seconds": 288.6350327079999,
+      "model_wall_seconds": 260.1344715889718,
+      "model_reported": [
+        "gpt-6-luna"
+      ],
+      "source_snapshot_sha256": "4d545fd3f2909b5016d1223ab9292587fcfd8ff3447dce9cade748446fc448b2",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "error": null
+    }
+  ],
+  "cost_usd": null,
+  "limitation": "Six repository contract questions, two repetitions per disclosure; noisy small sample, no general intelligence or billing claim.",
+  "decision": "Keep full initial verification output as default; summary is opt-in. None of four trials met complete correct delivery; no measured cost-per-success improvement.",
+  "exploratory_excluded": {
+    "path": ".local-tests/luna-cost-quality-round1",
+    "reason": "Checker script visible in model workspace; stopped, excluded from efficacy comparison",
+    "completed_requests": 8
+  },
+  "tree_benchmark": {
+    "fixture": {
+      "entries": 3000,
+      "query": "absent",
+      "description": "annotated leaf nodes, no matches"
+    },
+    "limitations": "In-process Bun microbenchmark; excludes store I/O, model calls, nested nodes and matching result pages.",
+    "runtime": {
+      "bun": "1.4.0",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "sources": {
+      "headCommit": "a1fc929e4c36596e55235c95105996f83170c076",
+      "beforeSha256": "eee23d328d97c1bf18c28052ed8e41a066c64140a46c3c3fe1646d759a961dc9",
+      "afterSha256": "cb3e30f87db1111d5a35b18f819811aab4f314746fb300f3b6b8da528e865cb3"
+    },
+    "rounds": 5,
+    "results": {
+      "browse": {
+        "beforeMs": [
+          955.8329020000001,
+          1362.145201,
+          771.1198589999999,
+          736.9183390000003,
+          725.1612949999999
+        ],
+        "afterMs": [
+          4.973871000000145,
+          3.506503000000066,
+          1.6384619999998904,
+          1.7352750000000015,
+          2.1084490000002916
+        ],
+        "beforeMedianMs": 771.1198589999999,
+        "afterMedianMs": 2.1084490000002916
+      },
+      "grep": {
+        "beforeMs": [
+          843.1519159999998,
+          829.0485829999998,
+          875.5965719999995,
+          888.0742069999997,
+          875.2908869999992
+        ],
+        "afterMs": [
+          2.8262549999999464,
+          2.2463079999997717,
+          1.7901660000006814,
+          1.834419999999227,
+          2.691811000000598
+        ],
+        "beforeMedianMs": 875.2908869999992,
+        "afterMedianMs": 2.2463079999997717
+      }
+    }
+  },
+  "local_validation": {
+    "status": "passed",
+    "source_snapshot_sha256": "fc15253b1b59988cfa63843b4d7ba4d6c80f68079f7571cbc8790364214a92ec",
+    "checks": [
+      {
+        "name": "sandbox-probe",
+        "returncode": 0,
+        "test_counts": {},
+        "wall_seconds": 0.030641
+      },
+      {
+        "name": "runtime-versions",
+        "returncode": 0,
+        "test_counts": {},
+        "wall_seconds": 0.135231
+      },
+      {
+        "name": "npm-check",
+        "returncode": 0,
+        "test_counts": {
+          "pass": 254,
+          "fail": 0
+        },
+        "wall_seconds": 25.923253
+      },
+      {
+        "name": "controller-regressions",
+        "returncode": 0,
+        "test_counts": {
+          "run": 13,
+          "skip": 0
+        },
+        "wall_seconds": 0.142167
+      },
+      {
+        "name": "typescript-recursive",
+        "returncode": 0,
+        "test_counts": {
+          "pass": 73,
+          "fail": 0
+        },
+        "wall_seconds": 5.87357
+      },
+      {
+        "name": "python-core",
+        "returncode": 0,
+        "test_counts": {
+          "run": 169,
+          "skip": 0
+        },
+        "wall_seconds": 17.211726
+      }
+    ]
+  },
+  "feedback_trials": {
+    "model": "codex/gpt-6-luna",
+    "trials": [
+      {
+        "trial": "01-baseline",
+        "disclosure": "summary",
+        "verified": true,
+        "completion": "final",
+        "candidate_checks": 3,
+        "score": {
+          "passed": 6,
+          "total": 6,
+          "checks": {
+            "offset_transfer": true,
+            "ordinary_read": true,
+            "nested_resolve": true,
+            "missing_shell": true,
+            "force_forget": true,
+            "child_recovery": true
+          }
+        },
+        "requests": 12,
+        "verification_message_bytes": 219,
+        "input_tokens": 352958,
+        "cached_input_tokens": 307328,
+        "output_tokens": 2217,
+        "wall_seconds": 121.41792980002356,
+        "model_wall_seconds": 91.31181987698073,
+        "model_reported": [
+          "gpt-6-luna"
+        ],
+        "source_snapshot_sha256": "ed0a6e2449a817f38aaef77ff9e0751bbd2ebd1db5f8f0a4df131d27a0caeac6",
+        "excluded_paths": [
+          "scripts/cost-quality-benchmark.py"
+        ],
+        "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+        "error": null
+      },
+      {
+        "trial": "02-baseline",
+        "disclosure": "summary",
+        "verified": true,
+        "completion": "final",
+        "candidate_checks": 2,
+        "score": {
+          "passed": 6,
+          "total": 6,
+          "checks": {
+            "offset_transfer": true,
+            "ordinary_read": true,
+            "nested_resolve": true,
+            "missing_shell": true,
+            "force_forget": true,
+            "child_recovery": true
+          }
+        },
+        "requests": 9,
+        "verification_message_bytes": 219,
+        "input_tokens": 214514,
+        "cached_input_tokens": 186752,
+        "output_tokens": 1963,
+        "wall_seconds": 122.83990596499643,
+        "model_wall_seconds": 91.08604051804286,
+        "model_reported": [
+          "gpt-6-luna"
+        ],
+        "source_snapshot_sha256": "ed0a6e2449a817f38aaef77ff9e0751bbd2ebd1db5f8f0a4df131d27a0caeac6",
+        "excluded_paths": [
+          "scripts/cost-quality-benchmark.py"
+        ],
+        "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+        "error": null
+      }
+    ],
+    "cost_usd": null,
+    "limitation": "Six repository contract questions, two repetitions per disclosure; noisy small sample, no general intelligence or billing claim."
+  },
+  "feedback_decision": "Keep clean acceptance feedback opt-in. Both repeated six-case tasks finished 6/6, with 12 and 9 requests; compared with 4/6 in full-log no-feedback trials. Different turn limits (14 vs 10), small samples and additional checker guidance prohibit a causal general-intelligence or cost-speed improvement claim.",
+  "budget_note": "Initial four-trial log comparison followed by two explicitly reported feedback trials. One stopped exploratory batch excluded from efficacy; its completed eight-request trial retained. Failed API usage remains unknown."
+}
