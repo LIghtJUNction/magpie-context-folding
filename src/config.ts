@@ -8,8 +8,6 @@ export const optionsSchema = z.object({
   enabled: z.boolean().default(true),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
   delayRequests: nonnegativeInteger.default(1),
-  contextWindowTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
-  reserveOutputTokens: nonnegativeInteger.default(0),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
   recoveryToolName: z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/).optional(),
 }).strict();
@@ -19,8 +17,6 @@ const foldingSchema = z.object({
   enabled: optionsSchema.shape.enabled,
   max_session_bytes: optionsSchema.shape.maxSessionBytes,
   delay_requests: optionsSchema.shape.delayRequests,
-  context_window_tokens: optionsSchema.shape.contextWindowTokens,
-  reserve_output_tokens: optionsSchema.shape.reserveOutputTokens,
 }).strict();
 // These sections are shared with the source-file/Python integration.
 const annotationsSchema = z.object({
@@ -67,12 +63,16 @@ type Table = Record<string, unknown>;
 const table = (value: unknown): value is Table => value !== null && typeof value === 'object' && !Array.isArray(value);
 const missing = (error: unknown) => table(error) && error.code === 'ENOENT';
 const migrationReason = 'removed: folding now requires agent-authored @context-fold begin/end annotations; remove mode, threshold, policy and accounting settings';
+const removedBudgetReason = 'removed: delete context-window and output-reserve settings; context budgets are not managed by this project';
 
 /** Recognize removed public settings without echoing arbitrary input or secret values. */
 function rejectLegacy(value: unknown, source: string, runtime = false): void {
   // @context-fold begin rejectLegacy-76c9704195
   if (!table(value)) return;
   if (runtime) {
+    for (const key of ['contextWindowTokens', 'reserveOutputTokens']) {
+      if (Object.hasOwn(value, key)) throw new ConfigError(source, key, removedBudgetReason);
+    }
     for (const key of ['mode', 'thresholdTokens', 'keepRecentMessages', 'headChars', 'minimumSavingUsd', 'policy', 'accounting']) {
       if (Object.hasOwn(value, key)) throw new ConfigError(source, key, migrationReason);
     }
@@ -80,6 +80,9 @@ function rejectLegacy(value: unknown, source: string, runtime = false): void {
   }
   if (Object.hasOwn(value, 'policy')) throw new ConfigError(source, 'policy', migrationReason);
   if (table(value.folding)) {
+    for (const key of ['context_window_tokens', 'reserve_output_tokens']) {
+      if (Object.hasOwn(value.folding, key)) throw new ConfigError(source, `folding.${key}`, removedBudgetReason);
+    }
     for (const key of ['mode', 'threshold_tokens', 'keep_recent_messages', 'head_chars', 'minimum_saving_usd']) {
       if (Object.hasOwn(value.folding, key)) throw new ConfigError(source, `folding.${key}`, migrationReason);
     }
@@ -191,11 +194,10 @@ function fromOptions(input: unknown): Table {
   // @context-fold begin fromOptions-1a94c69f7b
   const value = input ?? {};
   rejectLegacy(value, '<overrides>', true);
-  const { enabled, maxSessionBytes, delayRequests, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, recoveryToolName } =
+  const { enabled, maxSessionBytes, delayRequests, gatewayTimeoutMs, recoveryToolName } =
     explicitFields(validated(optionsSchema.partial(), value, '<overrides>'), value);
   return {
-    folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests,
-      context_window_tokens: contextWindowTokens, reserve_output_tokens: reserveOutputTokens },
+    folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests },
     magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs },
   };
   // @context-fold end fromOptions-1a94c69f7b
@@ -225,7 +227,6 @@ export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Opt
   const m = config.magpie;
   return validated(optionsSchema, {
     enabled: f.enabled, maxSessionBytes: f.max_session_bytes, delayRequests: f.delay_requests,
-    contextWindowTokens: f.context_window_tokens, reserveOutputTokens: f.reserve_output_tokens,
     recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms,
   }, '<effective settings>');
   // @context-fold end loadOptions-69cb98dd63

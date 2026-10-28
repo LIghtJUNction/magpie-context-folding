@@ -6,7 +6,7 @@
 
 **Agent 用一对注释圈出以后可以收起的内容；插件保存原文，等一个请求周期，再把它换成带短哈希的引用。**
 
-0.4.0 的折叠决定全部来自 Agent 写出的标记。没有智力、平衡、经济档位，没有按长度或预算挑选历史的策略，也不需要先列目录、再调用 `mark`。未标记的内容保持完整。预算提示只告诉 Agent 当前使用量，怎样整理上下文由 Agent 决定。
+0.4.0 的折叠决定全部来自 Agent 写出的标记。没有智力、平衡、经济档位，也不需要先列目录、再调用 `mark`。未标记的内容保持完整。什么时候整理上下文、哪些内容可以收起，由 Agent 判断；本项目只负责按标记保存、折叠和恢复原文。
 
 这是正在开发的 **0.4.0 源码版本，未发布到 npm**。本页只描述当前源码；旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
 
@@ -113,7 +113,7 @@ Python 用 `#`，JavaScript/TypeScript 用 `//`，也可使用对应语言的完
 
 系统按实际折叠正文的 UTF-8 字节计算 SHA-256，引用为 `[[cf:v2:<hash>]]`，通常显示前 12 位，遇到冲突时延长。外层标记不计入正文；正文末尾的一个物理换行保留在引用外，以便精确恢复。哈希随正文变化，同名标记的不同内容不会指向同一个快照。旧引用仍恢复当时的原文，不会偷偷改成磁盘上的最新文件。
 
-从折叠引用取出实际短哈希，使用请求提示中的 scope：
+从折叠引用取出实际短哈希，使用请求中 `<context-folding scope=… />` 的 scope：
 
 ```json
 {"action":"read","scope":"<current-scope>","id":"<actual-short-hash>"}
@@ -134,23 +134,17 @@ Python 用 `#`，JavaScript/TypeScript 用 `//`，也可使用对应语言的完
 
 根插件的分页偏移按 JavaScript UTF-16 单元计数，直接使用 `nextOffset`。Python 核心使用 Unicode 码点偏移，二者不能混用。scope 是会话恢复能力值，不应转交其他会话。旧归档的原文、历史层和分组清单仍可读取；0.4.0 不再创建旧式摘要层或通过 `mark` 建组。
 
-## 预算只提供信息
+## 恢复定位信息
 
-系统更新一条放在协议 system 元数据中的预算提示，不重复追加教学、安装建议或折叠回执。其格式为：
-
-```text
-<context-budget used_estimate=31200 capacity=128000 output_reserved=8000 available_estimate=88800 basis=json-utf8-bytes/4 scope=<current-scope> />
-```
-
-数值仅为格式示例；容量未知时，`capacity` 和 `available_estimate` 为 `unknown`。使用量按完整请求 JSON 的 UTF-8 字节数除以四、向上取整，包含提示自身的开销；这不是模型 tokenizer 的精确计数。
-
-配置了模型窗口后，可以显示估算剩余量：
+确认恢复工具可调用后，系统在协议的 system 元数据中保留一条会话恢复定位信息：
 
 ```text
-remaining = max(0, context_window_tokens - reserve_output_tokens - estimated_input)
+<context-folding scope=<current-scope> />
 ```
 
-窗口未知时明确标为未知，不根据模型名称猜容量。剩余量变小也不会触发被动折叠，更不会替 Agent 决定哪些资料已经不重要。
+实际 scope 是 64 位十六进制值，用于让恢复工具找到当前会话的归档。相同请求再次处理时更新这条信息，不重复追加教学、安装建议或折叠回执。无法确认恢复入口时，原样保留请求。
+
+本项目不配置模型窗口大小，也不计算或注入已用、剩余及预留上下文预算。`stats` 中的折叠量估算仅用于诊断，不参与折叠决定，也不注入模型请求。
 
 ## 配置
 
@@ -163,9 +157,6 @@ version = 1
 enabled = true
 delay_requests = 1
 max_session_bytes = 67108864
-reserve_output_tokens = 0
-# 只有已知模型实际窗口时才填写：
-# context_window_tokens = 128000
 
 [magpie]
 # 仅在恢复工具由宿主包装、无法从当前请求声明发现时设置：
@@ -173,13 +164,15 @@ reserve_output_tokens = 0
 # gateway_timeout_ms = 3000
 ```
 
-插件 options 使用对应 camelCase：`delayRequests`、`maxSessionBytes`、`contextWindowTokens`、`reserveOutputTokens`、`recoveryToolName`、`gatewayTimeoutMs`。`delay_requests = 0` 表示在首次完整观察到闭合标记的请求中折叠；默认值 1 留出一次完整观察机会。
+插件 options 使用对应 camelCase：`delayRequests`、`maxSessionBytes`、`recoveryToolName`、`gatewayTimeoutMs`。`delay_requests = 0` 表示在首次完整观察到闭合标记的请求中折叠；默认值 1 留出一次完整观察机会。
 
 `max_session_bytes` 是归档容量上限，不是折叠阈值。存档失败、容量不足、并发状态冲突或无法确认恢复入口时，保留原文。默认状态目录为 `$XDG_DATA_HOME/magpie-context-folding` 或 `~/.local/share/magpie-context-folding`，可通过 `MAGPIE_CONTEXT_FOLDING_STATE_DIR` 指定。
 
 ## 从 0.3.x 升级
 
 删除配置中的 `mode`、`threshold_tokens`、`keep_recent_messages`、`head_chars`、`minimum_saving_usd`、`[policy]` 和 `[magpie.accounting]`。这些设置不会静默映射成另一种自动策略；旧配置会给出迁移错误。
+
+早期 0.4.0 配置中的 `context_window_tokens`、`reserve_output_tokens` 及插件 options 中的 `contextWindowTokens`、`reserveOutputTokens` 也已移除。删除这些字段；继续使用会返回明确的已移除设置错误。已有提示词若要求从预算信息读取 scope，改为读取 `<context-folding scope=… />`。
 
 删除 Agent 提示词里关于 `mark`、三档切换、自动摘要和成本批准的操作要求，换成上面的标记说明。保留旧数据库，以便恢复仍在引用的内容；不要靠删除归档解决配置错误。
 

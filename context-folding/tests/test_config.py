@@ -56,7 +56,7 @@ class ConfigTests(unittest.TestCase):
 
 
     def test_only_nearest_project_file_is_loaded(self):
-        self.write(self.project_path, "[folding]\ndelay_requests=20\nreserve_output_tokens=100\n")
+        self.write(self.project_path, "[folding]\ndelay_requests=20\nmax_session_bytes=100\n")
         child = self.project / "nested"
         child.mkdir()
         nearest = self.write(child / ".context-folding.toml", "[folding]\ndelay_requests=30\n")
@@ -65,7 +65,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(project_config_path(grandchild), nearest)
         settings = load_config(grandchild)
         self.assertEqual(settings["folding"]["delay_requests"], 30)
-        self.assertEqual(settings["folding"]["reserve_output_tokens"], 0)
+        self.assertEqual(settings["folding"]["max_session_bytes"], 67108864)
 
     def test_git_root_checked_but_never_its_parent_for_git_directory_or_file(self):
         self.write(self.root / ".context-folding.toml", "[folding]\ndelay_requests=999\n")
@@ -162,25 +162,46 @@ class ConfigTests(unittest.TestCase):
     def test_annotation_only_defaults_and_input_isolation(self):
         settings = self.load()
         self.assertEqual(settings["folding"], {"enabled": True, "delay_requests": 1,
-                         "max_session_bytes": 67108864, "reserve_output_tokens": 0})
+                         "max_session_bytes": 67108864})
         self.assertEqual(set(settings), {"folding", "annotations", "gc", "magpie"})
         self.assertNotIn("context_window_tokens", settings["folding"])
+        self.assertNotIn("reserve_output_tokens", settings["folding"])
         settings["annotations"]["keep"].append("changed")
         self.assertEqual(self.load()["annotations"]["keep"], [])
         self.assertFalse(self.global_path.exists())
         self.assertFalse(self.project_path.exists())
 
-    def test_budget_and_delay_merge_without_changing_inputs(self):
-        self.write(self.global_path, "[folding]\ndelay_requests=2\ncontext_window_tokens=128000\n")
-        self.write(self.project_path, "[folding]\ndelay_requests=3\nreserve_output_tokens=8000\n")
+    def test_folding_settings_merge_without_changing_inputs(self):
+        self.write(self.global_path, "[folding]\ndelay_requests=2\nmax_session_bytes=128000\n")
+        self.write(self.project_path, "[folding]\ndelay_requests=3\nenabled=false\n")
         overrides = {"folding": {"delay_requests": 1}, "annotations": {"keep": ["result"]}}
         original = copy.deepcopy(overrides)
         settings = self.load(overrides)
-        self.assertEqual(settings["folding"]["context_window_tokens"], 128000)
-        self.assertEqual(settings["folding"]["reserve_output_tokens"], 8000)
+        self.assertEqual(settings["folding"]["max_session_bytes"], 128000)
+        self.assertFalse(settings["folding"]["enabled"])
         self.assertEqual(settings["folding"]["delay_requests"], 1)
         settings["annotations"]["keep"].append("other")
         self.assertEqual(overrides, original)
+
+    def test_removed_budget_settings_rejected_in_every_config_layer(self):
+        for field in ("context_window_tokens", "reserve_output_tokens"):
+            for source in (self.global_path, self.project_path, "<overrides>"):
+                for value in (0, 128000, "secret"):
+                    with self.subTest(field=field, source=source, value=value):
+                        self.global_path.unlink(missing_ok=True)
+                        self.project_path.unlink(missing_ok=True)
+                        overrides = {"folding": {"delay_requests": 0}}
+                        if source == "<overrides>":
+                            overrides["folding"][field] = value
+                        else:
+                            self.write(source, f"[folding]\n{field}={value!r}\n")
+                        with self.assertRaises(ConfigError) as raised:
+                            self.load(overrides)
+                        message = str(raised.exception)
+                        self.assertIn(str(source), message)
+                        self.assertIn(f"folding.{field}: removed:", message)
+                        self.assertIn("delete", message)
+                        self.assertNotIn("secret", message)
 
     def test_removed_strategies_and_policy_report_migration(self):
         for field in ("mode", "threshold_tokens", "head_chars", "keep_recent_messages", "minimum_saving_usd"):
@@ -193,8 +214,6 @@ class ConfigTests(unittest.TestCase):
 
     def test_strict_types_unknown_fields_and_safe_ranges(self):
         invalid = {"folding.delay_requests": [True, -1, 0.5, 9007199254740992],
-                   "folding.context_window_tokens": [False, 0, -1, 1.5],
-                   "folding.reserve_output_tokens": [True, -1, 1.5],
                    "folding.max_session_bytes": [False, 0, 67108865],
                    "folding.enabled": ["true", 1], "annotations.keep": [[""], ["a\0b"], "a"],
                    "magpie.gateway_timeout_ms": [99, 10001],
@@ -207,8 +226,7 @@ class ConfigTests(unittest.TestCase):
         for config in ({"surprise": {}}, {"folding": {"unknown": 1}}, {"folding": []}, []):
             with self.assertRaises(ConfigError):
                 self.load(config)
-        valid = self.load({"folding": {"delay_requests": 0, "context_window_tokens": 1,
-                            "reserve_output_tokens": 0, "max_session_bytes": 1},
+        valid = self.load({"folding": {"delay_requests": 0, "max_session_bytes": 1},
                            "magpie": {"recovery_tool_name": "context_folding", "gateway_timeout_ms": 100}})
         self.assertEqual(valid["folding"]["delay_requests"], 0)
 

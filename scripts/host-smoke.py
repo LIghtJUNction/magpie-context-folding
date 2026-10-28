@@ -32,13 +32,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 PROJECT = Path(__file__).resolve().parents[1]
 HTTP = build_opener(ProxyHandler({}))
-CAPACITY = 1_000_000
-OUTPUT_RESERVED = 1000
-BUDGET = re.compile(
-    r"^<context-budget used_estimate=(\d+) capacity=(\d+|unknown) "
-    r"output_reserved=(\d+) available_estimate=(\d+|unknown) "
-    r"basis=json-utf8-bytes/4(?: scope=([a-f0-9]{64}))?\s*/>$"
-)
+RECOVERY_METADATA = re.compile(r"^<context-folding scope=([a-f0-9]{64}) />$")
 
 
 def serialized(value: object) -> str:
@@ -56,6 +50,7 @@ def utf16_length(text: str) -> int:
 class Fixture:
     def __init__(self) -> None:
         self.upstream: list[dict] = []
+        self.upstream_bytes: list[int] = []
 
     def handler(self) -> type[BaseHTTPRequestHandler]:
         fixture = self
@@ -81,11 +76,13 @@ class Fixture:
                     self.respond(404, {"error": "synthetic endpoint not found"})
 
             def do_POST(self) -> None:
-                payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                payload = json.loads(raw)
                 if not self.path.endswith("/chat/completions"):
                     self.respond(404, {"error": "synthetic endpoint not found"})
                     return
                 fixture.upstream.append(payload)
+                fixture.upstream_bytes.append(len(raw))
                 self.respond(200, {
                     "id": "chatcmpl-synthetic", "object": "chat.completion",
                     "created": int(time.time()), "model": "m1",
@@ -128,28 +125,22 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(serialized(value), encoding="utf-8")
 
 
-def verify_budget(outgoing: dict, sent: dict) -> tuple[dict, str, dict]:
+def verify_recovery_metadata(outgoing: dict, sent: dict) -> tuple[dict, str]:
     """Check the actual wire request after allowing for Magpie's provider routing."""
     clean = copy.deepcopy(outgoing)
     hints = [item for item in clean["messages"] if item.get("role") == "system"
-             and isinstance(item.get("content"), str) and BUDGET.fullmatch(item["content"])]
-    assert len(hints) == 1, f"expected exactly one system budget, found {len(hints)}"
-    match = BUDGET.fullmatch(hints[0]["content"])
+             and isinstance(item.get("content"), str) and RECOVERY_METADATA.fullmatch(item["content"])]
+    assert len(hints) == 1, f"expected exactly one scope-only system metadata item, found {len(hints)}"
+    assert "<context-budget" not in serialized(outgoing), "removed context budget was injected"
+    match = RECOVERY_METADATA.fullmatch(hints[0]["content"])
     assert match is not None
-    used, capacity, reserved, available, scope = match.groups()
-    assert scope is not None, "callable recovery tool did not produce a session locator"
-    assert int(capacity) == CAPACITY and int(reserved) == OUTPUT_RESERVED, "configured budget was not propagated"
-    assert int(available) == max(0, CAPACITY - int(used) - OUTPUT_RESERVED), "remaining budget arithmetic changed"
-    # The hook estimates the whole request, including its hint, before the host
-    # changes fake/m1 to m1. All other request fields are checked by each scenario.
+    scope = match.group(1)
+    # Provider routing changes fake/m1 to m1; normalize it for content checks.
     assert outgoing["model"] == "m1", f"unexpected routed model: {outgoing['model']}"
-    estimated = {**outgoing, "model": sent["model"]}
-    expected = (len(serialized(estimated).encode("utf-8")) + 3) // 4
-    assert int(used) == expected, f"budget is not self-inclusive: {used} != {expected}"
     clean["messages"].remove(hints[0])
     clean["model"] = sent["model"]
     assert clean["tools"] == sent["tools"], "client tool declarations changed"
-    return clean, scope, {"usedEstimate": int(used), "availableEstimate": int(available)}
+    return clean, scope
 
 
 def advance(body: dict, message: str) -> dict:
@@ -182,11 +173,10 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
         "spec": str(project), "options": {
             "enabled": True, "delayRequests": 1, "maxSessionBytes": 64 * 1024 * 1024,
-            "contextWindowTokens": CAPACITY, "reserveOutputTokens": OUTPUT_RESERVED,
         },
     }]})
     write_json(cache / "magpie" / "models.json", {"fake": {"id": "fake", "name": "Synthetic", "models": {
-        "m1": {"id": "m1", "name": "Synthetic", "limit": {"context": CAPACITY, "output": OUTPUT_RESERVED}, "tool_call": True},
+        "m1": {"id": "m1", "name": "Synthetic", "limit": {"context": 1_000_000, "output": 1000}, "tool_call": True},
     }}})
     environment = dict(os.environ)
     environment.update({
@@ -259,7 +249,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 reply = request_json(gateway + "/v1/chat/completions", body, session)
                 assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
                 assert len(fixture.upstream) == count + 1, "request did not reach synthetic upstream exactly once"
-                output = verify_budget(fixture.upstream[-1], body)
+                output = verify_recovery_metadata(fixture.upstream[-1], body)
                 # Response hooks can finish after HTTP completion. Wait for their
                 # write before the next archive mutation; do not mistake an
                 # unverified host response for verified usage.
@@ -271,7 +261,8 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                         break
                     assert time.monotonic() < deadline, f"response hook did not finish: {after}"
                     time.sleep(0.05)
-                return output
+                # Measure the actual HTTP body, including recovery metadata.
+                return *output, {"requestUtf8Bytes": fixture.upstream_bytes[-1]}
 
             def read_all(scope: str, original: str) -> None:
                 expected_hash = sha256(original)
@@ -327,24 +318,24 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 {"role": "assistant", "content": last_part + suffix},
                 {"role": "user", "content": "The annotation is now closed."},
             ])
-            first, first_scope, first_budget = send(closed)
+            first, first_scope, first_request = send(closed)
             assert first_scope == scope and first == closed, "first closed observation did not keep its grace period"
             retry, retry_scope, _ = send(closed)
             assert retry_scope == scope and retry == closed, "an identical retry consumed the grace period"
             advanced = advance(closed, "A distinct request after the completed work.")
-            folded, folded_scope, folded_budget = send(advanced)
+            folded, folded_scope, folded_request = send(advanced)
             reference = f"[[cf:v2:{sha256(original)[:12]}]]"
             expected = copy.deepcopy(advanced)
             expected["messages"][3]["content"] = prefix + reference
             expected["messages"][5]["content"] = reference + suffix
             assert folded_scope == scope and folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
-            assert folded_budget["usedEstimate"] < first_budget["usedEstimate"], "fold did not reduce the outgoing estimate"
+            assert folded_request["requestUtf8Bytes"] < first_request["requestUtf8Bytes"], "fold did not reduce outgoing request bytes"
             repeated, _, _ = send(advanced)
             assert repeated == expected, "a repeated request changed the projection"
             projected = copy.deepcopy(fixture.upstream[-1])
             projected["model"] = "fake/m1"
             replayed, _, _ = send(projected)
-            assert replayed == expected, "replaying a projected request duplicated the budget or re-folded a reference"
+            assert replayed == expected, "replaying a projected request duplicated recovery metadata or re-folded a reference"
             status = call({"scope": scope, "action": "status"})
             assert status["entries"] == 1 and status["metrics"]["itemsFolded"] == 1, "retry created duplicate archives or folds"
             read_all(scope, original)
@@ -414,14 +405,15 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 "checks": [
                     "MCP discovery and recovery", "open annotations stay visible", "first closed observation and identical retries stay visible",
                     "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
-                    "one self-inclusive budget with configured reserve", "projection replay does not duplicate budgets or archives",
+                    "one scope-only recovery metadata item without context budgets", "folding reduces measured request bytes",
+                    "projection replay does not duplicate recovery metadata or archives",
                     "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
                     "default read persistently expands all slices", "session isolation", "source comments share the protocol",
                     "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
                     "source files remain unchanged by folding", "unmarked source stays visible",
                 ],
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
-                "firstBudget": first_budget, "foldedBudget": folded_budget,
+                "firstRequest": first_request, "foldedRequest": folded_request,
                 "responseHooks": {key: final_metrics[key] for key in (
                     "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests")},
             }))

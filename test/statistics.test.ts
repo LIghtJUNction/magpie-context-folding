@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { onRequest, onResponse } from '../src/context.hooks.js';
-import { estimateTokens, withoutBudget } from '../src/budget.js';
+import { estimateTokens } from '../src/metrics.js';
+import { withoutRecoveryMetadata } from '../src/recovery.js';
 import { execute } from '../src/tool.js';
 import { Store, digest } from '../src/store.js';
 
@@ -49,7 +50,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.equal(metrics.itemsFolded, 2);
     assert.equal(metrics.recursiveItemsFolded, 0);
     const firstFoldedTokens = metrics.foldedTokensEstimated;
-    assert.equal(firstFoldedTokens, String(estimateTokens(body) - estimateTokens(withoutBudget(first, 'chat'))));
+    assert.equal(firstFoldedTokens, String(estimateTokens(body) - estimateTokens(withoutRecoveryMetadata(first, 'chat'))));
     assert.ok(BigInt(firstFoldedTokens) > 0n);
     assert.equal(metrics.successfulFoldedRequests, 0, 'a planned fold is not a verified successful request');
     await onResponse({}, { ...firstContext, success: false, request: first });
@@ -135,7 +136,7 @@ test('large estimates and legacy conditional amounts never imply measured saving
       status: 'unverified', reason: 'no-certified-comparisons', actualTimeSavingMs: null, measuredOverheadUsd: null,
     });
     assert.equal(estimated.money.actualBillSavingUsd, null);
-    assert.equal(estimated.metrics.estimatedTokenDelta, '-100', 'budget-message overhead remains visible in the signed estimate');
+    assert.equal(estimated.metrics.estimatedTokenDelta, '-100', 'recovery-metadata overhead remains visible in the signed estimate');
     assert.equal(estimated.summary.detailViewCount, 2);
     assert.equal(estimated.summary.foldedTokensEstimated, '99999999999999999999');
 

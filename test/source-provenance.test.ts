@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
-import { withoutBudget } from '../src/budget.js';
+import { withoutRecoveryMetadata } from '../src/recovery.js';
 import { digest } from '../src/store.js';
 import { bodyFor, fixture, progress } from './helpers.js';
 
@@ -52,9 +52,9 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       assert.equal(old.sha256, digest(code));
       const normal = readBody(protocol, source, 'exec-1', 'exec');
       const normalOutput = await onRequest(normal, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-      assert.deepEqual(withoutBudget(normalOutput, protocol), normal, 'generic tool output cannot become source by containing markers');
+      assert.deepEqual(withoutRecoveryMetadata(normalOutput, protocol), normal, 'generic tool output cannot become source by containing markers');
       const recovery = readBody(protocol, source, 'recovery-1', 'context_folding');
-      assert.deepEqual(withoutBudget(await onRequest(recovery, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>, protocol), recovery);
+      assert.deepEqual(withoutRecoveryMetadata(await onRequest(recovery, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>, protocol), recovery);
     }, protocol);
   });
 }
@@ -68,7 +68,7 @@ test('unmarked source, read failures and missing provenance are never auto-selec
       { role: 'tool', tool_call_id: 'error', content: source, is_error: true }, { role: 'user', content: 'Continue.' },
     ] }]) {
       const output = await onRequest(body, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-      assert.deepEqual(withoutBudget(output, 'chat'), body);
+      assert.deepEqual(withoutRecoveryMetadata(output, 'chat'), body);
     }
   });
 });

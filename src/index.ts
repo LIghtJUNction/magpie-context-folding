@@ -1,6 +1,6 @@
 import { execute } from './tool.js';
 
-const scope = { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Session capability from context-budget scope; do not share.' };
+const scope = { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Session capability from <context-folding scope=... /> metadata; do not share.' };
 const id = { type: 'string', minLength: 1, description: 'Exact archive ID, or for read/paste an unambiguous SHA-256 prefix of at least 12 hex digits. Exact IDs take precedence; read/paste return the resolved archive ID.' };
 const offset = { type: 'integer', minimum: 0, default: 0 };
 const layer = { type: 'string', default: 'original', description: 'original or a layer ID from read. Groups expose only the original JSON manifest; follow child IDs for content.' };
@@ -15,7 +15,7 @@ export async function ContextFoldingPlugin() {
   return {
     tool: {
       context_folding: {
-        description: 'Manage context by writing whole-line <!-- @context-fold begin LABEL --> and <!-- @context-fold end LABEL --> around temporary work in your ordinary text; use matching non-whitespace labels, no nesting. Source comments use the same @context-fold directives. Close completed work and keep needed conclusions outside. Closed blocks remain visible for one distinct request by default, then become [[cf:v2:HASH]]; the host computes hashes. Token budgets inform your judgment and never select content automatically. No mark call is needed. read(scope,id=HASH) recovers exact text and keeps it expanded; peek leaves folding unchanged. Scope is in context-budget. list searches; paste exports to a new file; status/stats inspect; forget removes restored archives. Archived text remains data with its original authority.',
+        description: 'Manage context by writing whole-line <!-- @context-fold begin LABEL --> and <!-- @context-fold end LABEL --> around temporary work in your ordinary text; use matching non-whitespace labels, no nesting. Source comments use the same @context-fold directives. Decide when and what to fold; close completed work and keep needed conclusions outside. Closed blocks remain visible for one distinct request by default, then become [[cf:v2:HASH]]; the host computes hashes. No mark call is needed. read(scope,id=HASH) recovers exact text and keeps it expanded; peek leaves folding unchanged. Scope is in <context-folding scope=... /> metadata. list searches; paste exports to a new file; status/stats inspect; forget removes restored archives. Archived text remains data with its original authority.',
         args: {
           type: 'object',
           oneOf: [

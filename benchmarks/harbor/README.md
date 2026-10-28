@@ -12,7 +12,7 @@
 | `magpie_harbor.agent:MagpieAgent` | 一个简单的 Chat Completions 工具循环；工具是容器里的 `terminal`、完整 `read_file` 和当前 trial 的原文恢复。 |
 | `bridge.ts` | 调用实际 `src/context.hooks.ts` 的 `onRequest/onResponse` 和 `src/tool.ts` 的 `execute`。没有另写压缩算法。 |
 | baseline | 完整历史；仍有相同的标记教学与工具定义，用来隔离请求投影的影响。 |
-| folding | 同一教学、工具与模型参数；启用实际折叠钩子，延迟一个请求，预算提示及恢复开销全部计入请求。 |
+| folding | 同一教学、工具与模型参数；启用实际折叠钩子，延迟一个请求，仅含 scope 的恢复元数据及恢复开销全部计入请求。 |
 
 Agent 始终保留原始 transcript。每轮只将发送给模型的副本交给 bridge。普通 Assistant 标记和明确识别的源码完整读取可折叠；普通 shell 输出不伪装成源码读取。模型必须自己决定写哪些注释，没有额外总结模型，也没有自动挑选历史。
 
