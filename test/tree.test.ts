@@ -7,7 +7,7 @@ import { Store } from '../src/store.js';
 import type { Entry, Snapshot } from '../src/store.js';
 import { emptyMetrics } from '../src/metrics.js';
 import { execute } from '../src/tool.js';
-import { browse, latestVersions } from '../src/tree.js';
+import { browse, grep, latestVersions } from '../src/tree.js';
 import { ContextFoldingPlugin } from '../src/index.js';
 
 const entry = (id: string, text = id): Entry => ({ id, text, role: 'tool', mark: { disposition: 'unmarked' }, layers: [] });
@@ -141,6 +141,33 @@ test('tree depth, subtree and pagination bound every returned node', () => {
   assert.deepEqual(browse(state, { depth: 8, offset: 2, limit: 2 }).entries.map(node => node.id), ['a', 'b']);
   assert.equal(browse(state, { offset: 100 }).nextOffset, null);
   assert.throws(() => browse(state, { id: 'missing' }), /Unknown/);
+});
+
+test('grep searches nested global roots and pagination advances over all matches', () => {
+  const state = snapshot();
+  state.entries[0]!.text = 'top needle\n';
+  state.entries[1]!.text = 'child needle\n';
+  state.entries[2]!.text = 'other needle\n';
+  state.entries[3]!.text = 'standalone needle\n';
+
+  const first = grep(state, { query: 'needle', limit: 2 });
+  assert.equal(first.matches.length, 2);
+  assert.equal(first.total, 4);
+  assert.equal(first.nextOffset, 2);
+  const second = grep(state, { query: 'needle', offset: first.nextOffset!, limit: 2 });
+  assert.equal(second.matches.length, 2);
+  assert.equal(second.nextOffset, null);
+  assert.deepEqual(new Set([...first.matches, ...second.matches].map(match => match.id)), new Set(['a', 'b', 'c', 'd']));
+});
+
+test('tree queries tolerate cyclic groups and shared-child pagination', () => {
+  const state = snapshot();
+  state.groups = [group('cycle-a', ['cycle-b']), group('cycle-b', ['cycle-a']), group('shared-a', ['a']), group('shared-b', ['a'])];
+  assert.doesNotThrow(() => browse(state, { depth: 8 }));
+  const shared = { ...snapshot(), groups: [group('shared-a', ['a']), group('shared-b', ['a'])] };
+  const first = browse(shared, { depth: 8, limit: 2 });
+  const second = browse(shared, { depth: 8, limit: 2, offset: first.nextOffset! });
+  assert.equal(new Set([...first.entries, ...second.entries].map(node => node.id)).size, first.entries.length + second.entries.length);
 });
 
 test('literal search keeps matching ancestors and searches paths, summaries and IDs', () => {
