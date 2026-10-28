@@ -1,0 +1,48 @@
+name: Harbor benchmark integration
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'benchmarks/harbor/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/harbor-benchmark.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      HARBOR_TELEMETRY: 'off'
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: uv sync --project benchmarks/harbor --frozen --python 3.12
+      - run: npm run test:harbor
+      - run: npm run bench:harbor -- validate
+      - name: Run real Harbor Docker controls and folding smoke
+        run: npm run bench:harbor -- smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: harbor-smoke-results
+          path: benchmarks/harbor/jobs/
+          retention-days: 7

@@ -1,0 +1,1 @@
+{"service":{"host":"localhost","port":8080,"retries":3,"tls":false,"paths":["base"]},"logging":{"level":"info","format":"text"},"limits":{"rate":10,"burst":20}}
