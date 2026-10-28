@@ -389,12 +389,12 @@ class ScriptedSmokeAgent(MagpieAgent):
                        + "\n<!-- @context-fold end smoke-notes -->\nKeep: solve the task and check output.")
         elif step == 2:
             text = "\n".join(m.get("content") or "" for m in payload["messages"] if m["role"] == "assistant")
-            match = re.search(r"\[\[cf:v2:([0-9a-f]+)\]\]", text)
+            match = re.search(r"\[\[cf:v3:([0-9a-f]{64})\]\]", text)
             if self.options.mode == "folding":
                 if not match:
                     raise RuntimeError("Smoke expected a delayed production-hook reference")
                 guidance = " ".join(m.get("content") or "" for m in payload["messages"] if m["role"] == "system")
-                recall = re.search(r"Need original: (.+?) --id HASH\.", guidance)
+                recall = re.search(r"Need original: (.+?) --id NODE_ID\.", guidance)
                 if not recall:
                     raise RuntimeError("Smoke expected a CLI recovery command in system guidance")
                 args = {"cmd": f"{recall[1]} --id {match[1]} --limit 24000 --json"}

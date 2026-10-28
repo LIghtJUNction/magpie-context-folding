@@ -1,4 +1,4 @@
-"""The v2 contract: annotation-only selection, durable hash references and delay."""
+"""Annotation selection, durable v3 occurrence references and legacy recovery."""
 import ast
 import hashlib
 import json
@@ -106,7 +106,7 @@ class SourceProtocolTests(unittest.TestCase):
         reference = folded["foldedRegions"][0]["reference"]
         payload = original.split("\n", 1)[1].rsplit("\n# @context-fold end", 1)[0]
         digest = hashlib.sha256(payload.encode()).hexdigest()
-        self.assertEqual(reference, f"[[cf:v2:{digest[:12]}]]")
+        self.assertEqual(reference, f"[[cf:v3:{folded['foldedRegions'][0]['id']}]]")
         changed = original.replace("value_59 = 59", "value_59 = 60")
         self.project(changed, occurrence="b", requestCycle=2)
         changed_view = self.project(changed, occurrence="b", requestCycle=3)
@@ -143,11 +143,10 @@ class SourceProtocolTests(unittest.TestCase):
                         self.assertTrue(view["foldedRegions"])
                         self.assertEqual(eager.resolve("shell", view["text"])["value"], source)
 
-    def test_invalid_unclosed_and_nested_regions_stay_visible(self):
+    def test_invalid_and_unclosed_regions_stay_visible(self):
         samples = ["# @context-fold begin open\n" + "x\n" * 100,
                    "# @context-fold end orphan\n", "# @context-fold begin\n",
-                   region().replace("end result", "end wrong"),
-                   "# @context-fold begin outer\n" + region() + "# @context-fold end outer\n"]
+                   region().replace("end result", "end wrong")]
         for source in samples:
             with self.subTest(source=source[:50]):
                 self.assertEqual(discover_source(source, "python")["regions"], [])
@@ -158,15 +157,12 @@ class SourceProtocolTests(unittest.TestCase):
         complete = region("# completed detail\n" * 30, label="complete")
         following = region("# independent detail\n" * 30, label="following")
         damaged = {
-            "unclosed": ("# @context-fold begin open\n# work in progress\n", False),
-            "nested": ("# @context-fold begin outer\n"
-                       + region("# child detail\n" * 30, label="inner")
-                       + "# @context-fold end outer\n", True),
+            "unclosed": ("# @context-fold begin open\n# work in progress\n", True),
             "malformed": ("# @context-fold begin broken\n# @context-fold end\n"
                           "# @context-fold end broken\n", True),
             "mismatch": ("# @context-fold begin broken\n# @context-fold end wrong\n"
                          "# @context-fold end broken\n", True),
-            "mismatch-unclosed": ("# @context-fold begin broken\n# @context-fold end wrong\n", False),
+            "mismatch-unclosed": ("# @context-fold begin broken\n# @context-fold end wrong\n", True),
         }
         with Client(self.path, config={"folding": {"delay_requests": 0}}) as eager:
             for kind, (bad, resumes) in damaged.items():
@@ -193,12 +189,12 @@ class SourceProtocolTests(unittest.TestCase):
         first = region("first detail\n" * 30, label="first", start="//")
         bad = "// @context-fold begin open\n# @context-fold end open\n"
         last = region("last detail\n" * 30, label="last", start="//")
-        self.assertEqual([r["name"] for r in discover_source(first + bad + last, "explicit")["regions"]], ["first"])
+        self.assertEqual([r["name"] for r in discover_source(first + bad + last, "explicit")["regions"]], ["first", "last"])
         repaired_boundary = first + bad + "// @context-fold end open\n" + last
         self.assertEqual([r["name"] for r in discover_source(repaired_boundary, "explicit")["regions"]], ["first", "last"])
 
     def test_existing_fold_references_are_not_archived_again(self):
-        for prefix in ("[[cf:v1:", "[[cf:v2:"):
+        for prefix in ("[[cf:v1:", "[[cf:v2:", "[[cf:v3:"):
             source = region(prefix + "1" * 24 + "]]\n" + "old output\n" * 60)
             for cycle in (0, 1):
                 view = self.project(source, occurrence=prefix, requestCycle=cycle)
@@ -219,12 +215,14 @@ class SourceProtocolTests(unittest.TestCase):
         self.assertEqual(ast.dump(ast.parse(source)), ast.dump(ast.parse(result["text"])))
         self.assertEqual(annotate_python_functions(result["text"])["text"], result["text"])
 
-    def test_recovery_read_and_expand_keep_the_original_visible(self):
+    def test_read_is_inspection_and_explicit_restore_keeps_original_visible(self):
         source = region(label="left") + region(body="other = 2\n" * 60, label="right")
         self.project(source, occurrence="x", requestCycle=0)
         folded = self.project(source, occurrence="x", requestCycle=1)
         left = folded["foldedRegions"][0]["reference"][8:-2]
         self.client.read("s", left)
+        self.assertEqual([item["name"] for item in self.project(source, occurrence="x", requestCycle=2)["foldedRegions"]], ["left", "right"])
+        self.client.call({"action": "restore", "scope": "s", "id": left})
         view = self.project(source, occurrence="x", requestCycle=2)
         self.assertEqual([item["name"] for item in view["foldedRegions"]], ["right"])
         expanded = self.project(source, occurrence="x", requestCycle=3, expand=["right"])

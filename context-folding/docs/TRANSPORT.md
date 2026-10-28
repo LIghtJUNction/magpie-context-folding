@@ -48,17 +48,17 @@ The API/RPC operation is:
 | `scope` | The archive namespace used for this call. |
 | `text` | The complete projected input. Unmarked text and unsafe marker regions stay visible. |
 | `references` | Bodies actually folded by this call. Existing reference literals are not new entries in this list. |
-| `references[].id` / `sha256` | The complete SHA-256 of the marked body. |
+| `references[].id` / `nodeId` / `archiveId` | The complete 64-digit hexadecimal occurrence node ID. |
+| `references[].sha256` / `contentHash` | The separate SHA-256 of the exact marked body. |
 | `references[].label` | The marker's label. |
-| `references[].reference` | The `[[cf:v2:…]]` string inserted into the returned text. |
-| `references[].archiveId` | The backing archive entry identifier. |
+| `references[].reference` | The `[[cf:v3:…]]` string inserted into the returned text. |
 
-`fold` is an explicit immediate conversion. It does not require or manufacture an `occurrence` or `requestCycle`, and does not change `read-source`'s default delay. Automatic-projection `enabled`, `default_fold`, `keep` and delay settings do not suppress this explicitly requested conversion; archive quotas and safety checks still apply. Only bodies whose references reduce UTF-8 byte length are replaced, after their originals have been committed. Existing references remain literal rather than being recursively folded.
+`fold` is an explicit immediate conversion. It does not require or manufacture an `occurrence` or `requestCycle`, and does not change `read-source`'s default delay. Optional `sourceId` is a nonempty string of at most 200 characters identifying the submitted material. Without it, the full input hash is used; identical input retries therefore reuse nodes. Independent copies of the same input need different source IDs. Source identity, original range and source version determine node identity; body hashes determine blob deduplication. Automatic-projection `enabled`, `default_fold`, `keep` and delay settings do not suppress this explicitly requested conversion; archive quotas and safety checks still apply. Only bodies whose references reduce UTF-8 byte length are replaced, after their originals and relationships have been committed. Existing references remain literal rather than being recursively folded.
 
 Recover one marked body using the same state and scope:
 
 ```sh
-ctxf read --scope investigation --id ACTUAL_RETURNED_HASH --raw > original-body.txt
+ctxf read --scope investigation --id ACTUAL_RETURNED_NODE_ID --raw > original-body.txt
 ```
 
 Without `--raw`, `read` retains the existing JSON envelope and page metadata. With `--raw` and no range options, the CLI follows pagination and writes the complete original without adding a newline. An explicit `--offset` starts later; `--limit` intentionally returns only the selected page. `resolve` can reconstruct the complete submitted text by replacing references in a folded view; a single `read` returns only its referenced body.
@@ -98,7 +98,7 @@ Application or input failures return `error` and exit 1; success exits 0. Argume
 
 A source request selects exactly one of `text`, absolute UTF-8 regular-file `path`, or archived `id`. To change retained history later, use the archived ID or the exact previously read text: rereading a changed disk file is a new observation.
 
-Only whole-line `@context-fold begin LABEL` / `@context-fold end LABEL` comments create regions. The same label and comment style must close the region. The core preserves unmarked text and malformed, mismatched, unclosed or nested regions, including their children. An earlier independently closed region remains eligible when a later region is damaged or still open; an orphan end marker remains literal. Source-editing commands use strict validation and reject any damaged existing marker before writing.
+Only whole-line `@context-fold begin LABEL` / `@context-fold end LABEL` comments create regions. The same label and comment style must close the region. Complete nested regions form a containment tree; the nearest containing region is the parent. The core preserves unmarked text and malformed, mismatched, unclosed or crossing regions. An earlier independently closed region remains eligible when a later region is damaged or still open; an orphan end marker remains literal. Source-editing commands use strict validation and reject any damaged existing marker before writing.
 
 Python uses actual comment tokens; JS/TS requires optional Tree-sitter grammars; the generic literal fallback reports its lack of language parsing. The separate Magpie gateway uses a conservative Python/JS lexical filter and preserves a source read when complex constructs make comment boundaries ambiguous. Installing this Python transport does not extend the gateway's parser or intercept another host's tools.
 
@@ -127,7 +127,7 @@ Its first response remains complete. Reproject the same immutable source and occ
 
 ```text
 # @context-fold begin investigation
-[[cf:v2:<actual-content-hash>]]
+[[cf:v3:<actual-node-id>]]
 # @context-fold end investigation
 ```
 
@@ -139,11 +139,11 @@ Without a host cycle, the default returns original text with `delayReason: "host
 
 ## Recovery and references
 
-A newly folded body uses `[[cf:v2:<hash>]]`. It identifies exact UTF-8 body bytes, without marker lines or the final physical newline left next to the reference. The stored SHA-256 is complete; the displayed prefix begins at 12 hexadecimal digits and lengthens when needed. Ambiguous prefixes fail with `ambiguous_hash`, never a guessed result.
+A newly folded body uses `[[cf:v3:<node-id>]]` with a complete 64-digit hexadecimal node ID. It identifies one occurrence in one immutable source version. The separate body SHA-256 identifies exact UTF-8 body bytes, without marker lines or the final physical newline left next to the reference. Same-content occurrences may share one blob but retain separate parents and source positions.
 
-Legacy `[[cf:v1:<entry-id>]]` references still resolve against their original entries. New source payload hashes and old entry IDs are different identifiers. Do not construct a v2 reference from an arbitrary old ID.
+Legacy `[[cf:v1:<entry-id>]]` references still resolve against their original entries, and v2 references still resolve by body hash. Do not construct a content-hash reference from a node ID. Navigation by an old content hash that names several occurrences fails as ambiguous; use the exact node ID returned by `list` or `search`.
 
-`read` returns original text by default and protects recovered annotated content from subsequent folding. `peek: true` inspects without adding that protection. For large content, follow `nextOffset` until null and join the pages. `sha256` and `totalChars` identify the selected complete view, while `text` is the current page. Source projections additionally return original metadata, folded-region references, parser information and limitations.
+`read` returns original text by default and leaves folding state unchanged. Use `restore` to explicitly protect content from subsequent folding. Legacy `peek` inputs remain accepted. For large content, follow `nextOffset` until null and join the pages. `sha256` and `totalChars` identify the selected complete view, while `text` is the current page. Source projections additionally return original metadata, folded-region references, parser information and limitations.
 
 Offsets and limits always count **Python Unicode code points**, including through TypeScript and C# bridges. They are not UTF-8 byte offsets or JavaScript/.NET UTF-16 lengths. The separate Magpie plugin uses UTF-16 units; offsets cannot be transferred between implementations.
 
@@ -161,13 +161,25 @@ Offsets and limits always count **Python Unicode code points**, including throug
 | `read`, `resolve`, `paste` | Recover or export exact stored content. |
 | `put` | Explicitly archive text, optional role and source provenance. It does not summarize or authorize folding. |
 | `render` | Project selected archived entries using explicit annotations; `protected` IDs remain original. |
-| `list` | Search/browse archived originals and legacy manifests, with pagination. |
+| `list` | Browse root nodes or `parentId`'s direct children; use `id` and `recursive` to enumerate a subtree, with pagination. |
+| `search` / `grep` | Search original text within the scope or an `id` subtree; return exact node-relative offsets and bounded excerpts. |
+| `meta` | Return node identity, content hash, direct parent, source range and paginated child metadata. |
 | `status` | Return scoped counts and offset units. |
 | `restore` | Recover visibility of an existing entry or legacy group. |
 | `roots`, `pin`, `gc` | Host-controlled retention and cleanup. Defaults do not enable automatic collection. |
 | `skills` | Inspect reuse evidence or export explicitly authored instructions with provenance. It does not install them. |
 
 `mark`, `group`, and source `marks` are rejected. Old summary layers and groups remain recovery data only. Lifecycle strength settings are retention policies, not alternative compression modes. Do not remove data still needed by references in retained history.
+
+## Read-only archive queries
+
+`list`, `meta`, `search`, `grep` and default `read` do not change folding state, read counters or retention timestamps, and do not trigger garbage collection. Querying old inline-text snapshots does not migrate them; the next successful write migrates bodies to `blobs(hash,text)` in the same transaction.
+
+`list` defaults to root nodes (`depth: 0`, `recursive: false`) and 20 records. `parentId` selects direct children; `id` selects a subtree root. `meta` requires `id`, and its `offset` / `limit` paginate children. Metadata includes `id`, `sha256`, `parentId` and `sourceRange` with `sourceId`, `sourceHash`, `start`, `end` and `offsetUnit` when original provenance is known. Old archives need not contain source positions that were never recorded.
+
+`search` requires a nonempty literal `query` of at most 2,000 characters. It defaults to `recursive: true`, `caseSensitive: true` and 20 results. `grep` is an alias, not a regular-expression engine. CLI `--ignore-case` maps to `caseSensitive: false`. `id` restricts the search to that node and, by default, its descendants. `offset` paginates result records, while each match's own `offset` locates text inside its node's original; pass that match offset to `read` to inspect the surrounding text. These are separate coordinate systems. `nextOffset` continues the result page.
+
+Search visits occurrences, not distinct body hashes. Identical siblings are separate matches. Parent originals contain child originals, so the same source text may match both a parent and its child. Results always identify the node and original position; no generated summaries or embeddings participate in retrieval.
 
 ## JSON Lines RPC
 

@@ -115,6 +115,14 @@ def _graph(snapshot):
                     or bool(item.get("folded"))):
                 live.add(key)
     roots = _ids(snapshot.get("roots", []))
+    for item in entries:
+        parent = item.get("parentId")
+        if parent is not None:
+            if parent not in records or parent == item["id"]:
+                _fail("Invalid archived parent relation")
+            edges[parent].add(item["id"])
+            # A retained child must still be able to navigate to its parent.
+            edges[item["id"]].add(parent)
     if not roots <= records.keys() or any(not refs <= records.keys() for refs in edges.values()):
         _fail("Invalid lifecycle snapshot")
     live.update(roots)

@@ -66,11 +66,12 @@ const observation = z.object({
   completedAt: count.max(8_640_000_000_000_000).optional(),
   status: z.enum(['pending', 'confirmed', 'failed', 'unverified']),
 });
-// Parse metadata only. IDs stay internal to count group coverage; never output them.
+// Parse metadata only. IDs stay internal to count containment coverage; never output them.
 const metadata = z.object({
   entries: z.array(z.object({
     id: z.string(), mark: z.object({ disposition: z.enum(['keep', 'unmarked', 'foldable']) }),
     foldedHash: z.string().optional(), layers: z.array(z.unknown()).default([]),
+    annotation: z.object({ children: z.array(z.object({ id: z.string() })).default([]) }).optional(),
   })),
   groups: z.array(z.object({ id: z.string(), children: z.array(z.string()), folded: z.string().optional() })).default([]),
   decision: z.object({ reason: z.unknown().optional(), approved: z.boolean().optional(),
@@ -127,14 +128,20 @@ export async function collectReport(scope?: string): Promise<EffectsReport> {
         const raw = z.object({ snapshot: z.string() }).parse(row);
         const snapshot = metadata.parse(JSON.parse(raw.snapshot));
         const d = snapshot.decision;
-        const groups = new Map(snapshot.groups.map(group => [group.id, group]));
+        const children = new Map<string, string[]>([
+          ...snapshot.entries.map(entry => [entry.id, entry.annotation?.children.map(child => child.id) ?? []] as [string, string[]]),
+          ...snapshot.groups.map(group => [group.id, group.children] as [string, string[]]),
+        ]);
         const covered = new Set<string>();
-        const pending = snapshot.groups.filter(group => group.folded !== undefined).flatMap(group => group.children);
+        const pending = [
+          ...snapshot.entries.filter(entry => entry.foldedHash !== undefined).flatMap(entry => children.get(entry.id)!),
+          ...snapshot.groups.filter(group => group.folded !== undefined).flatMap(group => group.children),
+        ];
         while (pending.length) {
           const id = pending.pop()!;
           if (covered.has(id)) continue;
           covered.add(id);
-          pending.push(...(groups.get(id)?.children ?? []));
+          pending.push(...(children.get(id) ?? []));
         }
         const reason = typeof d.reason === 'string' && Object.hasOwn(reasons, d.reason)
           ? `${reasons[d.reason]} (${d.reason})` : '无记录或未识别的原因（已隐藏原值）';

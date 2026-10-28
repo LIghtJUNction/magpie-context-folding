@@ -41,7 +41,7 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     assert.equal(JSON.parse(hashed.out).id, 'a');
     assert.equal(JSON.parse(hashed.out).text, read.out);
     const output = join(directory, 'paste.txt');
-    const paste = await invoke(['paste', '--scope', scope, '--id', 'a', '--path', output]);
+    const paste = await invoke(['paste', '--scope', scope, '--id', 'a', '--path', output, '--restore']);
     assert.equal(paste.code, 0);
     assert.equal(await readFile(output, 'utf8'), read.out);
     assert.equal((await stat(output)).mode & 0o777, 0o600);
@@ -54,7 +54,7 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     assert.equal(JSON.parse(status.out).folded, 0);
     const stats = await invoke(['stats', '--scope', scope, '--json']);
     assert.equal(stats.code, 0);
-    assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 2);
+    assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 0);
     assert.equal((await invoke(['stats'])).code, 0);
     assert.equal(JSON.parse((await invoke(['forget', '--scope', scope])).out).forgotten, true);
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 1);
@@ -130,5 +130,30 @@ test('CLI invalid commands and arguments use stderr, exit 1 and never leak suppl
     assert.ok(!/^mark\s|^mode\s/m.test(help.out));
     assert.match((await invoke(['mode'])).err, /removed/);
     assert.equal((await invoke(['read', '--help'])).code, 0);
+  });
+});
+
+
+test('CLI list, search/grep and meta are bounded read-only archive queries', async () => {
+  await fixture(async (scope, _directory, invoke) => {
+    const read = await invoke(['read', '--scope', scope, '--id', 'a', '--json']);
+    assert.equal(JSON.parse(read.out).kept, false);
+    const list = await invoke(['list', '--scope', scope, '--recursive', '--limit', '1']);
+    assert.equal(list.code, 0, list.err);
+    assert.equal(JSON.parse(list.out).entries[0].id, 'a');
+    const meta = await invoke(['meta', '--scope', scope, '--id', 'a']);
+    assert.equal(meta.code, 0, meta.err);
+    assert.equal(JSON.parse(meta.out).parentId, null);
+    const missing = await invoke(['search', '--scope', scope, '--query', 'EXACT']);
+    assert.equal(JSON.parse(missing.out).total, 0);
+    const search = await invoke(['search', '--scope', scope, '--query', 'EXACT', '--ignore-case']);
+    assert.equal(search.code, 0, search.err);
+    const hit = JSON.parse(search.out).matches[0];
+    assert.equal(hit.id, 'a');
+    const page = await invoke(['read', '--scope', scope, '--id', hit.id, '--offset', String(hit.offset), '--limit', String(hit.endOffset - hit.offset)]);
+    assert.equal(page.out, 'exact');
+    const grep = await invoke(['grep', '--scope', scope, '--query', 'exact']);
+    assert.equal(JSON.parse(grep.out).total, 1);
+    assert.equal(JSON.parse((await invoke(['status', '--scope', scope])).out).folded, 1);
   });
 });

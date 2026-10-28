@@ -26,13 +26,23 @@ const groupSchema = z.object({
   summary: z.string().trim().min(1).max(2000), enabled: z.boolean(), folded: z.string().optional(),
   foldedMark: z.string().optional(),
 });
+const sourceRangeSchema = z.object({
+  sourceId: z.string().min(1), sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+  start: z.number().int().nonnegative(), end: z.number().int().positive(), offsetUnit: z.literal('utf16'),
+});
 const entrySchema = z.object({
   id: z.string().min(1), role: z.enum(['user', 'assistant', 'tool']), text: z.string(),
   mark: markSchema, folded: z.string().optional(), layers: z.array(layerSchema).default([]),
   version: versionSchema.optional(), manual: z.boolean().optional(),
   protectionReason: z.string().optional(),
   foldedMark: z.string().optional(),
-  annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string() }).optional(),
+  annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string(),
+    nodeVersion: z.literal(3).optional(), parentId: z.string().min(1).nullable().optional(),
+    sourceRanges: z.array(sourceRangeSchema).min(1).optional(),
+    observedRanges: z.array(sourceRangeSchema).optional(),
+    children: z.array(z.object({ id: z.string().min(1), start: z.number().int().nonnegative(),
+      end: z.number().int().positive() })).optional(),
+  }).optional(),
   occurrences: z.record(z.string(), z.object({
     firstSeen: z.number().int().nonnegative(), lastSeen: z.number().int().nonnegative(), folded: z.boolean().optional(),
   })).optional(),
@@ -141,6 +151,40 @@ function validateLayers(snapshot: Snapshot): void {
     }
   }
   const byId = new Map(snapshot.entries.map(entry => [entry.id, entry]));
+  const annotationParents = new Map<string, string>();
+  for (const entry of snapshot.entries) {
+    const annotation = entry.annotation;
+    if (!annotation) continue;
+    if (annotation.nodeVersion === 3 && (!/^[a-f0-9]{64}$/.test(entry.id)
+      || digest(entry.text) !== annotation.sha256 || !annotation.sourceRanges?.length)) {
+      throw new Error('Invalid archive node identity or content');
+    }
+    if (annotation.nodeVersion === 3 && annotation.sourceRanges!.reduce((sum, range) => sum + range.end - range.start, 0) !== entry.text.length) {
+      throw new Error('Archive source ranges do not cover the original');
+    }
+    for (const source of [...(annotation.sourceRanges ?? []), ...(annotation.observedRanges ?? [])]) {
+      if (source.end <= source.start) throw new Error('Invalid archive source range');
+    }
+    let previousEnd = 0;
+    for (const edge of annotation.children ?? []) {
+      const child = byId.get(edge.id);
+      if (!child?.annotation || edge.start < previousEnd || edge.end <= edge.start || edge.end > entry.text.length
+        || entry.text.slice(edge.start, edge.end) !== child.text || annotationParents.has(edge.id)) {
+        throw new Error('Invalid annotation child range or parent');
+      }
+      if (child.annotation.nodeVersion === 3 && child.annotation.parentId !== entry.id) {
+        throw new Error('Annotation parent relation mismatch');
+      }
+      annotationParents.set(edge.id, entry.id);
+      previousEnd = edge.end;
+    }
+  }
+  for (const entry of snapshot.entries) {
+    if (entry.annotation?.nodeVersion === 3 && entry.annotation.parentId !== undefined
+      && entry.annotation.parentId !== null && annotationParents.get(entry.id) !== entry.annotation.parentId) {
+      throw new Error('Dangling annotation parent');
+    }
+  }
   const latestSeries = new Set<string>();
   for (const entry of snapshot.entries) {
     const version = entry.version;
@@ -159,7 +203,7 @@ function validateLayers(snapshot: Snapshot): void {
     if (nodes.has(group.id)) throw new Error('Duplicate archive node ID');
     nodes.add(group.id);
   }
-  const parents = new Map<string, string>();
+  const parents = new Map<string, string>(annotationParents);
   for (const group of snapshot.groups ?? []) {
     for (const child of group.children) {
       if (!nodes.has(child) || parents.has(child)) throw new Error('Unknown or multiply parented group member');
@@ -374,6 +418,31 @@ export class Store {
       }
     });
     // @context-fold end recordMetrics-8a08af355b
+  }
+
+  /** Query an existing archive without opening a writer, initializing tables or changing counters. */
+  async inspect<T>(scope: string, run: (snapshot: Snapshot) => T): Promise<T> {
+    hashSchema.parse(scope);
+    const path = join(this.directory, 'state.sqlite');
+    try { await stat(path); }
+    catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') throw new Error('Unknown context scope');
+      throw error;
+    }
+    const database = new Database(path, { readonly: true, strict: true });
+    try {
+      database.exec('BEGIN');
+      const row = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
+      if (row === null) throw new Error('Unknown context scope');
+      const session = sessionRowSchema.parse(row);
+      const snapshot = decode(database, storedSnapshotSchema.parse(JSON.parse(session.snapshot)));
+      const result = run(snapshot);
+      database.exec('COMMIT');
+      return result;
+    } catch (error) {
+      if (database.inTransaction) database.exec('ROLLBACK');
+      throw error;
+    } finally { database.close(); }
   }
 
   async transaction<T>(

@@ -1,11 +1,23 @@
-import type { Entry, Snapshot } from './store.js';
+import { digest, type Entry, type Snapshot } from './store.js';
 
 type Group = NonNullable<Snapshot['groups']>[number];
-type Node = Entry | Group;
+export type ArchiveNode = Entry | Group;
+type Node = ArchiveNode;
+export const childrenOf = (node: Node): string[] => 'children' in node
+  ? [...node.children] : (node.annotation?.children ?? []).map(child => child.id);
+export const nodeFields = (node: Node) => 'text' in node ? {
+  nodeId: node.id, sha256: node.annotation?.sha256 ?? digest(node.text), contentHash: node.annotation?.sha256 ?? digest(node.text),
+  sourceRange: node.annotation?.sourceRanges?.length === 1 ? node.annotation.sourceRanges[0]! : null,
+  sourceRanges: (node.annotation?.sourceRanges ?? []).slice(0, 20), sourceRangeCount: node.annotation?.sourceRanges?.length ?? 0,
+  observedRanges: (node.annotation?.observedRanges ?? []).slice(0, 20), observedRangeCount: node.annotation?.observedRanges?.length ?? 0,
+  offsetUnit: 'utf16' as const,
+} : { nodeId: node.id, offsetUnit: 'utf16' as const };
 
 export interface BrowseOptions {
   id?: string | undefined;
-  depth?: number;
+  parentId?: string | undefined;
+  recursive?: boolean | undefined;
+  depth?: number | undefined;
   query?: string | undefined;
   sort?: 'chronological' | 'size' | 'id' | 'version';
   order?: 'asc' | 'desc';
@@ -15,8 +27,8 @@ export interface BrowseOptions {
 
 export function parentIndex(snapshot: Snapshot): Map<string, string> {
   const parents = new Map<string, string>();
-  for (const group of snapshot.groups ?? []) {
-    for (const child of group.children) parents.set(child, group.id);
+  for (const node of [...snapshot.entries, ...(snapshot.groups ?? [])]) {
+    for (const child of childrenOf(node)) parents.set(child, node.id);
   }
   return parents;
 }
@@ -25,14 +37,16 @@ export function parentIndex(snapshot: Snapshot): Map<string, string> {
 export function restoreAncestors(snapshot: Snapshot, id: string): number {
   // @context-fold begin restoreAncestors-f4581f349a
   const parents = parentIndex(snapshot);
-  const groups = new Map((snapshot.groups ?? []).map(group => [group.id, group]));
+  const nodes = new Map<string, Node>([...snapshot.entries, ...(snapshot.groups ?? [])].map(node => [node.id, node]));
   let restored = 0;
   let parent = parents.get(id);
   while (parent !== undefined) {
-    const group = groups.get(parent)!;
-    if (group.folded !== undefined) restored++;
-    group.enabled = false;
-    delete group.folded;
+    const node = nodes.get(parent)!;
+    if (node.folded !== undefined) restored++;
+    if ('children' in node) node.enabled = false;
+    else { node.mark = { disposition: 'keep' }; node.manual = true; }
+    delete node.folded;
+    delete node.foldedMark;
     parent = parents.get(parent);
   }
   return restored;
@@ -87,7 +101,9 @@ function searchMatch(node: Node, pattern: RegExp): SearchMatch | undefined {
 export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
   // @context-fold begin browse-c3d5e9701b
   const nodes = new Map<string, Node>([...snapshot.entries, ...(snapshot.groups ?? [])].map(node => [node.id, node]));
-  if (options.id !== undefined && !nodes.has(options.id)) throw new Error(`Unknown entry or group ${options.id}`);
+  if ((options.id !== undefined && !nodes.has(options.id)) || (options.parentId !== undefined && !nodes.has(options.parentId))) {
+    throw new Error('Unknown entry or group');
+  }
   const parents = parentIndex(snapshot);
   const latest = latestVersions(snapshot);
   const metadata = new Map<string, { position: number; size: number }>();
@@ -134,7 +150,8 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
     difference ||= metadata.get(a)!.position - metadata.get(b)!.position || lexical(a, b);
     return options.order === 'desc' ? -difference : difference;
   };
-  const roots = options.id === undefined ? [...nodes.keys()].filter(id => !parents.has(id)) : [options.id];
+  const roots = options.parentId !== undefined ? childrenOf(nodes.get(options.parentId)!)
+    : options.id === undefined ? [...nodes.keys()].filter(id => !parents.has(id)) : [options.id];
   const stack = roots.sort(compare).reverse().map(id => ({ id, depth: 0 }));
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 20;
@@ -145,7 +162,7 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
     if (included && !included.has(id)) continue;
     const node = nodes.get(id)!;
     if (total >= offset && entries.length < limit) {
-      const base = { id, parentId: parents.get(id) ?? null, depth, childCount: 'children' in node ? node.children.length : 0,
+      const base = { id, ...nodeFields(node), parentId: parents.get(id) ?? null, depth, childCount: childrenOf(node).length,
         chars: metadata.get(id)!.size, folded: node.folded !== undefined,
         ...(matches.has(id) ? { match: matches.get(id)! } : {}) };
       entries.push('children' in node
@@ -153,14 +170,72 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
         : { ...base, role: node.role, disposition: node.mark.disposition, layers: node.layers.length,
           currentLayer: node.layers.find(layer => layer.text === node.folded)?.id ?? 'original',
           ...(node.mark.disposition === 'foldable' ? { summary: node.mark.summary.slice(0, 240) } : { opening: node.text.slice(0, 100) }),
-          ...(node.annotation ? { annotation: node.annotation } : {}),
+          ...(node.annotation ? { annotation: { sha256: node.annotation.sha256, label: node.annotation.label.slice(0, 80) } } : {}),
           ...(node.version ? { version: node.version, latestVersion: latest.has(id) } : {}) });
     }
     total++;
-    if ('children' in node && depth < (options.depth ?? 1)) {
-      for (const child of [...node.children].sort(compare).reverse()) stack.push({ id: child, depth: depth + 1 });
+    if (depth < (options.parentId !== undefined ? 0 : options.depth ?? (options.recursive ? Infinity : 0))) {
+      for (const child of [...childrenOf(node)].sort(compare).reverse()) stack.push({ id: child, depth: depth + 1 });
     }
   }
   return { entries, total, nextOffset: offset + entries.length < total ? offset + entries.length : null };
   // @context-fold end browse-c3d5e9701b
+}
+
+
+export function parentRange(snapshot: Snapshot, id: string) {
+  for (const parent of snapshot.entries) {
+    const child = parent.annotation?.children?.find(edge => edge.id === id);
+    if (child) return { parentId: parent.id, start: child.start, end: child.end, offsetUnit: 'utf16' as const };
+  }
+  return null;
+}
+
+export function nodeMeta(snapshot: Snapshot, node: Node, offset = 0, limit = 20) {
+  const children = childrenOf(node);
+  const text = 'text' in node ? node.text : JSON.stringify({ id: node.id, summary: node.summary, children });
+  return { id: node.id, ...nodeFields(node), parentId: parentIndex(snapshot).get(node.id) ?? null,
+    parentRange: parentRange(snapshot, node.id),
+    ...('text' in node ? { sourceRanges: (node.annotation?.sourceRanges ?? []).slice(offset, offset + limit),
+      nextSourceOffset: offset + limit < (node.annotation?.sourceRanges?.length ?? 0) ? offset + limit : null,
+      observedRanges: (node.annotation?.observedRanges ?? []).slice(offset, offset + limit),
+      nextObservedOffset: offset + limit < (node.annotation?.observedRanges?.length ?? 0) ? offset + limit : null } : {}),
+    chars: text.length, bytes: Buffer.byteLength(text), childCount: children.length,
+    children: children.slice(offset, offset + limit), nextOffset: offset + limit < children.length ? offset + limit : null };
+}
+
+/** Literal search always reports offsets in read(id)'s original text. */
+export function search(snapshot: Snapshot, options: { query: string; id?: string | undefined; recursive?: boolean;
+  offset?: number; limit?: number; caseSensitive?: boolean }) {
+  const nodes = new Map<string, Node>([...snapshot.entries, ...(snapshot.groups ?? [])].map(node => [node.id, node]));
+  const parents = parentIndex(snapshot);
+  if (options.id !== undefined && !nodes.has(options.id)) throw new Error('Unknown entry or group');
+  const pending = options.id === undefined ? [...nodes.keys()].filter(id => !parents.has(id)).reverse() : [options.id];
+  if (!options.query || options.query.length > 2000) throw new Error('Invalid search query');
+  const pattern = new RegExp(options.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), options.caseSensitive !== false ? 'gu' : 'giu');
+  const offset = options.offset ?? 0; const limit = options.limit ?? 20;
+  const matches = []; let total = 0;
+  while (pending.length) {
+    const node = nodes.get(pending.pop()!)!;
+    const text = 'text' in node ? node.text : JSON.stringify({ id: node.id, summary: node.summary, children: node.children });
+    pattern.lastIndex = 0;
+    for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+      const at = match.index; const end = at + match[0].length;
+      // An ancestor's full original already contains its children. Prefer the
+      // child's hit when that child is also searched, while keeping every occurrence.
+      if (options.recursive !== false && 'text' in node
+        && node.annotation?.children?.some(child => child.start <= at && end <= child.end)) continue;
+      if (total >= offset && matches.length < limit) {
+        let start = Math.max(0, at - 40); let stop = Math.min(text.length, start + 200);
+        if (start && /[\uDC00-\uDFFF]/.test(text[start]!) && /[\uD800-\uDBFF]/.test(text[start - 1]!)) start--;
+        if (stop < text.length && /[\uD800-\uDBFF]/.test(text[stop - 1]!) && /[\uDC00-\uDFFF]/.test(text[stop]!)) stop--;
+        matches.push({ id: node.id, ...nodeFields(node), parentId: parents.get(node.id) ?? null,
+          offset: at, endOffset: end, excerptOffset: start, excerpt: text.slice(start, stop),
+          line: text.slice(0, at).split(/\r\n|\r|\n/).length, layer: 'original' as const });
+      }
+      total++;
+    }
+    if (options.recursive !== false) pending.push(...[...childrenOf(node)].reverse());
+  }
+  return { matches, total, nextOffset: offset + matches.length < total ? offset + matches.length : null, offsetUnit: 'utf16' };
 }

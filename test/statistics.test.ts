@@ -87,8 +87,8 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.equal(metrics.savingNanoUsdLower, '0');
     assert.equal(metrics.certifiedTokenDeltaLower, '0');
 
-    await execute({ scope, action: 'read', id: ids[0], limit: 10 });
-    await execute({ scope, action: 'read', id: ids[1], limit: 5 });
+    await execute({ scope, action: 'read', restore: true, id: ids[0], limit: 10 });
+    await execute({ scope, action: 'read', restore: true, id: ids[1], limit: 5 });
     const session = await call({ scope, action: 'stats' });
     assert.equal(session.metrics.originalReadCalls, 2);
     assert.equal(session.metrics.layerReadCalls, 0);
@@ -103,7 +103,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     const bytesBefore = (await stat(join(directory, 'state.sqlite'))).size;
     await execute({ action: 'stats' });
     await execute({ action: 'stats' });
-    await execute({ scope, action: 'read', id: 'missing-entry' });
+    await execute({ scope, action: 'read', restore: true, id: 'missing-entry' });
     assert.equal((await call({ scope, action: 'stats' })).summary.detailViewCount, 2);
     assert.equal((await stat(join(directory, 'state.sqlite'))).size, bytesBefore);
     assert.equal((await call({ scope, action: 'forget' })).forgotten, true);
@@ -197,5 +197,45 @@ test('new folds do not recount the gross savings of older regions in the same re
     assert.equal(BigInt(metrics.foldedTokensEstimated), firstGross + newGross);
     assert.equal(metrics.itemsFolded, 2);
     assert.equal(metrics.foldBatchesApproved, 2);
+  });
+});
+
+test('nested gross savings count new outer replacements without expanding old references or recounting children', async () => {
+  await fixture(async (directory, cwd) => {
+    const body = { tools: [{ type: 'function', function: { name: 'exec_command' } }],
+      messages: [{ role: 'assistant', content: '@context-fold begin outer\nHeading.\n'
+        + annotated('child', 'Completed child work. '.repeat(500)) }] };
+    const context = { protocol: 'chat', model: 'fixture', session: 'nested-mixed-replay', cwd,
+      options: { delayRequests: 0 }, state: {} };
+    const store = new Store(directory);
+    const first = await onRequest(body, context) as Record<string, unknown>;
+    const firstGross = BigInt((await store.readStats()).metrics.foldedTokensEstimated);
+    assert.ok(firstGross > 0n, 'the completed child folds while its parent is open');
+
+    // Completing the parent around a previously emitted reference must count
+    // the actual short input, even though its archived original restores the child.
+    const outerInput = { ...first, messages: [...first.messages as unknown[],
+      { role: 'assistant', content: '\n' + 'Completed outer work. '.repeat(300) + '\n@context-fold end outer' }] };
+    const outer = await onRequest(outerInput, context) as Record<string, unknown>;
+    const cleanOuterInput = withoutGuidance(withoutBudget(outerInput, 'chat'), 'chat');
+    const cleanOuter = withoutGuidance(withoutBudget(outer, 'chat'), 'chat');
+    const outerGross = BigInt(estimateTokens(cleanOuterInput) - estimateTokens(cleanOuter));
+    assert.ok(outerGross > 0n, 'the newly completed parent folds');
+    assert.equal(BigInt((await store.readStats()).metrics.foldedTokensEstimated), firstGross + outerGross);
+
+    // Replay the old parent beside a new tree. Its tiny child is archived and
+    // hidden with the parent, but contributes no additional replacement savings.
+    const nextInput = { ...cleanOuterInput, messages: [...cleanOuterInput.messages as unknown[],
+      { role: 'assistant', content: annotated('new-parent', 'New parent work. '.repeat(300)
+        + '\n' + annotated('tiny-child', 'tiny')) }] };
+    const next = await onRequest(nextInput, context) as Record<string, unknown>;
+    const cleanNext = withoutGuidance(withoutBudget(next, 'chat'), 'chat');
+    const newOnly = { ...nextInput, messages: [...nextInput.messages.slice(0, -1),
+      ...(cleanNext.messages as unknown[]).slice(-1)] };
+    const newGross = BigInt(estimateTokens(nextInput) - estimateTokens(newOnly));
+    assert.ok(newGross > 0n, 'the new nested tree folds');
+    const metrics = (await store.readStats()).metrics;
+    assert.equal(BigInt(metrics.foldedTokensEstimated), firstGross + outerGross + newGross);
+    assert.equal(metrics.foldBatchesApproved, 3);
   });
 });
