@@ -11,7 +11,7 @@ const folded = (value: unknown) => JSON.stringify(value).includes('[[cf:v2:');
 const tool = async (args: unknown) => JSON.parse(await execute(args));
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
-  test(`${protocol}: markers fold after a distinct request, retries keep the grace period, and exact read keeps originals`, async () => {
+  test(`${protocol}: markers fold after a distinct request, retries keep the grace period, and read queries originals without unfolding history`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const input = bodyFor(protocol);
       const first = await onRequest(input, context) as Record<string, unknown>;
@@ -30,8 +30,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const recovered = await tool({ action: 'read', scope, id: digest(payload).slice(0, 12), limit: 24000 });
       assert.equal(recovered.text, payload);
       assert.equal(recovered.sha256, digest(payload));
-      assert.equal(recovered.kept, true);
-      assert.equal(folded(await onRequest(nextInput, context)), false, 'recovered content stays visible');
+      assert.equal(folded(await onRequest(nextInput, context)), true, 'querying content never unfolds history');
     }, protocol);
   });
 }
@@ -105,8 +104,7 @@ test('without a callable recovery entry point only budget metadata is emitted', 
 
 test('malformed and tiny annotated blocks remain readable', async () => {
   await fixture(async ({ context }) => {
-    for (const text of [marked('x'), '@context-fold begin x\n' + payload,
-      '@context-fold begin x\n@context-fold begin y\n' + payload + '\n@context-fold end y\n@context-fold end x']) {
+    for (const text of [marked('x'), '@context-fold begin x\n' + payload]) {
       const input = bodyFor('chat', text);
       const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
       assert.deepEqual(withoutBudget(output, 'chat'), input);

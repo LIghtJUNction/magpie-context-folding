@@ -280,6 +280,20 @@ impl Client {
         self.action("list", scope, options_object(options)?)
     }
 
+    /// Search archived views without unfolding their history.
+    pub fn grep(&self, scope: &str, query: &str, options: Value) -> Result<Value> {
+        let mut request = options_object(options)?;
+        request.insert("query".into(), json!(query));
+        self.action("grep", scope, request)
+    }
+
+    /// Read metadata and child identifiers without returning body text.
+    pub fn meta(&self, scope: &str, id: &str, options: Value) -> Result<Value> {
+        let mut request = options_object(options)?;
+        request.insert("id".into(), json!(id));
+        self.action("meta", scope, request)
+    }
+
     pub fn render(&self, scope: &str, ids: &[&str], protected: &[&str]) -> Result<Value> {
         self.action(
             "render",

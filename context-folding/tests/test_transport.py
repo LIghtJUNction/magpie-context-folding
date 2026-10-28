@@ -63,7 +63,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(replies[0]["result"]["text"], text)
 
-    def test_source_cli_batch_expansion_recovery_and_project_configuration(self):
+    def test_source_cli_batch_pure_read_and_project_configuration(self):
         source = "# @context-fold begin alpha\r\ndef alpha():\r\n" + "".join(f"    value_{n} = {n}\r\n" for n in range(25)) + "# @context-fold end alpha\r\n"
         path = Path(self.tmp.name) / "source.py"
         path.write_bytes(source.encode())
@@ -72,9 +72,9 @@ class TransportTests(unittest.TestCase):
         view = replies[0]["result"]
         self.assertEqual(view["mode"], "folded")
         self.assertNotIn("value_24", view["text"])
-        code, replies = self.run_cli("read", b"", "--scope", "test", "--id", view["id"], "--expand", "alpha")
+        code, replies = self.run_cli("read", b"", "--scope", "test", "--id", view["id"])
         self.assertEqual(code, 0, replies)
-        self.assertEqual(replies[0]["result"]["text"], source)
+        self.assertEqual(replies[0]["result"]["text"], view["text"])
         code, replies = self.run_cli("read-source", b"", "--scope", "test", "--files", json.dumps([
             {"path": str(path)}, {"text": "const value = 1;", "language": "typescript"}]))
         self.assertEqual(code, 0, replies)
@@ -90,7 +90,7 @@ class TransportTests(unittest.TestCase):
             result = subprocess.run(command + ["--state", self.state, "--scope", "test", "--id", view["id"]],
                 capture_output=True, env=self.env, cwd=PACKAGE, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout)
-            self.assertEqual(json.loads(result.stdout)["result"]["text"], source)
+            self.assertEqual(json.loads(result.stdout)["result"]["text"], view["text"])
         (project / ".context-folding.toml").write_text("[annotations]\ndefault_fold = 'invalid'\n")
         code, replies = self.run_cli("status", b"", "--scope", "test", "--project-dir", str(project))
         self.assertEqual(code, 1)
@@ -137,12 +137,13 @@ class TransportTests(unittest.TestCase):
         annotated = replies[0]["result"]
         self.assertEqual(len(annotated["regions"]), 1)
         self.assertEqual(annotated["commentStyles"], request["commentStyles"])
-        requests = [initialize(), mcp_call(2, {"action": "read-source", "scope": "bridge", "id": annotated["id"]})]
+        requests = [initialize(), mcp_call(2, {"action": "fold", "scope": "bridge", "text": source,
+                                             "language": "custom", "commentStyles": request["commentStyles"]})]
         code, replies = self.run_cli("mcp", b"".join(map(encoded, requests)))
         self.assertEqual(code, 0, replies)
         self.assertFalse(replies[1]["result"]["isError"])
         view = json.loads(replies[1]["result"]["content"][0]["text"])
-        self.assertEqual(len(view["foldedRegions"]), 1)
+        self.assertEqual(len(view["references"]), 1)
         code, replies = self.run_cli("rpc", encoded({"action": "resolve", "scope": "bridge", "value": view["text"]}))
         self.assertEqual(code, 0, replies)
         self.assertEqual(replies[0]["result"]["value"], source)
@@ -286,23 +287,21 @@ class TransportTests(unittest.TestCase):
                 tools = replies[2]["result"]["tools"]
                 self.assertEqual([tool["name"] for tool in tools], ["context_folding"])
                 self.assertEqual(tools[0]["inputSchema"]["required"], ["action", "scope"])
-                for action in ("resolve", "gc", "roots", "pin", "skills"):
-                    self.assertIn(action, tools[0]["inputSchema"]["properties"]["action"]["enum"])
+                self.assertEqual(set(tools[0]["inputSchema"]["properties"]["action"]["enum"]),
+                                 {"fold", "list", "grep", "read", "meta", "status"})
 
     def test_mcp_tool_application_errors_and_success_are_content(self):
         requests = [initialize(), mcp_call(2, {"action": "unknown", "scope": "test"}),
-            mcp_call(3, {"action": "put", "scope": "test", "text": "original"}),
+            mcp_call(3, {"action": "fold", "scope": "test", "text": "original"}),
             mcp_call(4, {}),
             {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "other", "arguments": {}}}]
         code, replies = self.run_cli("mcp", b"".join(map(encoded, requests)))
         self.assertEqual(code, 0)
-        failure = replies[1]["result"]
-        self.assertTrue(failure["isError"])
-        self.assertIn("error", json.loads(failure["content"][0]["text"]))
+        self.assertEqual(replies[1]["error"]["code"], -32602)
         success = replies[2]["result"]
         self.assertFalse(success["isError"])
-        self.assertIn("id", json.loads(success["content"][0]["text"]))
-        self.assertTrue(replies[3]["result"]["isError"])
+        self.assertEqual(json.loads(success["content"][0]["text"])["text"], "original")
+        self.assertEqual(replies[3]["error"]["code"], -32602)
         self.assertEqual(replies[4]["error"]["code"], -32602)
 
     def test_mcp_invalid_frames_and_envelopes(self):

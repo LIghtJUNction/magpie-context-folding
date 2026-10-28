@@ -42,19 +42,21 @@ async function command(directory: string, args: string[], input?: string) {
   return { stdout, stderr, code };
 }
 
-test('CLI restores paginated exact text with no added newline and supports JSON/range/pipe export/config', async () => {
+test('CLI defaults to a bounded query and exports paginated exact text explicitly with no added newline and supports JSON/range/pipe export/config', async () => {
   await fixture(async (store, scope, directory, text) => {
     await writeFile(join(directory, '.context-folding.toml'), '[folding]\nenabled = false\n');
     const config = await command(directory, ['config']);
     assert.equal(config.code, 0);
     assert.equal(JSON.parse(config.stdout).config.folding.enabled, false);
     assert.ok(!config.stdout.includes('hidden'));
-    const read = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    const bounded = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    assert.equal(bounded.stdout, text.slice(0, 1200));
+    const read = await command(directory, ['read', '--scope', scope, '--id', 'a', '--full']);
     assert.equal(read.code, 0, read.stderr);
     assert.equal(read.stderr, '');
     assert.equal(read.stdout, text);
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
-    const json = await command(directory, ['read', '--scope', scope, '--id', 'a', '--json']);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
+    const json = await command(directory, ['read', '--scope', scope, '--id', 'a', '--json', '--full']);
     assert.equal(JSON.parse(json.stdout).text, text);
     const range = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '11', '--limit', '11', '--json']);
     assert.equal(range.code, 0);
@@ -64,7 +66,7 @@ test('CLI restores paginated exact text with no added newline and supports JSON/
     assert.equal(tail.stdout, text.slice(-11));
     const peek = await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', '-', '--peek']);
     assert.equal(peek.stdout, text);
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
     const destination = join(directory, 'destination');
     assert.equal((await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', destination])).code, 0);
     assert.equal(await readFile(destination, 'utf8'), text);

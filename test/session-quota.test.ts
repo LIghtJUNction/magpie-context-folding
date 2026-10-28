@@ -129,7 +129,7 @@ test('lowering the quota keeps oversized snapshots recoverable while rejecting g
     assert.deepEqual(f.stored(), before);
     const recovered = await call({ action: 'read', scope: f.scope, id });
     assert.equal(recovered.text, text);
-    assert.equal(recovered.kept, true);
+    assert.equal(recovered.layer, 'view');
     assert.equal(JSON.parse(f.stored().snapshot).sessionLimitBytes, 2048);
   });
 });

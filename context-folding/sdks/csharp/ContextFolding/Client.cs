@@ -220,6 +220,10 @@ public sealed class Client : IAsyncDisposable
         => OperationAsync("put", scope, fields, cancellationToken, ("text", text));
     public Task<JsonElement> ListAsync(string scope, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("list", scope, fields, cancellationToken);
+    public Task<JsonElement> GrepAsync(string scope, string query, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
+        => OperationAsync("grep", scope, fields, cancellationToken, ("query", query));
+    public Task<JsonElement> MetaAsync(string scope, string id, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
+        => OperationAsync("meta", scope, fields, cancellationToken, ("id", id));
     public Task<JsonElement> ReadAsync(string scope, string id, IReadOnlyDictionary<string, object?>? fields = null, CancellationToken cancellationToken = default)
         => OperationAsync("read", scope, fields, cancellationToken, ("id", id));
 

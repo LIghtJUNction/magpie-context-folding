@@ -152,6 +152,12 @@ export class ContextFoldingClient implements AsyncDisposable {
   list<T = unknown>(scope: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'list', scope }, signal);
   }
+  grep<T = unknown>(scope: string, query: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
+    return this.call<T>({ ...fields, action: 'grep', scope, query }, signal);
+  }
+  meta<T = unknown>(scope: string, id: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
+    return this.call<T>({ ...fields, action: 'meta', scope, id }, signal);
+  }
   read<T = unknown>(scope: string, id: string, fields: Fields = {}, signal?: AbortSignal): Promise<T> {
     return this.call<T>({ ...fields, action: 'read', scope, id }, signal);
   }

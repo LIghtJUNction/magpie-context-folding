@@ -125,9 +125,10 @@ class FoldTests(unittest.TestCase):
         automatic = self.client.read_source("s", text=source, occurrence="read-1", requestCycle=1, limit=24000)
         self.assertTrue(automatic["foldedRegions"])
         self.client.read("s", folded["references"][0]["id"])
-        self.assertEqual(self.client.read_source("s", text=source, occurrence="read-1", requestCycle=2, limit=24000)["text"], source)
-        self.assertTrue(self.client.fold("s", source)["references"], "an explicit request may fold recovered text again")
-        self.assertEqual(self.client.read_source("s", text=source, occurrence="read-1", requestCycle=3, limit=24000)["text"], source)
+        continued = self.client.read_source("s", text=source, occurrence="read-1", requestCycle=2, limit=24000)
+        self.assertTrue(continued["foldedRegions"], "reading an archive must not mark it keep or unfold it")
+        self.assertTrue(self.client.fold("s", source)["references"], "explicit folds stay valid after inspection")
+        self.assertTrue(self.client.read_source("s", text=source, occurrence="read-1", requestCycle=3, limit=24000)["foldedRegions"])
         self.assertEqual(self.client.config["folding"]["delay_requests"], 1)
         with Client(self.directory / "disabled.sqlite3", project_dir=self.directory, config={
             "folding": {"enabled": False, "delay_requests": 100},
@@ -197,7 +198,7 @@ class FoldTests(unittest.TestCase):
             self.assertEqual(client.resolve("s", folded["text"])["value"], block())
             client.call({"action": "gc", "scope": "s", "mode": "collect"})
         with Client(state, project_dir=self.directory, config=config) as reopened:
-            self.assertEqual(reopened.read("s", folded["references"][0]["id"], peek=True)["text"], BODY)
+            self.assertEqual(reopened.read("s", folded["references"][0]["id"], peek=True, limit=24000)["text"], BODY)
             self.assertEqual(reopened.resolve("s", folded["text"])["value"], block())
 
 
@@ -245,9 +246,13 @@ class CtxfProcessTests(unittest.TestCase):
             metadata = json.loads(self.succeeded(result))
             self.assertEqual(metadata["scope"], "default")
             self.assertEqual(metadata["text"], block(metadata["references"][0]["reference"], newline="\r\n", shell="#") + ending)
-            self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", metadata["references"][0]["id"])), BODY.encode())
-            regular_read = json.loads(self.succeeded(self.run_ctxf("read", "--id", metadata["references"][0]["id"])))
-            self.assertEqual(regular_read["result"]["text"], BODY)
+            short = self.run_ctxf("read", "--raw", "--id", metadata["references"][0]["id"])
+            self.assertEqual(short.returncode, 0, short.stderr)
+            self.assertEqual(short.stdout, BODY[:1200].encode())
+            self.assertIn(b"nextOffset=1200", short.stderr)
+            self.assertEqual(self.succeeded(self.run_ctxf("read", metadata["references"][0]["id"], "--limit", "24000")), BODY.encode())
+            structured = json.loads(self.succeeded(self.run_ctxf("read", metadata["references"][0]["id"], "--json", "--limit", "24000")))
+            self.assertEqual(structured["text"], BODY)
             self.assertEqual(self.succeeded(self.run_ctxf(data=source.encode())), metadata["text"].encode())
 
     def test_two_actual_processes_form_an_idempotent_pipeline(self):
@@ -266,20 +271,30 @@ class CtxfProcessTests(unittest.TestCase):
             expected = source.replace(BODY, f"[[cf:v2:{digest(BODY)[:12]}]]").encode()
             self.assertEqual(output, expected)
             self.assertGreater(len(output), 24000)
-            self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", digest(BODY))), BODY.encode())
+            self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", digest(BODY), "--limit", "24000")), BODY.encode())
         finally:
             for process in (first, second):
                 if process.poll() is None:
                     process.kill()
                     process.communicate(timeout=5)
 
-    def test_raw_read_collects_more_than_one_page_without_truncation(self):
+    def test_raw_read_is_bounded_without_automatic_full_expansion(self):
         body = "原文🙂\r\n" * 12000 + "end without newline"
         source = block(body, newline="\r\n")
         metadata = json.loads(self.succeeded(self.run_ctxf("--json", data=source.encode())))
         identifier = metadata["references"][0]["id"]
-        self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", identifier)), body.encode())
-        self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--id", identifier, "--offset", "1", "--limit", "2")), body[1:3].encode())
+        page = self.run_ctxf("read", "--raw", "--id", identifier)
+        self.assertEqual(page.returncode, 0, page.stderr)
+        self.assertTrue(body.startswith(page.stdout.decode()))
+        self.assertLessEqual(len(page.stdout.decode()), 1200)
+        self.assertIn(b"nextOffset=", page.stderr)
+        sample = self.run_ctxf("read", identifier, "--offset", "1", "--limit", "2")
+        self.assertEqual(sample.returncode, 0, sample.stderr)
+        self.assertEqual(sample.stdout, body[1:3].encode())
+        self.assertIn(b"nextOffset=3", sample.stderr)
+        structured = json.loads(self.succeeded(self.run_ctxf("read", identifier, "--json", "--limit", "7")))
+        self.assertEqual(structured["text"], body[:7])
+        self.assertEqual(structured["nextOffset"], 7)
         request = json.dumps({"action": "resolve", "scope": "default", "value": metadata["text"]}).encode()
         recovered = json.loads(self.succeeded(self.run_ctxf("call", data=request)))
         self.assertEqual(recovered["result"]["value"].encode(), source.encode())
@@ -317,10 +332,61 @@ class CtxfProcessTests(unittest.TestCase):
         replies = [json.loads(line) for line in output.splitlines()]
         tool = replies[1]["result"]["tools"][0]
         self.assertEqual(tool["name"], "context_folding")
-        self.assertIn("fold", tool["inputSchema"]["properties"]["action"]["enum"])
+        self.assertEqual(set(tool["inputSchema"]["properties"]["action"]["enum"]),
+                         {"fold", "list", "grep", "read", "meta", "status"})
         self.assertIn("immediate", replies[0]["result"]["instructions"])
         self.assertFalse(replies[2]["result"]["isError"])
         self.assertEqual(json.loads(replies[2]["result"]["content"][0]["text"]), result["result"])
+
+    def test_query_cli_plaintext_json_and_lines_are_bounded(self):
+        source = block("header\n" + "find-me\n" * 150 + "final tail", "notes")
+        folded = json.loads(self.succeeded(self.run_ctxf("--json", data=source.encode())))
+        identifier = folded["references"][0]["id"]
+
+        listing = self.run_ctxf("list", "--limit", "1")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn(identifier[:12].encode(), listing.stdout)
+        self.assertNotIn(b"{\"result\"", listing.stdout)
+        structured_list = json.loads(self.succeeded(self.run_ctxf("list", "--json")))
+        self.assertGreaterEqual(structured_list["total"], 1)
+
+        metadata = json.loads(self.succeeded(self.run_ctxf("meta", identifier)))
+        self.assertEqual(metadata["sha256"], identifier)
+        self.assertIn("childCount", metadata)
+
+        grep = self.run_ctxf("grep", "find-me", "--limit", "1")
+        self.assertEqual(grep.returncode, 0, grep.stderr)
+        self.assertIn(b"find-me", grep.stdout)
+        self.assertIn(b"nextOffset=", grep.stderr)
+        structured = json.loads(self.succeeded(self.run_ctxf("grep", "find-me", "--json", "--limit", "1")))
+        self.assertEqual(len(structured["matches"]), 1)
+        self.assertEqual(structured["nextOffset"], 1)
+        next_match = json.loads(self.succeeded(self.run_ctxf("grep", "find-me", "--json", "--offset", "1", "--limit", "1")))
+        self.assertEqual(next_match["matches"][0]["line"], structured["matches"][0]["line"] + 1)
+        with_context = self.run_ctxf("grep", "find-me", identifier, "--limit", "1", "--context", "1")
+        self.assertEqual(with_context.returncode, 0, with_context.stderr)
+        self.assertIn(b"header", with_context.stdout)
+        self.assertIn(b"find-me", with_context.stdout)
+        self.assertLessEqual(len(with_context.stdout.splitlines()), 3)
+
+        excerpt = self.run_ctxf("read", identifier, "--lines", "2:3", "--limit", "80")
+        self.assertEqual(excerpt.returncode, 0, excerpt.stderr)
+        self.assertEqual(excerpt.stdout.decode(), "find-me\nfind-me\n")
+        invalid = self.run_ctxf("read", identifier, "--lines", "3:2")
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertFalse(invalid.stdout)
+        self.assertEqual(json.loads(invalid.stderr)["error"]["code"], "invalid_request")
+
+        conflict = self.run_ctxf("grep", "one", "--query", "two")
+        self.assertNotEqual(conflict.returncode, 0)
+        self.assertEqual(conflict.stdout, b"")
+
+    def test_mcp_rejects_legacy_expansion_operations(self):
+        messages = [initialize(), {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+            "name": "context_folding", "arguments": {"scope": "default", "action": "resolve", "value": "text"}}}]
+        raw = self.succeeded(self.run_ctxf("mcp", data=b"".join(json.dumps(m).encode() + b"\n" for m in messages)))
+        replies = [json.loads(line) for line in raw.splitlines()]
+        self.assertEqual(replies[1]["error"]["code"], -32602)
 
     def test_server_scope_is_per_request_and_raw_read_accepts_peek(self):
         for command in ("rpc", "mcp"):
@@ -330,7 +396,7 @@ class CtxfProcessTests(unittest.TestCase):
             self.assertIn(b"each RPC/MCP request", rejected.stderr)
         folded = json.loads(self.succeeded(self.run_ctxf("--json", data=block().encode())))
         identifier = folded["references"][0]["id"]
-        self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--peek", "--id", identifier)), BODY.encode())
+        self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--peek", "--id", identifier, "--limit", "24000")), BODY.encode())
 
     def test_closed_downstream_pipe_exits_without_traceback_or_partial_error(self):
         for text in ("x", "long visible output\n" * 2000):

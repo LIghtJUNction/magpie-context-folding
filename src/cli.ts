@@ -9,35 +9,37 @@ import { writeReport } from './report.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
-read   --scope S --id ID [--layer ID] [--offset N] [--limit N] [--peek] [--json]
-paste  --scope S --id ID --path /new/file|- [--layer ID] [--offset N] [--limit N] [--peek]
-list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size|id|version]
-       [--order asc|desc] [--offset N] [--limit N]
+read   --scope S --id HASH [--start-line N --end-line N | --offset N] [--limit N] [--json]
+grep   --scope S --query TEXT [--id HASH] [--no-recursive] [--limit N] [--offset N] [--json]
+list   --scope S [--id HASH] [--recursive] [--depth N] [--limit N] [--offset N] [--json]
+meta   --scope S --id HASH [--offset N] [--limit N] [--json]
+paste  --scope S --id HASH --path /new/file|-
 status --scope S
 stats  [--scope S] [--json]
 report --output /absolute/new.html [--scope S]
-forget --scope S (requires restored entries and group manifests)
+forget --scope S [--force]
 config [--project-dir PATH]
 
-read writes the full exact text to stdout unless --limit selects a page; paste --path - does the same.
-Other archive commands and config write JSON.
-read/paste persist keep and restore all ancestor groups; --peek leaves folding unchanged.
-Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
-Folding is requested with @context-fold begin/end annotations, not a CLI command.
---json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
+read returns at most 1200 UTF-16 units by default; nested children stay as short references.
+Query each child explicitly. No query expands history or changes folding state.
+grep searches node views recursively and returns at most 10 short matching lines by default.
+list returns 10 metadata rows by default. meta returns sizes and direct child IDs.
+--json returns structured data. Diagnostics go to stderr; errors exit 1.`;
 
 const string = { type: 'string' } as const;
 const boolean = { type: 'boolean' } as const;
 const common = { json: boolean, help: boolean };
-const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean };
+const range = { scope: string, id: string, layer: string, offset: string, limit: string, peek: boolean, 'start-line': string, 'end-line': string };
 const options: Record<string, ParseArgsConfig['options']> = {
-  read: { ...common, ...range },
+  read: { ...common, ...range, full: boolean },
   paste: { ...common, ...range, path: string },
-  list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
+  list: { ...common, scope: string, id: string, depth: string, recursive: boolean, query: string, sort: string, order: string, offset: string, limit: string },
+  grep: { ...common, scope: string, id: string, query: string, recursive: boolean, 'no-recursive': boolean, 'case-sensitive': boolean, offset: string, limit: string },
+  meta: { ...common, scope: string, id: string, offset: string, limit: string },
   status: { ...common, scope: string },
   stats: { ...common, scope: string },
   report: { help: boolean, output: string, scope: string },
-  forget: { ...common, scope: string },
+  forget: { ...common, scope: string, force: boolean },
   config: { ...common, 'project-dir': string },
 };
 class UsageError extends Error {}
@@ -95,13 +97,14 @@ async function main(): Promise<void> {
   }
   const args: Record<string, unknown> = { action: command };
   for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || key === 'json' || key === 'help') continue;
-    if (['offset', 'limit', 'depth'].includes(key)) {
+    if (value === undefined || key === 'json' || key === 'help' || key === 'full') continue;
+    if (['offset', 'limit', 'depth', 'start-line', 'end-line'].includes(key)) {
       if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
         throw new UsageError('Expected a nonnegative integer for range/depth options');
       }
-      args[key] = Number(value);
-    } else args[key] = value;
+      args[key === 'start-line' ? 'startLine' : key === 'end-line' ? 'endLine' : key] = Number(value);
+    } else if (key === 'no-recursive') { if (value) args.recursive = false; }
+    else args[key === 'case-sensitive' ? 'caseSensitive' : key] = value;
   }
   const stdoutRead = command === 'read' || (command === 'paste' && values.path === '-');
   if (stdoutRead) {
@@ -109,18 +112,20 @@ async function main(): Promise<void> {
     delete request.path;
     const page = async (input: Record<string, unknown>) => {
       const result = JSON.parse(await execute(input)) as {
-        error?: string; id: string; text: string; nextOffset: number | null; sha256: string; totalChars: number;
+        error?: string; id: string; text: string; nextOffset: number | null; sha256: string; viewSha256: string; totalChars: number;
       };
       if (result.error) throw new UsageError(result.error);
       return result;
     };
-    const result = await page({ ...request, limit: args.limit ?? 24000 });
+    const full = values.full === true || (command === 'paste' && args.limit === undefined);
+    if (full && (args.startLine !== undefined || args.endLine !== undefined)) throw new UsageError('Full export cannot combine with a line range');
+    const result = await page({ ...request, limit: args.limit ?? (full ? 24000 : 1200) });
     request.id = result.id;
     const chunks = [result.text];
     let nextOffset = result.nextOffset;
-    while (args.limit === undefined && nextOffset !== null) {
+    while (full && args.limit === undefined && nextOffset !== null) {
       const next = await page({ ...request, peek: true, offset: nextOffset, limit: 24000 });
-      if (next.sha256 !== result.sha256 || next.totalChars !== result.totalChars) {
+      if (next.viewSha256 !== result.viewSha256 || next.totalChars !== result.totalChars) {
         throw new UsageError('Context archive changed during reading; retry request');
       }
       chunks.push(next.text);
@@ -132,9 +137,16 @@ async function main(): Promise<void> {
     else await Bun.write(Bun.stdout, result.text);
     return;
   }
-  const result = JSON.parse(await execute(args)) as { error?: string };
+  const result = JSON.parse(await execute(args)) as { error?: string; entries?: { id: string; key: string; label?: string; depth: number; chars: number; childCount: number }[];
+    matches?: { id: string; key: string; line: number; text: string }[]; nextOffset?: number | null };
   if (result.error) throw new UsageError(result.error);
-  console.log(JSON.stringify(result));
+  if (!values.json && result.entries && command === 'list') {
+    for (const item of result.entries) console.log('  '.repeat(item.depth) + item.key + ' ' + (item.label ?? '') + ' (' + item.chars + ' chars, ' + item.childCount + ' children)');
+    if (result.nextOffset !== null) console.log('nextOffset=' + result.nextOffset);
+  } else if (!values.json && result.matches && command === 'grep') {
+    for (const item of result.matches) console.log(item.key + ':' + item.line + ':' + item.text);
+    if (result.nextOffset !== null) console.log('nextOffset=' + result.nextOffset);
+  } else console.log(JSON.stringify(result));
   // @context-fold end main-5a1db74d0b
 }
 
