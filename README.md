@@ -70,7 +70,7 @@ bun /absolute/path/magpie-context-folding/src/cli.ts read \
 | `read --id HASH` | 有界查看；原归档继续保持折叠。 |
 | `read --offset N --limit N` | 只查看当前任务需要的一页。 |
 | `read --all` | 显式读取完整原文，仍保持折叠。 |
-| `read --restore` | 显式解除该原文及旧分组的折叠保护状态，让后续原始历史保持展开。 |
+| `read --restore` | 将原文标记为 `keep`，并解除旧祖先组的折叠，让后续原始历史保持展开。 |
 | `list --query TEXT` | 按需搜索归档，返回有界摘要。 |
 | `paste --path /new/file` | 完整导出并恢复，拒绝覆盖已有文件。 |
 | `status` / `stats` / `report` | 用户主动诊断时使用，不是每轮流程。 |
@@ -99,10 +99,9 @@ max_session_bytes = 67108864
 # shell_tool_name = "functions.exec"
 # 默认使用 Bun 与 CLI 的绝对路径；可改为已经安装且可运行的命令：
 # recovery_command = "magpie-context-folding"
-# gateway_timeout_ms = 3000
 ```
 
-对应插件 options 为 `delayRequests`、`minSavingsTokens`、`budgetHints`、`maxSessionBytes`、`contextWindowTokens`、`reserveOutputTokens`、`shellToolName`、`recoveryCommand`、`gatewayTimeoutMs`。配置的 shell 也必须出现在当前请求且未被 tool choice 禁用。`delay_requests=0` 允许首次看到完整闭合块时折叠，仍受收益与恢复条件约束。
+对应插件 options 为 `delayRequests`、`minSavingsTokens`、`budgetHints`、`maxSessionBytes`、`contextWindowTokens`、`reserveOutputTokens`、`shellToolName`、`recoveryCommand`。宿主请求钩子的超时需在 Magpie 插件 options 中设置 `gatewayTimeoutMs`；TOML 不会调整宿主的超时期限。配置的 shell 也必须出现在当前请求且未被 tool choice 禁用。`delay_requests=0` 允许首次看到完整闭合块时折叠，仍受收益与恢复条件约束。
 
 默认 Magpie 归档目录为 `$XDG_DATA_HOME/magpie-context-folding` 或 `~/.local/share/magpie-context-folding`，`MAGPIE_CONTEXT_FOLDING_STATE_DIR` 可覆盖。保存失败、容量不足或并发状态冲突时保留原文。
 
