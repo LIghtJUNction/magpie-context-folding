@@ -4,7 +4,7 @@ This is an asynchronous Node.js **bridge SDK**, not a native TypeScript folding 
 
 The client keeps one `python3 -m context_folding rpc --state PATH` subprocess alive, sends JSON Lines requests serially, drains stderr, and returns the `result` value. Application errors throw `ContextFoldingError` with the engine's `code`; malformed output and process failures close the bridge. Caller-owned archive state persists after disposal.
 
-This is the same engine used by `ctxf fold` and `ctxf mcp`. Set `statePath` to the CLI/server's archive file and use the same scope to recover their references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+This is the same engine used by `ctxf fold` and `ctxf rpc`. Set `statePath` to the CLI's archive file and use the same scope to recover their references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
 
 ```ts
 import { ContextFoldingClient } from '@context-folding/python-bridge';

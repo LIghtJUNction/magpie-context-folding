@@ -1,0 +1,724 @@
+{
+  "formatVersion": 1,
+  "measuredAt": "2026-10-28T02:11:01.626Z",
+  "baselineCommit": "8fd0bf70dc2729b3662e3112c522698af0b2847f",
+  "baselineSource": "Actual git show HEAD:src/* modules copied into an isolated directory and executed by Bun; no reimplemented baseline logic.",
+  "currentSource": {
+    "kind": "working-tree",
+    "sha256ByFile": {
+      "src/index.ts": "df5d3f60f2a5967052a950b32e90461c5717f0c74d7ed0b257f5796e8fee2e21",
+      "src/cli.ts": "76b4714179973ad56b5cd955840b83174795bb532fed7b916fe2156c39805806",
+      "src/protocol.ts": "5880bbc91a67c2e104d0015925465876830f9da09e4114d7f78bc20bfceca05d",
+      "src/context.hooks.ts": "0ca179f30a24f6bf85f8c32fc19431bfa0d9ebed0eebfed21ae1b5376d52308b",
+      "src/config.ts": "a7d594e169cc55a386a0e5f52ccabeb1081df77ea7447e740faab14bca3a4ec6",
+      "src/budget.ts": "9c9e2ce116458e28c38cc65e722a037ab4ac171e9004fd548df86b9ebe4008c1",
+      "src/guidance.ts": "7e43b1684f1f10d0b7cc194d3ccae23698a71852e4ad6962fdd9fe507eba6843",
+      "src/store.ts": "be588f3a1c6bccdfe6d434fb9da17cc924927261833a16ae3a13d4bdeb788d86",
+      "src/tool.ts": "9ca5d1d7c608aa618e49505ebae4da63d946ee9b7a3b996b5df7fa0b861a73fb"
+    }
+  },
+  "runtime": {
+    "bunVersion": "1.4.4",
+    "executable": "/workspace/scratch/33ef7dda146d/tools/mise-data/installs/bun/1.4.4/bin/bun"
+  },
+  "scope": "Synthetic request projection and CLI recovery only; no model or network calls.",
+  "method": {
+    "serialization": "JSON.stringify with UTF-8 byte length, no pretty printing",
+    "tokenEstimate": "ceil(full serialized request UTF-8 bytes / 4)",
+    "interpretation": "Approximate size, not model-tokenizer counts, cache-aware billing, task quality or measured end-to-end savings.",
+    "commonRequest": "Both variants receive exactly the same history and an existing exec_command declaration.",
+    "baselineTools": "The real baseline ContextFoldingPlugin tool definition is added as a Chat function declaration.",
+    "currentTools": "The real current ContextFoldingPlugin registers no model-facing tool.",
+    "guidanceAccounting": "Actual output minus output stripped by the actual version-specific budget/guidance helpers; includes wrappers, scope and recovery path.",
+    "immediateRun": "delayRequests=0 only isolates transformation cost. It is not a demonstration of default request timing.",
+    "defaultTiming": "Separate fresh archives use untouched delayRequests=1 defaults for first observation, identical retry and a later distinct request.",
+    "readAccounting": "Actual default CLI subprocess read stdout length and archive mark inspected afterward. CLI tool-call request costs are not included in the isolated hook table.",
+    "omittedSetup": "No manually pasted guidance added to baseline. This avoids inflating the baseline with optional setup text.",
+    "paths": "Current recovery hint includes this actual Bun/CLI location and temporary synthetic state path. Different installation path lengths change overhead.",
+    "currentRecheck": "Current implementation rerun from stored complete fixtures after the optional Chat budget-role fix. Original immutable baseline measurements retained; state path format and lengths kept identical."
+  },
+  "fixtures": [
+    {
+      "name": "short-demo",
+      "originalTextUtf16Units": 43,
+      "originalTextUtf8Bytes": 117,
+      "originalTextSha256": "b8d730a87fa2c3257270728d27d9f096128e183c29f66e67041bbb256fd95af3",
+      "commonOriginalRequest": {
+        "model": "synthetic",
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "description": "Run a shell command.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "cmd": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cmd"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "system",
+            "content": "Complete the task. Preserve required conclusions and exact evidence."
+          },
+          {
+            "role": "user",
+            "content": "Inspect the routing behavior and retain the result."
+          },
+          {
+            "role": "assistant",
+            "content": "<!-- @context-fold begin completed-work -->\n临时体验记录：下一次请求应把这段过程收成哈希引用；之后用 read 验证能否恢复原文。\n<!-- @context-fold end completed-work -->\nConclusion: timeout behavior is understood; continue implementation."
+          },
+          {
+            "role": "user",
+            "content": "Continue using the retained conclusion."
+          }
+        ]
+      }
+    },
+    {
+      "name": "long-finished-work",
+      "originalTextUtf16Units": 24599,
+      "originalTextUtf8Bytes": 24599,
+      "originalTextSha256": "51cf2654ee83c85b5f7746e1190aefe9abeb6460bf997f7952ceec506f4b4da4",
+      "commonOriginalRequest": {
+        "model": "synthetic",
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "description": "Run a shell command.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "cmd": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cmd"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "system",
+            "content": "Complete the task. Preserve required conclusions and exact evidence."
+          },
+          {
+            "role": "user",
+            "content": "Inspect the routing behavior and retain the result."
+          },
+          {
+            "role": "assistant",
+            "content": "<!-- @context-fold begin completed-work -->\nChecked route 000: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 001: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 002: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 003: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 004: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 005: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 006: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 007: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 008: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 009: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 010: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 011: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 012: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 013: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 014: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 015: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 016: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 017: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 018: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 019: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 020: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 021: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 022: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 023: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 024: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 025: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 026: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 027: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 028: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 029: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 030: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 031: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 032: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 033: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 034: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 035: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 036: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 037: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 038: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 039: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 040: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 041: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 042: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 043: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 044: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 045: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 046: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 047: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 048: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 049: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 050: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 051: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 052: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 053: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 054: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 055: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 056: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 057: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 058: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 059: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 060: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 061: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 062: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 063: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 064: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 065: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 066: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 067: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 068: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 069: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 070: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 071: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 072: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 073: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 074: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 075: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 076: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 077: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 078: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 079: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 080: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 081: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 082: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 083: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 084: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 085: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 086: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 087: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 088: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 089: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 090: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 091: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 092: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 093: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 094: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 095: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 096: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 097: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 098: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 099: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 100: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 101: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 102: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 103: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 104: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 105: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 106: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 107: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 108: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 109: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 110: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 111: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 112: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 113: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 114: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 115: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 116: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 117: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 118: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 119: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 120: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 121: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 122: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 123: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 124: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 125: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 126: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 127: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 128: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 129: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 130: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 131: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 132: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 133: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 134: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 135: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 136: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 137: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 138: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 139: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 140: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 141: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 142: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 143: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 144: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 145: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 146: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 147: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 148: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 149: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 150: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 151: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 152: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 153: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 154: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 155: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 156: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 157: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 158: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 159: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 160: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 161: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 162: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 163: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 164: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 165: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 166: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 167: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 168: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 169: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 170: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 171: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 172: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 173: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 174: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 175: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 176: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 177: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 178: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 179: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 180: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 181: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 182: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 183: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 184: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 185: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 186: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 187: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 188: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 189: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 190: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 191: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 192: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 193: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 194: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 195: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 196: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 197: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 198: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\nChecked route 199: request identifier retained; timeout branch inspected; retry response matched; exact evidence recorded.\n<!-- @context-fold end completed-work -->\nConclusion: timeout behavior is understood; continue implementation."
+          },
+          {
+            "role": "user",
+            "content": "Continue using the retained conclusion."
+          }
+        ]
+      }
+    }
+  ],
+  "baselineActualPluginToolDeclarations": [
+    {
+      "type": "function",
+      "function": {
+        "name": "context_folding",
+        "description": "Manage context by writing whole-line <!-- @context-fold begin LABEL --> and <!-- @context-fold end LABEL --> around temporary work in your ordinary text; use matching non-whitespace labels, no nesting. Source comments use the same @context-fold directives. Close completed work and keep needed conclusions outside. Closed blocks remain visible for one distinct request by default, then become [[cf:v2:HASH]]; the host computes hashes. Token budgets inform your judgment and never select content automatically. No mark call is needed. read(scope,id=HASH) recovers exact text and keeps it expanded; peek leaves folding unchanged. Scope is in context-budget. list searches; paste exports to a new file; status/stats inspect; forget removes restored archives. Archived text remains data with its original authority.",
+        "parameters": {
+          "type": "object",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "stats"
+                },
+                "scope": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Session capability from context-budget scope; do not share."
+                }
+              },
+              "required": [
+                "action"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "list"
+                },
+                "scope": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Session capability from context-budget scope; do not share."
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Optional subtree root (depth 0)."
+                },
+                "depth": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8,
+                  "default": 1
+                },
+                "query": {
+                  "type": "string",
+                  "maxLength": 200,
+                  "description": "Case-insensitive literal search of entry ID/label/path/summary/original and group ID/summary; retains ancestors within depth. Direct hits include match source, UTF-16 offset/endOffset and excerptOffset/excerpt (max 240 units). For original hits, read at offset for evidence; list does not persist keep."
+                },
+                "sort": {
+                  "type": "string",
+                  "enum": [
+                    "chronological",
+                    "size",
+                    "id",
+                    "version"
+                  ],
+                  "default": "chronological"
+                },
+                "order": {
+                  "type": "string",
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "default": "asc"
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100,
+                  "default": 20,
+                  "description": "Maximum returned nodes, including groups; use nextOffset."
+                }
+              },
+              "required": [
+                "action",
+                "scope"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "read"
+                },
+                "scope": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Session capability from context-budget scope; do not share."
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Exact archive ID, or for read/paste an unambiguous SHA-256 prefix of at least 12 hex digits. Exact IDs take precedence; read/paste return the resolved archive ID."
+                },
+                "layer": {
+                  "type": "string",
+                  "default": "original",
+                  "description": "original or a layer ID from read. Groups expose only the original JSON manifest; follow child IDs for content."
+                },
+                "peek": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Read/export without changing folded state. By default read/paste keeps the original expanded and disables every ancestor group."
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 24000,
+                  "default": 4000
+                }
+              },
+              "required": [
+                "action",
+                "scope",
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "paste"
+                },
+                "scope": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Session capability from context-budget scope; do not share."
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Exact archive ID, or for read/paste an unambiguous SHA-256 prefix of at least 12 hex digits. Exact IDs take precedence; read/paste return the resolved archive ID."
+                },
+                "layer": {
+                  "type": "string",
+                  "default": "original",
+                  "description": "original or a layer ID from read. Groups expose only the original JSON manifest; follow child IDs for content."
+                },
+                "peek": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "Read/export without changing folded state. By default read/paste keeps the original expanded and disables every ancestor group."
+                },
+                "offset": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 24000
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Absolute path to a new file; parent must exist. Omit offset/limit for full text."
+                }
+              },
+              "required": [
+                "action",
+                "scope",
+                "id",
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "status"
+                },
+                "scope": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Session capability from context-budget scope; do not share."
+                }
+              },
+              "required": [
+                "action",
+                "scope"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "forget"
+                },
+                "scope": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$",
+                  "description": "Session capability from context-budget scope; do not share."
+                }
+              },
+              "required": [
+                "action",
+                "scope"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "fixture": "short-demo",
+      "isolatedTransformOptions": {
+        "delayRequests": 0
+      },
+      "baseline": {
+        "commonInputJsonBytes": 810,
+        "commonInputEstimatedTokens": 203,
+        "actualInputJsonBytes": 5601,
+        "actualInputEstimatedTokens": 1401,
+        "sentJsonBytes": 5731,
+        "sentEstimatedTokens": 1433,
+        "pluginToolDeclarationCount": 1,
+        "pluginToolDeclarationJsonBytes": 4790,
+        "pluginToolSchemaIncrementBytes": 4791,
+        "pluginToolSchemaIncrementEstimatedTokens": 1198,
+        "projectedWithoutPluginGuidanceJsonBytes": 5506,
+        "projectedWithoutPluginGuidanceEstimatedTokens": 1377,
+        "bodyReductionBytes": 95,
+        "bodyReductionEstimatedTokens": 24,
+        "guidanceIncrementBytes": 225,
+        "guidanceIncrementEstimatedTokens": 56,
+        "completeHookNetSavingsBytes": -130,
+        "completeHookNetSavingsEstimatedTokens": -32,
+        "folded": true,
+        "emittedRequestSha256": "e3eafd8902f1bc1dd5678017f4c8755e664800683852ed8cf95d0b9f237a16e9",
+        "pluginSystemBlocks": [
+          "<context-budget used_estimate=1433 capacity=unknown output_reserved=0 available_estimate=unknown basis=json-utf8-bytes/4 scope=7d0082476fa638c1e9b02e5df9798eb56d0a00b4ba29acf42e572a6319cf790f />"
+        ],
+        "decision": {
+          "reason": "annotated-regions-folded",
+          "cycle": 0,
+          "waiting": 0,
+          "foldedRegions": 1,
+          "replayedReferences": 0
+        },
+        "archiveEntries": 1,
+        "defaultRead": {
+          "performed": true,
+          "exitCode": 0,
+          "archivedOriginalUtf16Units": 43,
+          "returnedUtf16Units": 43,
+          "returnedUtf8Bytes": 117,
+          "returnedRawEstimatedTokens": 30,
+          "returnedWholeOriginal": true,
+          "stdoutIsExactOriginalPrefix": true,
+          "stderr": "",
+          "dispositionBefore": "unmarked",
+          "dispositionAfter": "keep",
+          "foldedStateRetained": false,
+          "metadataStateDirectorySelectedBy": "MAGPIE_CONTEXT_FOLDING_STATE_DIR in each actual CLI subprocess"
+        }
+      },
+      "current": {
+        "commonInputJsonBytes": 810,
+        "commonInputEstimatedTokens": 203,
+        "actualInputJsonBytes": 810,
+        "actualInputEstimatedTokens": 203,
+        "sentJsonBytes": 1107,
+        "sentEstimatedTokens": 277,
+        "pluginToolDeclarationCount": 0,
+        "pluginToolDeclarationJsonBytes": 0,
+        "pluginToolSchemaIncrementBytes": 0,
+        "pluginToolSchemaIncrementEstimatedTokens": 0,
+        "projectedWithoutPluginGuidanceJsonBytes": 810,
+        "projectedWithoutPluginGuidanceEstimatedTokens": 203,
+        "bodyReductionBytes": 0,
+        "bodyReductionEstimatedTokens": 0,
+        "guidanceIncrementBytes": 297,
+        "guidanceIncrementEstimatedTokens": 74,
+        "completeHookNetSavingsBytes": -297,
+        "completeHookNetSavingsEstimatedTokens": -74,
+        "folded": false,
+        "emittedRequestSha256": "ba620bab8817f7276306ea7e9e26616233aee9e931350f6c584e70711deac99a",
+        "pluginSystemBlocks": [
+          "<context-folding>Mark only long finished work with whole-line <!-- @context-fold begin L --> / <!-- @context-fold end L -->; keep conclusions and constraints outside, no nesting. Folding is automatic. No status polling, demos or verification reads.</context-folding>"
+        ],
+        "decision": {
+          "reason": "insufficient-net-savings",
+          "cycle": 0,
+          "waiting": 0,
+          "skipped": 1,
+          "foldedRegions": 0,
+          "replayedReferences": 0,
+          "estimatedNetSavings": -74
+        },
+        "archiveEntries": 0,
+        "defaultRead": {
+          "performed": false,
+          "reason": "no-folded-archive"
+        }
+      },
+      "crossVersionComponents": {
+        "toolSchemaRemovedBytes": 4791,
+        "toolSchemaRemovedEstimatedTokens": 1198,
+        "extraBodyReductionBytes": -95,
+        "extraBodyReductionEstimatedTokens": -24,
+        "guidanceOverheadReductionBytes": -72,
+        "guidanceOverheadReductionEstimatedTokens": -18,
+        "completeSentRequestReductionBytes": 4624,
+        "completeSentRequestReductionEstimatedTokens": 1156
+      },
+      "defaultDelayTiming": {
+        "baseline": [
+          {
+            "stage": "first-observation",
+            "folded": false,
+            "actualInputJsonBytes": 5601,
+            "sentJsonBytes": 5826,
+            "actualInputEstimatedTokens": 1401,
+            "sentEstimatedTokens": 1457,
+            "guidanceIncrementBytes": 225,
+            "completeHookNetSavingsEstimatedTokens": -56
+          },
+          {
+            "stage": "identical-retry",
+            "folded": false,
+            "actualInputJsonBytes": 5601,
+            "sentJsonBytes": 5826,
+            "actualInputEstimatedTokens": 1401,
+            "sentEstimatedTokens": 1457,
+            "guidanceIncrementBytes": 225,
+            "completeHookNetSavingsEstimatedTokens": -56
+          },
+          {
+            "stage": "next-distinct-request",
+            "folded": true,
+            "actualInputJsonBytes": 5654,
+            "sentJsonBytes": 5784,
+            "actualInputEstimatedTokens": 1414,
+            "sentEstimatedTokens": 1446,
+            "guidanceIncrementBytes": 225,
+            "completeHookNetSavingsEstimatedTokens": -32
+          }
+        ],
+        "current": [
+          {
+            "stage": "first-observation",
+            "folded": false,
+            "actualInputJsonBytes": 810,
+            "sentJsonBytes": 1107,
+            "actualInputEstimatedTokens": 203,
+            "sentEstimatedTokens": 277,
+            "guidanceIncrementBytes": 297,
+            "completeHookNetSavingsEstimatedTokens": -74
+          },
+          {
+            "stage": "identical-retry",
+            "folded": false,
+            "actualInputJsonBytes": 810,
+            "sentJsonBytes": 1107,
+            "actualInputEstimatedTokens": 203,
+            "sentEstimatedTokens": 277,
+            "guidanceIncrementBytes": 297,
+            "completeHookNetSavingsEstimatedTokens": -74
+          },
+          {
+            "stage": "next-distinct-request",
+            "folded": false,
+            "actualInputJsonBytes": 863,
+            "sentJsonBytes": 1160,
+            "actualInputEstimatedTokens": 216,
+            "sentEstimatedTokens": 290,
+            "guidanceIncrementBytes": 297,
+            "completeHookNetSavingsEstimatedTokens": -74
+          }
+        ]
+      }
+    },
+    {
+      "fixture": "long-finished-work",
+      "isolatedTransformOptions": {
+        "delayRequests": 0
+      },
+      "baseline": {
+        "commonInputJsonBytes": 25491,
+        "commonInputEstimatedTokens": 6373,
+        "actualInputJsonBytes": 30282,
+        "actualInputEstimatedTokens": 7571,
+        "sentJsonBytes": 5731,
+        "sentEstimatedTokens": 1433,
+        "pluginToolDeclarationCount": 1,
+        "pluginToolDeclarationJsonBytes": 4790,
+        "pluginToolSchemaIncrementBytes": 4791,
+        "pluginToolSchemaIncrementEstimatedTokens": 1198,
+        "projectedWithoutPluginGuidanceJsonBytes": 5506,
+        "projectedWithoutPluginGuidanceEstimatedTokens": 1377,
+        "bodyReductionBytes": 24776,
+        "bodyReductionEstimatedTokens": 6194,
+        "guidanceIncrementBytes": 225,
+        "guidanceIncrementEstimatedTokens": 56,
+        "completeHookNetSavingsBytes": 24551,
+        "completeHookNetSavingsEstimatedTokens": 6138,
+        "folded": true,
+        "emittedRequestSha256": "cf9e578d151f136d6634cda4d4b63464f5db8f7f79f62e31f799443744817e35",
+        "pluginSystemBlocks": [
+          "<context-budget used_estimate=1433 capacity=unknown output_reserved=0 available_estimate=unknown basis=json-utf8-bytes/4 scope=66044c7da6fefea8d3adafc0f57d91b750ef5836f14575b71c5e1f2ea2e7e906 />"
+        ],
+        "decision": {
+          "reason": "annotated-regions-folded",
+          "cycle": 0,
+          "waiting": 0,
+          "foldedRegions": 1,
+          "replayedReferences": 0
+        },
+        "archiveEntries": 1,
+        "defaultRead": {
+          "performed": true,
+          "exitCode": 0,
+          "archivedOriginalUtf16Units": 24599,
+          "returnedUtf16Units": 24599,
+          "returnedUtf8Bytes": 24599,
+          "returnedRawEstimatedTokens": 6150,
+          "returnedWholeOriginal": true,
+          "stdoutIsExactOriginalPrefix": true,
+          "stderr": "",
+          "dispositionBefore": "unmarked",
+          "dispositionAfter": "keep",
+          "foldedStateRetained": false,
+          "metadataStateDirectorySelectedBy": "MAGPIE_CONTEXT_FOLDING_STATE_DIR in each actual CLI subprocess"
+        }
+      },
+      "current": {
+        "commonInputJsonBytes": 25491,
+        "commonInputEstimatedTokens": 6373,
+        "actualInputJsonBytes": 25491,
+        "actualInputEstimatedTokens": 6373,
+        "sentJsonBytes": 1391,
+        "sentEstimatedTokens": 348,
+        "pluginToolDeclarationCount": 0,
+        "pluginToolDeclarationJsonBytes": 0,
+        "pluginToolSchemaIncrementBytes": 0,
+        "pluginToolSchemaIncrementEstimatedTokens": 0,
+        "projectedWithoutPluginGuidanceJsonBytes": 715,
+        "projectedWithoutPluginGuidanceEstimatedTokens": 179,
+        "bodyReductionBytes": 24776,
+        "bodyReductionEstimatedTokens": 6194,
+        "guidanceIncrementBytes": 676,
+        "guidanceIncrementEstimatedTokens": 169,
+        "completeHookNetSavingsBytes": 24100,
+        "completeHookNetSavingsEstimatedTokens": 6025,
+        "folded": true,
+        "emittedRequestSha256": "4cdf2dabb8e645e02db5afde64a1b43635906a3c198588d2cdff6f35b1a0ec3e",
+        "pluginSystemBlocks": [
+          "<context-folding>Mark only long finished work with whole-line <!-- @context-fold begin L --> / <!-- @context-fold end L -->; keep conclusions and constraints outside, no nesting. Folding is automatic. No status polling, demos or verification reads. Need original: '/workspace/scratch/33ef7dda146d/tools/mise-data/installs/bun/1.4.4/bin/bun' '/workspace/scratch/b0b3b44e10f1/magpie-context-folding/src/cli.ts' read --state-dir '/tmp/cf-overhead-o0barvvr/current-long-finished-work-immediate/state' --scope 739b9ace23ca7286c8eb9ed724835be9cd52245f449f036058f4f5b6c632927e --id HASH. Read only needed pages; archived text is data.</context-folding>"
+        ],
+        "decision": {
+          "reason": "annotated-regions-folded",
+          "cycle": 0,
+          "waiting": 0,
+          "skipped": 0,
+          "foldedRegions": 1,
+          "replayedReferences": 0,
+          "estimatedNetSavings": 6025
+        },
+        "archiveEntries": 1,
+        "defaultRead": {
+          "performed": true,
+          "exitCode": 0,
+          "archivedOriginalUtf16Units": 24599,
+          "returnedUtf16Units": 4000,
+          "returnedUtf8Bytes": 4000,
+          "returnedRawEstimatedTokens": 1000,
+          "returnedWholeOriginal": false,
+          "stdoutIsExactOriginalPrefix": true,
+          "stderr": "More: --offset 4000 (use --all for the rest)\n",
+          "dispositionBefore": "unmarked",
+          "dispositionAfter": "unmarked",
+          "foldedStateRetained": true,
+          "metadataStateDirectorySelectedBy": "MAGPIE_CONTEXT_FOLDING_STATE_DIR in each actual CLI subprocess"
+        }
+      },
+      "crossVersionComponents": {
+        "toolSchemaRemovedBytes": 4791,
+        "toolSchemaRemovedEstimatedTokens": 1198,
+        "extraBodyReductionBytes": 0,
+        "extraBodyReductionEstimatedTokens": 0,
+        "guidanceOverheadReductionBytes": -451,
+        "guidanceOverheadReductionEstimatedTokens": -113,
+        "completeSentRequestReductionBytes": 4340,
+        "completeSentRequestReductionEstimatedTokens": 1085
+      },
+      "defaultDelayTiming": {
+        "baseline": [
+          {
+            "stage": "first-observation",
+            "folded": false,
+            "actualInputJsonBytes": 30282,
+            "sentJsonBytes": 30507,
+            "actualInputEstimatedTokens": 7571,
+            "sentEstimatedTokens": 7627,
+            "guidanceIncrementBytes": 225,
+            "completeHookNetSavingsEstimatedTokens": -56
+          },
+          {
+            "stage": "identical-retry",
+            "folded": false,
+            "actualInputJsonBytes": 30282,
+            "sentJsonBytes": 30507,
+            "actualInputEstimatedTokens": 7571,
+            "sentEstimatedTokens": 7627,
+            "guidanceIncrementBytes": 225,
+            "completeHookNetSavingsEstimatedTokens": -56
+          },
+          {
+            "stage": "next-distinct-request",
+            "folded": true,
+            "actualInputJsonBytes": 30335,
+            "sentJsonBytes": 5784,
+            "actualInputEstimatedTokens": 7584,
+            "sentEstimatedTokens": 1446,
+            "guidanceIncrementBytes": 225,
+            "completeHookNetSavingsEstimatedTokens": 6138
+          }
+        ],
+        "current": [
+          {
+            "stage": "first-observation",
+            "folded": false,
+            "actualInputJsonBytes": 25491,
+            "sentJsonBytes": 25788,
+            "actualInputEstimatedTokens": 6373,
+            "sentEstimatedTokens": 6447,
+            "guidanceIncrementBytes": 297,
+            "completeHookNetSavingsEstimatedTokens": -74
+          },
+          {
+            "stage": "identical-retry",
+            "folded": false,
+            "actualInputJsonBytes": 25491,
+            "sentJsonBytes": 25788,
+            "actualInputEstimatedTokens": 6373,
+            "sentEstimatedTokens": 6447,
+            "guidanceIncrementBytes": 297,
+            "completeHookNetSavingsEstimatedTokens": -74
+          },
+          {
+            "stage": "next-distinct-request",
+            "folded": true,
+            "actualInputJsonBytes": 25544,
+            "sentJsonBytes": 1442,
+            "actualInputEstimatedTokens": 6386,
+            "sentEstimatedTokens": 361,
+            "guidanceIncrementBytes": 674,
+            "completeHookNetSavingsEstimatedTokens": 6025
+          }
+        ]
+      }
+    }
+  ],
+  "limits": [
+    "The short revised request still pays the fixed instructional hint; skipping a short fold does not make the plugin free.",
+    "Tool-schema removal and text folding are reported separately. A schema reduction is not evidence of better selection or task quality.",
+    "The long fixture is synthetic; these results do not establish real-world usefulness, reasoning quality, wall-clock savings or billed savings.",
+    "The model might never need to read an archive. This test intentionally reads once to show default CLI behavior, not a recommended validation workflow."
+  ],
+  "temporaryBaselineRemoved": true,
+  "baselineMeasuredAt": "2026-10-28T02:08:52.037Z",
+  "currentRemeasuredAt": "2026-10-28T02:11:01.626Z",
+  "temporaryRecheckRemoved": true
+}

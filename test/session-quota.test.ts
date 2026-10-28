@@ -8,11 +8,11 @@ import { onRequest } from '../src/context.hooks.js';
 import { Store, digest } from '../src/store.js';
 import { execute } from '../src/tool.js';
 
-const text = 'Finished work. '.repeat(30);
+const text = 'Finished work. '.repeat(100);
 const region = (label: string, content: string) => `@context-fold begin ${label}\n${content}\n@context-fold end ${label}`;
 const body = {
   model: 'synthetic',
-  tools: [{ type: 'function', function: { name: 'context_folding' } }],
+  tools: [{ type: 'function', function: { name: 'exec_command' } }],
   messages: [{ role: 'assistant', content: region('completed', text) }, { role: 'user', content: 'Continue.' }],
 };
 const id = digest(text);
@@ -38,7 +38,7 @@ async function fixture(run: (f: {
     const scope = await store.scopeFor(JSON.stringify([context.session, '', '', directory]));
     await run({
       directory, scope,
-      configure: (maxSessionBytes, input = body) => onRequest(input, { ...context, options: { maxSessionBytes, delayRequests: 0 } }),
+      configure: (maxSessionBytes, input = body) => onRequest(input, { ...context, options: { maxSessionBytes, delayRequests: 0, minSavingsTokens: 0, recoveryCommand: 'magpie-context-folding' } }),
       stored: () => {
         const database = new Database(join(directory, 'state.sqlite'), { readonly: true });
         try {

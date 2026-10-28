@@ -23,27 +23,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Resolve a callable recovery entry point, never a mention in descriptions or schemas. */
-export function recoveryToolName(body: Record<string, unknown>, protocol: Protocol, configured?: string): string | undefined {
-  // @context-fold begin recoveryToolName-143a590025
+/** CLI recovery needs a callable local shell, not another registered model tool. */
+export function recoveryShellName(body: Record<string, unknown>, protocol: Protocol, configured?: string): string | undefined {
   const config = protocol === "gemini" && isRecord(body.config) ? body.config : {};
   const toolConfig = body.toolConfig ?? body.tool_config ?? config.toolConfig ?? config.tool_config;
   const calling = isRecord(toolConfig) ? toolConfig.functionCallingConfig ?? toolConfig.function_calling_config : undefined;
   const choice = body.tool_choice;
   if (protocol === "gemini" ? isRecord(calling) && calling.mode === "NONE"
     : choice === "none" || (isRecord(choice) && choice.type === "none")) return;
-  // An explicit name attests to a verified wrapper (for example code mode).
-  // Its inner tool name need not match the wrapper selected on the wire.
-  if (configured) return configured;
-
   const functionName = (tool: unknown): string | undefined => {
     if (!isRecord(tool)) return;
     let declaration = tool;
     if (protocol === "chat") {
       if (tool.type !== "function" || !isRecord(tool.function)) return;
       declaration = tool.function;
-    } else if (protocol === "responses" && tool.type !== "function") return;
-    else if (protocol === "anthropic" && tool.type !== undefined && tool.type !== "custom") return;
+    } else if (protocol === "responses" && tool.type !== "function" && tool.type !== "custom") return;
+    else if (protocol === "anthropic" && tool.type !== undefined && tool.type !== "custom"
+      && !(typeof tool.type === "string" && /^bash_\d{8}$/.test(tool.type))) return;
     return typeof declaration.name === "string" ? declaration.name : undefined;
   };
   const tools = body.tools ?? config.tools;
@@ -70,9 +66,12 @@ export function recoveryToolName(body: Record<string, unknown>, protocol: Protoc
     return isRecord(subset) && (subset.mode === "auto" || subset.mode === "required")
       && Array.isArray(subset.tools) && subset.tools.some(tool => functionName(tool) === name);
   };
-  return names.find((name): name is string => (name === "context_folding"
-    || name === "mcp__magpie__magpie_context_folding_context_folding") && allowed(name));
-  // @context-fold end recoveryToolName-143a590025
+  const shells = new Set(['exec_command', 'shell_command', 'bash', 'Bash', 'shell', 'run_shell_command',
+    'functions.exec_command', 'functions.shell_command']);
+  // A configured wrapper must still be declared and permitted by this request.
+  // Descriptions, argument properties, and old context_folding tools are not shells.
+  return names.find((name): name is string => typeof name === 'string'
+    && (configured ? name === configured : shells.has(name)) && allowed(name));
 }
 
 function textRole(value: unknown): Role | undefined {

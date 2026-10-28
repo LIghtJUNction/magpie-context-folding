@@ -85,6 +85,43 @@ test('global statusline is explicitly cumulative and never impersonates the newe
   });
 });
 
+test('visibility commands honor the explicit archive directory across shell environments', async () => {
+  await fixture(async ({ context, scope, directory }) => {
+    const ctx = { ...context, options: { delayRequests: 0 } };
+    const output = await onRequest(bodyFor('chat'), ctx);
+    await onResponse({}, { ...ctx, success: true, request: output });
+    const archive = join(directory, 'state');
+    const unrelated = join(directory, 'other-shell-state');
+    process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR = unrelated;
+    const line = await invoke(['statusline', '--scope', scope, '--state-dir', archive, '--json']);
+    assert.equal(line.code, 0, line.err);
+    assert.equal(JSON.parse(line.out).request.status, 'confirmed');
+    const sessions = await invoke(['sessions', '--state-dir', archive, '--json']);
+    assert.equal(sessions.code, 0, sessions.err);
+    assert.equal(JSON.parse(sessions.out).sessions[0].scope, scope);
+    const hook = await invoke(['hook', '--state-dir', archive],
+      JSON.stringify({ session_id: context.session, hook_event_name: 'Stop' }));
+    assert.equal(hook.code, 0, hook.err);
+    assert.match(JSON.parse(hook.out).systemMessage, /响应已匹配/);
+    await assert.rejects(stat(unrelated), { code: 'ENOENT' });
+  });
+});
+
+test('insufficient net savings stays a recognized observation and preserves the original', async () => {
+  await fixture(async ({ context, scope }) => {
+    const original = '<!-- @context-fold begin short -->\nsmall completed note\n<!-- @context-fold end short -->';
+    const input = bodyFor('chat', original);
+    const projected = await onRequest(input, { ...context, options: { delayRequests: 0 } });
+    assert.ok(JSON.stringify(projected).includes('small completed note'));
+    const status = await invoke(['statusline', '--scope', scope, '--json']);
+    assert.equal(status.code, 0, status.err);
+    const request = JSON.parse(status.out).request;
+    assert.equal(request.reason, 'insufficient-net-savings');
+    assert.equal(request.foldedRegions, 0);
+    assert.equal(request.waiting, 0);
+  });
+});
+
 test('client session matching is exact and refuses unknown or ambiguous bindings', async () => {
   await fixture(async ({ context, store, scope }) => {
     await onRequest(bodyFor('chat'), context);
@@ -116,7 +153,7 @@ test('current request counts do not reuse permanent archives and replay reports 
     assert.equal(waiting.foldedRegions, 0);
     assert.equal(waiting.waiting, 1);
     assert.equal(waiting.reason, 'annotation-grace-period');
-    assert.ok(waiting.estimatedTokenDelta < 0, 'the full request includes the budget overhead');
+    assert.ok(waiting.estimatedTokenDelta < 0, 'the full request includes the guidance overhead');
     const output = await onRequest(progress(input, 'chat'), context);
     await onResponse({}, { ...context, success: true, request: output });
     const replay = await onRequest(output, context);

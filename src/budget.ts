@@ -19,7 +19,7 @@ export function withoutBudget(body: Body, protocol: Protocol): Body {
   // @context-fold begin withoutBudget-7b4cee3f11
   const result = structuredClone(body);
   if (protocol === 'chat' && Array.isArray(result.messages)) {
-    result.messages = result.messages.filter(item => !(record(item) && item.role === 'system' && isBudget(item.content)));
+    result.messages = result.messages.filter(item => !(record(item) && ['system', 'developer'].includes(String(item.role)) && isBudget(item.content)));
   } else if (protocol === 'responses' && typeof result.instructions === 'string') {
     const instructions = stripBudgetText(result.instructions);
     if (instructions) result.instructions = instructions;
@@ -52,7 +52,11 @@ function addSystemBudget(body: Body, text: string, protocol: Protocol): Body {
   const result = structuredClone(body);
   if (protocol === 'chat') {
     if (!Array.isArray(result.messages)) return result;
-    result.messages.unshift({ role: 'system', content: text });
+    let index = 0;
+    while (index < result.messages.length && record(result.messages[index])
+      && ['system', 'developer'].includes(String((result.messages[index] as Body).role))) index++;
+    const role = result.messages.slice(0, index).some(item => record(item) && item.role === 'developer') ? 'developer' : 'system';
+    result.messages.splice(index, 0, { role, content: text });
   } else if (protocol === 'responses') {
     if (result.instructions !== undefined && typeof result.instructions !== 'string') return result;
     result.instructions = result.instructions ? `${result.instructions}\n\n${text}` : text;

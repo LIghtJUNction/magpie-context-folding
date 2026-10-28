@@ -1,4 +1,4 @@
-"""Shared, explicit-annotation settings. No compression strategies or cost gate."""
+"""Shared annotation settings, including Magpie request-only CLI and savings options."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -17,7 +17,7 @@ MAX_CONFIG_BYTES = 1024 * 1024
 SAFE_INTEGER = 9007199254740991
 DEFAULTS = {
     "folding": {"enabled": True, "max_session_bytes": 67108864, "delay_requests": 1,
-                "reserve_output_tokens": 0},
+                "reserve_output_tokens": 0, "min_savings_tokens": 256, "budget_hints": False},
     "annotations": {"enabled": True, "default_fold": True, "keep": []},
     "gc": {"enabled": False, "strength": "conservative", "idle_seconds": 2592000,
            "max_uses": 2, "retention_seconds": 2592000, "auto_purge": False},
@@ -25,10 +25,11 @@ DEFAULTS = {
 }
 _KEYS = {**{section: set(values) for section, values in DEFAULTS.items()},
          "folding": set(DEFAULTS["folding"]) | {"context_window_tokens"},
-         "magpie": {"recovery_tool_name", "gateway_timeout_ms"}}
+         "magpie": {"shell_tool_name", "recovery_command", "gateway_timeout_ms"}}
 _RANGES = {
     "folding.max_session_bytes": (1, 67108864, True),
     "folding.delay_requests": (0, SAFE_INTEGER, True),
+    "folding.min_savings_tokens": (0, SAFE_INTEGER, True),
     "folding.context_window_tokens": (1, SAFE_INTEGER, True),
     "folding.reserve_output_tokens": (0, SAFE_INTEGER, True),
     "gc.idle_seconds": (0, 315576000, False),
@@ -132,9 +133,11 @@ def _validate(data: Any, source: str | Path) -> None:
             name = f"{section}.{key}"
             if (section == "folding" and key in _REMOVED) or name == "magpie.accounting":
                 _fail(source, name, "removed: delete strategy/automatic-folding settings; use explicit fold annotations")
+            if name == "magpie.recovery_tool_name":
+                _fail(source, name, "removed: MCP recovery was removed; use magpie.shell_tool_name for a callable shell wrapper")
             if key not in _KEYS[section]:
                 _fail(source, name, "unknown key")
-            if key in {"enabled", "default_fold", "auto_purge"}:
+            if key in {"enabled", "default_fold", "auto_purge", "budget_hints"}:
                 valid, expected = type(value) is bool, "expected a boolean"
             elif name == "annotations.keep":
                 valid = isinstance(value, list) and all(isinstance(item, str) and item and "\0" not in item for item in value)
@@ -142,9 +145,12 @@ def _validate(data: Any, source: str | Path) -> None:
             elif name == "gc.strength":
                 valid = isinstance(value, str) and value in {"off", "conservative", "balanced", "aggressive"}
                 expected = "expected off, conservative, balanced, or aggressive"
-            elif name == "magpie.recovery_tool_name":
+            elif name == "magpie.shell_tool_name":
                 valid = isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", value) is not None
-                expected = "expected a recovery tool identifier"
+                expected = "expected a shell tool identifier"
+            elif name == "magpie.recovery_command":
+                valid = isinstance(value, str) and bool(value.strip()) and len(value) <= 4096 and not any(char in value for char in "\0\r\n")
+                expected = "expected a nonempty single-line CLI command of at most 4096 characters"
             else:
                 low, high, integer = _RANGES[name]
                 valid = _number(value, low, high, integer=integer)
