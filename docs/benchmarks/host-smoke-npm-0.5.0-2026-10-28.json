@@ -1,0 +1,46 @@
+{
+  "result": "passed",
+  "host": "real Magpie and Bun via bubblewrap",
+  "provider": "local synthetic HTTP fixture; no external model was called",
+  "checks": [
+    "local CLI recovery without MCP",
+    "open annotations stay visible",
+    "first closed observation and identical retries stay visible",
+    "distinct requests fold explicit annotations",
+    "short SHA-256 references retain marker lines",
+    "system/user/unmarked text and tool calls/results remain intact",
+    "one concise system guidance; no context budgets",
+    "projection replay does not duplicate guidance or archives",
+    "paginated byte-for-byte Unicode/CRLF recovery",
+    "exclusive paste without text echo",
+    "unknown scope refused",
+    "explicit --restore persistently expands all slices",
+    "session isolation",
+    "source comments share the protocol",
+    "fresh Read occurrence gets its own grace period",
+    "changed source gets a new hash while old snapshots recover",
+    "source files remain unchanged by folding",
+    "unmarked source stays visible"
+  ],
+  "upstreamRequests": 18,
+  "originalUtf8Bytes": 46278,
+  "firstRequestEstimate": {
+    "usedEstimate": 14377,
+    "basis": "json-utf8-bytes/4"
+  },
+  "foldedRequestEstimate": {
+    "usedEstimate": 2624,
+    "basis": "json-utf8-bytes/4"
+  },
+  "responseHooks": {
+    "successfulHookRequests": 18,
+    "unverifiedHookRequests": 0,
+    "failedHookRequests": 0
+  },
+  "package": "magpie-context-folding@0.5.0",
+  "packageIntegrity": "sha512-fgL1gijaNu5BrAA145bkrDssiOj6rkCjuCOSi/P6BOKRBH3J+4D8ZAStTbosmrftfNFGxbe1ctlLkI9vpdYK1Q==",
+  "magpieVersion": "0.1.1850",
+  "bunVersion": "1.4.0",
+  "isolation": "bubblewrap, temporary HOME/XDG, isolated loopback synthetic provider",
+  "note": "Temporary adapter copied the npm-installed package files; the working-tree implementation was not used or modified."
+}

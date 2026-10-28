@@ -1,0 +1,57 @@
+{
+  "fixture": {
+    "entries": 3000,
+    "query": "absent",
+    "description": "annotated leaf nodes, no matches"
+  },
+  "limitations": "In-process Bun microbenchmark; excludes store I/O, model calls, nested nodes and matching result pages.",
+  "runtime": {
+    "bun": "1.4.0",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "sources": {
+    "headCommit": "716c78e909abb38902cacf38b91c718ab744fc33",
+    "beforeSha256": "cb3e30f87db1111d5a35b18f819811aab4f314746fb300f3b6b8da528e865cb3",
+    "afterSha256": "cb3e30f87db1111d5a35b18f819811aab4f314746fb300f3b6b8da528e865cb3"
+  },
+  "rounds": 5,
+  "results": {
+    "browse": {
+      "beforeMs": [
+        10.638412999999957,
+        5.798455999999987,
+        5.938675999999987,
+        2.587910000000022,
+        2.461753999999985
+      ],
+      "afterMs": [
+        7.275894999999991,
+        5.167778999999996,
+        7.508617999999956,
+        2.4299819999999954,
+        2.3332449999999767
+      ],
+      "beforeMedianMs": 5.798455999999987,
+      "afterMedianMs": 5.167778999999996
+    },
+    "grep": {
+      "beforeMs": [
+        8.074863999999991,
+        10.667875000000038,
+        9.363675999999998,
+        5.568363999999974,
+        5.1569430000000125
+      ],
+      "afterMs": [
+        5.5303499999999985,
+        7.554883000000018,
+        5.627795999999989,
+        4.555543,
+        5.445680999999979
+      ],
+      "beforeMedianMs": 8.074863999999991,
+      "afterMedianMs": 5.5303499999999985
+    }
+  }
+}

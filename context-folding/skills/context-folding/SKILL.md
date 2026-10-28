@@ -5,16 +5,27 @@ description: Manage context with explicit reversible fold comments and recover e
 
 # Context folding
 
-Proactively wrap completed temporary work that may need to be revisited in whole-line markers. Conversation text and source code use the same `@context-fold begin LABEL` / `@context-fold end LABEL` syntax: use HTML comments in conversation and valid language comments in source. Use a descriptive non-whitespace label; do not calculate hashes or call `mark`.
+Actively manage context with folding; do not wait for context pressure. For each substantial completed stage, first write a concise, current summary outside the markers, then put only lengthy supporting process and evidence in a block immediately below it:
 
 ```text
+Current result: the fixed source commit is present, but the generated binary has not been verified against the server.
+<!-- @context-fold begin build-diagnostics -->
+Long command output, checks and supporting details...
+<!-- @context-fold end build-diagnostics -->
+```
+
+Keep conclusions, constraints, failures, decisions and next steps visible above/outside every block; update that summary as work changes. A task-wide outer block is optional; benchmark replay showed little extra byte reduction over milestone-only folding. If used, keep the live summary outside it, close it at the task boundary and write the final conclusion after it. If work continues, repeat this summary-then-details pattern for the next completed stage. Small or active work stays outside. An unclosed pair cannot fold. Conversation text and source code use the same `@context-fold begin LABEL` / `@context-fold end LABEL` syntax: use HTML comments in conversation and valid language comments in source. Use a descriptive non-whitespace label; do not calculate hashes or call `mark`.
+
+```text
+Conclusion and next action: parsing succeeds; the remaining issue is the timeout branch. Supporting investigation details follow.
 <!-- @context-fold begin parser-investigation -->
 Temporary investigation details go here.
 <!-- @context-fold end parser-investigation -->
-Conclusion and the next action stay outside the region.
 ```
 
-Keep active requirements, unresolved failures, decisions and next-step inputs outside the region. Output the end marker when the enclosed work is complete. Begin/end may span Assistant messages, but cannot cross a new user instruction. Correctly matched regions may nest; quoted examples remain data.
+Keep active requirements, unresolved failures, decisions and next-step inputs outside and above the region. Output the end marker when the enclosed work is complete. Begin/end may span Assistant messages, but cannot cross a new user instruction. Correctly matched regions may nest; quoted examples remain data. Prefer closing completed work in bounded stages so it can fold during a long task instead of waiting for the final response. The visible summary must make sense without the folded details.
+
+If the host explicitly reports that context was compacted, treat that as a signal to resume the user's task, restate the known current status outside markers, then mark remaining completed work promptly. The notice does not recover details already dropped; use only actual archived references for recovery and do not reconstruct missing content by guessing.
 
 The host preserves the first complete observation and folds at a later request boundary. Identical retries do not advance the delay. Unclosed, ambiguous and too-small regions remain intact. Only explicit annotations authorize folding. A request hook cannot rewrite hidden model reasoning or provider-owned history.
 
