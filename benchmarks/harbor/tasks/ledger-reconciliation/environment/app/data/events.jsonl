@@ -1,0 +1,9 @@
+{"id":"e001","account":"alpha","kind":"credit","amount":"10.00","status":"posted"}
+{"id":"e002","account":"alpha","kind":"debit","amount":"3.25","status":"posted"}
+{"id":"e003","account":"beta","kind":"credit","amount":"20","status":"pending"}
+{"id":"e004","account":"beta","kind":"credit","amount":"5.1","status":"posted"}
+{"id":"e002","account":"alpha","kind":"debit","amount":"100.00","status":"posted"}
+{"id":"e003","account":"beta","kind":"credit","amount":"20","status":"posted"}
+{"id":"e005","account":"gamma","kind":"credit","amount":"0.01","status":"posted"}
+{"id":"e006","account":"gamma","kind":"debit","amount":"0.01","status":"posted"}
+{"id":"e007","account":"alpha","kind":"debit","amount":"0.05","status":"posted"}

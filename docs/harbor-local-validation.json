@@ -1,0 +1,107 @@
+{
+  "checked_at": "2026-10-28T00:55:13.650974+00:00",
+  "harbor_version": "0.25.0",
+  "scope": "local component validation; no Docker benchmark or model inference",
+  "checks": [
+    {
+      "name": "project_check",
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exit_code": 0,
+      "output_tail": [
+        "test/session-quota.test.ts:",
+        "(pass) annotation archival honors the configured quota and preserves the whole request on failure [26.00ms]",
+        "(pass) read, paste and inspection preserve the request quota instead of raising it to their recovery ceiling [150.91ms]",
+        "(pass) request configuration can raise a quota without changing archived content [33.41ms]",
+        "(pass) request configuration installs a missing quota on an unchanged legacy archive [27.28ms]",
+        "(pass) lowering the quota keeps oversized snapshots recoverable while rejecting growth [38.54ms]",
+        "(pass) legacy archives without a quota use the default rather than a recovery operation ceiling [22.41ms]",
+        "",
+        " 175 pass",
+        " 0 fail",
+        "Ran 175 tests across 21 files. [10.94s]",
+        "npm warn Unknown env config \"http-proxy\". This will stop working in the next major version of npm."
+      ]
+    },
+    {
+      "name": "harbor_component_tests",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "benchmarks/harbor/tests",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_tail": [
+        "test_unknown_source_and_absent_tree_or_endpoint_fingerprints_block_efficiency (test_report.ReportTests.test_unknown_source_and_absent_tree_or_endpoint_fingerprints_block_efficiency) ... ok",
+        "test_crashing_submission_still_writes_zero_reward (test_tasks.SyntheticTaskTests.test_crashing_submission_still_writes_zero_reward) ... ok",
+        "test_hardcoding_public_output_does_not_pass (test_tasks.SyntheticTaskTests.test_hardcoding_public_output_does_not_pass) ... ok",
+        "test_oracle_controls_pass_all_independent_checks (test_tasks.SyntheticTaskTests.test_oracle_controls_pass_all_independent_checks) ... ok",
+        "test_real_harbor_task_schema_when_installed (test_tasks.SyntheticTaskTests.test_real_harbor_task_schema_when_installed) ... ok",
+        "test_task_layout_and_python_syntax (test_tasks.SyntheticTaskTests.test_task_layout_and_python_syntax) ... ok",
+        "test_untouched_starter_controls_fail (test_tasks.SyntheticTaskTests.test_untouched_starter_controls_fail) ... ok",
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 31 tests in 8.475s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "harbor_schema",
+      "command": [
+        "python",
+        "benchmarks/harbor/run.py",
+        "validate"
+      ],
+      "exit_code": 0,
+      "output_tail": [
+        "{",
+        "  \"harbor_version\": \"0.25.0\",",
+        "  \"task_schema_version\": \"1.4\",",
+        "  \"tasks\": [",
+        "    \"config-precedence\",",
+        "    \"ledger-reconciliation\"",
+        "  ],",
+        "  \"agents\": 4,",
+        "  \"status\": \"configuration-and-task-files-valid\",",
+        "  \"container_execution\": false",
+        "}"
+      ]
+    },
+    {
+      "name": "harbor_doctor",
+      "command": [
+        "python",
+        "benchmarks/harbor/run.py",
+        "doctor"
+      ],
+      "exit_code": 0,
+      "output_tail": [
+        "{",
+        "  \"harbor_version\": \"0.25.0\",",
+        "  \"expected_harbor_version\": \"0.25.0\",",
+        "  \"python_version\": \"3.12.14\",",
+        "  \"bun_available\": true,",
+        "  \"project_dependencies_installed\": true,",
+        "  \"docker_cli_available\": false,",
+        "  \"docker_daemon_available\": false,",
+        "  \"model_endpoint_configured\": false,",
+        "  \"model_api_key_configured\": false,",
+        "  \"note\": \"Credentials are not printed; a missing Docker runtime prevents container benchmark execution.\"",
+        "}"
+      ]
+    }
+  ],
+  "cli_dry_run": {
+    "status": "blocked",
+    "exit_code": 1,
+    "reason": "Docker is not installed or not on PATH; Harbor loaded all four agent configurations before runtime preflight."
+  }
+}

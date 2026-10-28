@@ -22,7 +22,9 @@
     "test": "bun test test/*.test.ts",
     "test:host": "python3 scripts/host-smoke.py",
     "stats": "bun src/cli.ts stats",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build",
+    "bench:harbor": "uv run --project benchmarks/harbor --frozen python benchmarks/harbor/run.py",
+    "test:harbor": "uv run --project benchmarks/harbor --frozen python benchmarks/harbor/run.py test"
   },
   "engines": { "bun": ">=1.4.0", "node": ">=22" },
   "license": "MIT",
