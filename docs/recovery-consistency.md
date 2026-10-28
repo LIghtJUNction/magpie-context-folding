@@ -1,26 +1,29 @@
-# Recovery and concurrent requests
+# 原文恢复与并发一致性
 
-Text IDs also contain an occurrence number within the current request. Trimming
-identical results can therefore reuse an ID previously associated with another
-file or read range. Before tracking or replaying file versions, the plugin checks
-the stored file provenance against the current normalized path and range. A
-conflict or unavailable current provenance retains the original request and
-leaves the archive unchanged. Existing IDs and recovery layers remain valid.
+短哈希指向一次已经保存的内容快照。恢复不能重新读取源文件来替代旧快照，也不能把前缀冲突处理成“随便取第一条”。完整 SHA-256 用于确认原文，scope 限定可恢复的会话。
 
-An asynchronous operation validates both the revision and the exact stored
-snapshot before returning its result, including when its callback made no
-changes. A concurrent keep, forget, or statistics update invalidates that result.
-The request hook retains the original request on conflict and never retries a
-policy script or accounting call automatically.
+## 保存成功后才替换
 
-The list, status, read and paste tools can make up to three attempts to read the
-current state and, where applicable, apply keep protection. Each attempt starts from a fresh snapshot.
-Persistent contention still returns a conflict. Paste creates the destination
-only after protection commits, outside the retry loop, using exclusive creation;
-an existing file or symlink is never overwritten.
+请求钩子先构造候选视图，在原文和状态提交成功后才返回它。数据库不可写、配额不足或状态冲突时，返回原请求。延迟状态不能先于原文独立提交，从而制造一个没有恢复对象的引用。
 
-Comparing stored content also rejects stale writes when a scope was deleted and
-recreated with the same revision but different content. It does not distinguish
-recreated scopes whose stored snapshots are byte-for-byte identical. A separate
-lifecycle identifier would be required to invalidate every operation spanning
-any deletion, regardless of the resulting state.
+存储事务同时核对 revision 和原始 snapshot。异步处理期间有其他请求读取、保护、清理或更新统计时，旧结果不能覆盖较新的状态。即使回调没有修改内容，也需要验证所依据的快照仍有效。
+
+## 读取后保持可见
+
+`read` 和 `paste` 默认将原文保护为 keep；对于旧分组归档，还会解除其祖先组的折叠。保护提交后才返回内容或创建目标文件。`peek` 只检查归档，不改变折叠状态。
+
+读取类工具可在冲突后重新读取当前快照，次数有界。`paste` 的文件创建放在重试循环之外，使用独占创建；已有文件或符号链接不被覆盖。创建失败可能发生在原文已经保护之后，保护不会因此撤销。
+
+恢复输出不再次参加折叠。否则 Agent 查原文会生成另一个待恢复引用，造成重复回查。
+
+## 内容与出现分别计数
+
+同内容可共享哈希及原文存储，但一次新的出现有自己的延迟。请求重试不应推进等待计数，重新读取同一文件也不应继承旧出现已经耗尽的保留周期。
+
+旧数据库可能仍包含 v1 条目、历史层和分组。兼容读取这些原文与引用，不会重新启动自动摘要、版本候选选择或旧模式。
+
+## 当前边界
+
+如果删除并重新创建了内容完全相同、revision 也相同的会话，仅比较 snapshot 无法区分这两个生命周期。这一边界不应被表述成绝对的跨删除隔离保证。
+
+精确协议、消息边界与短哈希规则见 [annotation-protocol.md](annotation-protocol.md)。

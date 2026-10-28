@@ -1,8 +1,6 @@
-"""Source annotations: Python AST discovery and explicit cross-language regions.
+"""Explicit fold comments shared by source and editable context text.
 
-Discovery never edits source. The core archives originals and region payloads in
-one transaction, then uses these ranges to produce reversible compact reads.
-``fold_regions`` remains the legacy explicit-region adapter.
+Discovery never edits source and never selects functions automatically.
 """
 from __future__ import annotations
 
@@ -15,7 +13,7 @@ import tokenize
 from typing import Any
 
 _COMMENT_STYLES = (
-    ("//", ""), ("#", ""), ("--", ""), (";", ""), ("%", ""),
+    ("", ""), ("//", ""), ("#", ""), ("--", ""), (";", ""), ("%", ""),
     ("!", ""), ("'", ""), ('"', ""), ("REM", ""),
     ("/*", "*/"), ("<!--", "-->"), ("(*", "*)"), ("{-", "-}"),
     ("#|", "|#"), ("<#", "#>"),
@@ -106,124 +104,127 @@ def _python_function_header_lines(text: str) -> dict[int, int]:
 
 
 def discover_source(text: str, language: str | None = None, path: str | None = None,
-                    styles: Any = None) -> dict[str, Any]:
-    """Return validated ranges; unsupported languages use explicit markers only.
+                    styles: Any = None, *, strict: bool = False) -> dict[str, Any]:
+    """Discover only paired, whole-line annotations; never infer foldable code.
 
-    markref v0.1 has a comment lexer, not a structural parser. We do not infer
-    braces or function boundaries with regular expressions. Python uses its AST
-    and tokenizer; JS/TS validates explicit // and /* */ comments using optional Tree-sitter
-    grammars. Other languages require whole-line begin/end annotations.
+    Python and optional JS/TS lexers exclude marker-looking string contents.
+    Plain text and other languages use the same literal line protocol. Invalid,
+    nested or incomplete pairs leave only their uncertain range visible. Earlier
+    complete regions remain eligible. Source-editing helpers use strict validation
+    before inserting comments and still reject any damaged marker.
     """
     extra = comment_styles([] if styles is None else styles)
-    marker_styles = _marker_styles(extra)
     inferred = {".py": "python", ".pyi": "python", ".js": "javascript", ".mjs": "javascript",
                 ".cjs": "javascript", ".jsx": "jsx", ".ts": "typescript", ".mts": "typescript",
                 ".cts": "typescript", ".tsx": "tsx"}
     language = (language or inferred.get(Path(path).suffix.lower(), "explicit") if path else language or "explicit").lower()
-    if language == "py":
-        language = "python"
     from .javascript import LANGUAGES, normalize_language, parse_source, comment_lines
-    language = normalize_language(language)
-    javascript = language in LANGUAGES
-    if language == "python":
-        marker_styles = [("#", "")]
-    elif javascript:
-        marker_styles = [("//", ""), ("/*", "*/")]
+    language = "python" if language == "py" else normalize_language(language)
     lines = _source_lines(text)
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
+    marker_styles = _marker_styles(extra)
     comments = None
-    tree = None
-    if javascript:
-        javascript_tree, javascript_data = parse_source(text, language)
-        comments = comment_lines(javascript_tree, javascript_data)
-    if language in {"python", "py"}:
+    parser = "explicit-regions"
+    if language == "python":
+        marker_styles = [("#", "")]
+        # Tokenization is sufficient: source syntax is not used to select blocks.
         try:
-            tree = ast.parse(text)
             comments = _python_comment_lines(text)
-            function_headers = _python_function_header_lines(text)
         except (SyntaxError, ValueError, tokenize.TokenError, IndentationError):
-            raise ValueError("Invalid Python source; annotations unchanged") from None
-    regions: list[dict[str, Any]] = []
+            if strict:
+                raise ValueError("Invalid Python source; annotations unchanged") from None
+            return {"language": language, "commentStyles": extra, "parser": "python-comments",
+                    "regions": [], "limitations": ["Invalid Python tokens; original preserved."]}
+        parser = "python-comments"
+    elif language in LANGUAGES:
+        marker_styles = [("//", ""), ("/*", "*/")]
+        tree, data = parse_source(text, language)
+        comments = comment_lines(tree, data)
+        parser = "tree-sitter-explicit"
 
-    def add(name: str, kind: str, first: int, last: int, header: str):
-        start, end = offsets[first - 1], offsets[last]
-        ending = lines[last - 1]
-        newline = "\r\n" if ending.endswith("\r\n") else ending[-1:] if ending.endswith(("\n", "\r")) else ""
-        end -= len(newline)
-        if end <= start:
-            return
-        key = hashlib.sha256(f"{name}:{start}:{end}".encode()).hexdigest()[:16]
-        regions.append({"id": key, "name": name, "kind": kind, "start": start, "end": end,
-                        "startLine": first, "endLine": last, "header": header[:200],
-                        "disposition": "foldable"})
+    regions = []
+    opened = None
+    invalid = False
+    depth = 0
+    problems = []
 
-    if tree is not None:
-        compound = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.If, ast.For,
-                    ast.AsyncFor, ast.While, ast.With, ast.AsyncWith, ast.Try)
-        compound += tuple(getattr(ast, name) for name in ("Match", "TryStar") if hasattr(ast, name))
+    def problem(reason: str):
+        # Reading can preserve only the uncertain range. Editing must reject the
+        # entire input before planning or applying any source changes.
+        if strict:
+            raise ValueError(reason)
+        if reason not in problems:
+            problems.append(reason)
 
-        def walk(node, prefix=""):
-            name = prefix
-            if isinstance(node, compound):
-                label = getattr(node, "name", f"{type(node).__name__.lower()}@{node.lineno}")
-                name = f"{prefix}.{label}" if prefix else label
-                body = getattr(node, "body", None)
-                # Multiline suites retain their entire header, including decorators.
-                # One-line functions remain readable without automatic folding.
-                first = body[0].lineno if body and body[0].lineno > node.lineno else node.lineno
-                if body and first > node.lineno:
-                    first = min([first] + [d.lineno for d in getattr(body[0], "decorator_list", [])])
-                if (not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        or body[0].lineno > function_headers[node.lineno]):
-                    add(name, type(node).__name__, first, node.end_lineno, lines[node.lineno - 1].strip())
-            for child in ast.iter_child_nodes(node):
-                walk(child, name)
-        walk(tree)
-
-    opened: list[tuple[str, int, tuple[str, str]]] = []
     for number, line in enumerate(lines, 1):
         match = _comment_marker(line, marker_styles)
-        if match is None:
+        if match is None or (comments is not None and number not in comments):
             continue
         style, body = match
-        expected_styles = {("//", ""), ("/*", "*/")} if javascript else {("#", "")}
-        if comments is not None and (style not in expected_styles or number not in comments):
-            continue
         marker = _MARKER.fullmatch(body)
         if marker is None:
-            raise ValueError("Malformed source annotation")
+            problem("Malformed source annotation")
+            if opened is not None:
+                invalid = True
+            continue
         operation, name = marker.groups()
         if operation == "begin":
-            opened.append((name, number, style))
-        else:
-            if not opened or (name, style) != (opened[-1][0], opened[-1][2]):
-                raise ValueError("Unmatched source annotation")
-            _, first, _ = opened.pop()
-            if number > first + 1:
-                add(name, "explicit", first + 1, number - 1, name)
-    if opened:
-        raise ValueError("Unterminated source annotation")
-    # Equal and crossing spans are ambiguous. Prefer explicit equal spans;
-    # reject crossing ranges before the caller performs any archive writes.
-    unique = {}
-    for region in regions:
-        unique[(region["start"], region["end"])] = region
-    regions = sorted(unique.values(), key=lambda r: (r["start"], -r["end"]))
-    stack = []
-    for region in regions:
-        while stack and region["start"] >= stack[-1]["end"]:
-            stack.pop()
-        if stack and region["end"] > stack[-1]["end"]:
-            raise ValueError("Crossing source annotations")
-        region["parentId"] = stack[-1]["id"] if stack else None
-        stack.append(region)
+            if opened is not None:
+                problem("Nested source annotations are unsupported")
+                invalid = True
+                depth += 1
+            else:
+                opened = (name, number, style)
+                invalid = False
+                depth = 1
+            continue
+        if opened is None:
+            problem("Unmatched source annotation")
+            continue
+        if depth > 1:
+            # Nested content is never a candidate, including apparently valid
+            # children. Resume only after the outer region closes correctly.
+            depth -= 1
+            continue
+        if (name, style) != (opened[0], opened[2]):
+            problem("Unmatched source annotation")
+            invalid = True
+            continue
+        _, first, _ = opened
+        opened = None
+        depth = 0
+        if invalid or number <= first + 1:
+            continue
+        start, end = offsets[first], offsets[number - 1]
+        payload = text[start:end]
+        newline = "\r\n" if payload.endswith("\r\n") else payload[-1:] if payload.endswith(("\r", "\n")) else ""
+        end -= len(newline)
+        payload = text[start:end]
+        if not payload or re.search(r"\[\[cf:v[12]:", payload):
+            continue
+        sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        regions.append({"id": sha256[:12], "sha256": sha256, "name": name, "kind": "explicit",
+                        "start": start, "end": end, "startLine": first + 1, "endLine": number - 1,
+                        "header": name, "parentId": None, "disposition": "foldable"})
+    if opened is not None:
+        problem("Unterminated source annotation")
     if len(regions) > 10000:
-        raise ValueError("Too many source annotations")
-    return {"language": language, "commentStyles": extra, "parser": "python-ast" if tree is not None else "tree-sitter-explicit" if javascript else "explicit-regions",
-            "limitations": ["Only explicit whole-line // or /* */ regions are recognized; structural discovery requires annotate-functions first."] if javascript else [] if tree is not None else ["No structural parser for this language; only explicit whole-line regions are recognized. Marker-looking multiline strings may be misidentified."],
-            "regions": regions}
+        problem("Too many source annotations")
+        regions = []
+    # Extend colliding prefixes; do not equate different payloads at 12 digits.
+    hashes = {region["sha256"] for region in regions}
+    for region in regions:
+        length = 12
+        while any(other != region["sha256"] and other.startswith(region["sha256"][:length]) for other in hashes):
+            length += 2
+        region["id"] = region["sha256"][:length]
+    limitations = [reason + "; affected text preserved." for reason in problems]
+    if comments is None:
+        limitations.append("Literal whole-line protocol; no language parser. Marker-looking multiline strings may be misidentified.")
+    return {"language": language, "commentStyles": extra, "parser": parser,
+            "limitations": limitations, "regions": regions}
 
 
 def annotate_python_functions(text: str) -> dict[str, Any]:
@@ -233,7 +234,7 @@ def annotate_python_functions(text: str) -> dict[str, Any]:
     except (SyntaxError, ValueError):
         raise ValueError("Invalid Python source; annotations unchanged") from None
     # Validate existing markers before planning any edits, including their nesting.
-    discover_source(text, "python")
+    discover_source(text, "python", strict=True)
     lines = _source_lines(text)
     endings = [re.search(r"\r\n$|\r$|\n$", line) for line in lines]
     default_newline = next((match.group() for match in endings if match), "\n")
@@ -277,7 +278,12 @@ def annotate_python_functions(text: str) -> dict[str, Any]:
 
     added = []
     events: dict[int, list[tuple[tuple[int, int], str, str]]] = {}
-    for start, end, name in candidates:
+    skipped_nested = 0
+    for start, end, name in sorted(candidates, key=lambda item: (item[0], -item[1])):
+        if any(start <= last and end >= first for _, first, last in existing) or any(
+                start <= item["endLine"] and end >= item["startLine"] for item in added):
+            skipped_nested += 1
+            continue
         if any(mark_name == name and first == start - 1 and last > end
                for mark_name, first, last in existing):
             continue
@@ -311,8 +317,8 @@ def annotate_python_functions(text: str) -> dict[str, Any]:
     # Comments must preserve Python semantics and remain usable by the source API.
     if ast.dump(ast.parse(output)) != ast.dump(tree):
         raise ValueError("Annotations would change Python syntax; annotations unchanged")
-    discover_source(output, "python")
-    return {"text": output, "added": added, "skippedNested": 0}
+    discover_source(output, "python", strict=True)
+    return {"text": output, "added": added, "skippedNested": skipped_nested}
 
 
 def select_regions(regions: list[dict], selectors: Any) -> set[str]:
@@ -340,10 +346,12 @@ def _check_literal_references(text: str) -> None:
 
 
 def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bool = False,
-                   *, expand_mode: str = "recursive") -> dict:
+                   *, expand_mode: str = "recursive", allow_reference_literals: bool = False) -> dict:
     if expand_mode not in {"single", "recursive"}:
         raise ValueError("Invalid source expansion mode")
     regions = annotation["regions"]
+    if not regions:
+        return {"text": text, "foldedRegions": []}
     expanded = select_regions(regions, [] if expand is None else expand)
     by_id = {r["id"]: r for r in regions}
     # Targeted expansion reveals ancestors; keep/unmarked also protects children.
@@ -363,129 +371,40 @@ def compact_source(text: str, annotation: dict, expand: Any = None, keep_all: bo
             preserve = preserve or parent in kept or (expand_mode == "recursive" and parent in expanded)
             parent = by_id[parent]["parentId"]
         payload = text[region["start"]:region["end"]]
-        if preserve or region["id"] in protected or len(region["reference"]) >= len(payload):
+        if preserve or region["id"] in protected or len(region["reference"].encode("utf-8")) >= len(payload.encode("utf-8")):
             continue
-        _check_literal_references(text[cursor:region["start"]])
+        if not allow_reference_literals:
+            _check_literal_references(text[cursor:region["start"]])
         chunks.extend((text[cursor:region["start"]], region["reference"]))
         cursor = region["end"]
         visible.append({key: region[key] for key in ("id", "name", "header", "reference", "startLine", "endLine")})
-    _check_literal_references(text[cursor:])
+    if not allow_reference_literals:
+        _check_literal_references(text[cursor:])
     chunks.append(text[cursor:])
     return {"text": "".join(chunks), "foldedRegions": visible}
 
 
-def fold_regions(
-    client: Any,
-    scope: str,
-    text: str,
-    language: str | None = None,
-    min_lines: int = 256,
-    commentStyles: Any = None,
-) -> dict[str, Any]:
-    """Archive interiors of explicitly marked regions longer than min_lines.
+def fold_regions(client: Any, scope: str, text: str, language: str | None = None,
+                 commentStyles: Any = None, *, occurrence: str | None = None,
+                 requestCycle: int | None = None) -> dict[str, Any]:
+    """Project explicit annotations using the same durable source path.
 
-    Common line/block comment delimiters are built in; ``commentStyles`` adds
-    literal start/end delimiters for other languages (end defaults to empty).
-    Python additionally uses tokenization when ``language`` is python/py to
-    reject markers inside strings. Other languages use the explicit whole-line
-    convention; this fallback does not claim full language parsing.
-
-    Boundary lines remain byte-for-byte intact. A region's terminal newline is
-    kept beside the reference and excluded from its archived payload, so resolve
-    reproduces the original text exactly, including CRLF and Unicode. Offsets in
-    reference metadata count Python string characters, not encoded bytes.
+    The host supplies an occurrence and monotonically increasing requestCycle.
+    Missing request-cycle information keeps the complete original visible unless
+    delay_requests=0 was explicitly configured. No length threshold chooses text.
     """
-    if not isinstance(text, str):
-        raise TypeError("text must be a string")
-    if not isinstance(min_lines, int) or isinstance(min_lines, bool) or min_lines < 0:
-        raise ValueError("min_lines must be a nonnegative integer")
-    if language is not None and not isinstance(language, str):
-        raise TypeError("language must be a string or None")
-
-    def unchanged(reason: str, line: int | None = None) -> dict[str, Any]:
-        _check_literal_references(text)
-        skipped: dict[str, Any] = {"reason": reason}
-        if line is not None:
-            skipped["line"] = line
-        return {"text": text, "references": [], "skipped": [skipped]}
-
-    extra = comment_styles([] if commentStyles is None else commentStyles)
-    marker_styles = _marker_styles(extra)
-    python_lines = None
-    if language and language.lower() in {"python", "py"}:
-        marker_styles = [("#", "")]
-        try:
-            python_lines = _python_comment_lines(text)
-        except (tokenize.TokenError, IndentationError, SyntaxError):
-            return unchanged("invalid_python_tokens")
-
-    lines = _source_lines(text)
-    regions: list[dict[str, Any]] = []
-    opened: dict[str, Any] | None = None
-    offset = 0
-    for number, line in enumerate(lines, 1):
-        match = _comment_marker(line, marker_styles)
-        if match is None:
-            offset += len(line)
-            continue
-        style, body = match
-        # Python's tokenizer identifies actual # comments; other marker syntax
-        # is not a Python comment and must remain ordinary source text.
-        if python_lines is not None and (style != ("#", "") or number not in python_lines):
-            offset += len(line)
-            continue
-        marker = _MARKER.fullmatch(body)
-        if marker is None:
-            return unchanged("malformed_marker", number)
-        operation, name = marker.groups()
-        if operation == "begin":
-            if opened is not None:
-                return unchanged("nested_region", number)
-            opened = {"name": name, "style": style, "startLine": number, "start": offset + len(line)}
-        else:
-            if opened is None:
-                return unchanged("unmatched_end", number)
-            if name != opened["name"] or style != opened["style"]:
-                return unchanged("mismatched_end", number)
-            opened.update({"endLine": number, "end": offset})
-            regions.append(opened)
-            opened = None
-        offset += len(line)
-    if opened is not None:
-        return unchanged("unterminated_region", opened["startLine"])
-
-    selected = []
-    skipped: list[dict[str, Any]] = []
-    cursor = 0
-    for region in regions:
-        start, end = region["start"], region["end"]
-        interior = text[start:end]
-        line_count = len(_source_lines(interior))
-        if line_count <= min_lines:
-            skipped.append({"name": region["name"], "startLine": region["startLine"],
-                            "endLine": region["endLine"], "lines": line_count, "reason": "below_threshold"})
-            continue
-        newline = "\r\n" if interior.endswith("\r\n") else "\n" if interior.endswith("\n") else "\r" if interior.endswith("\r") else ""
-        payload = interior[:-len(newline)] if newline else interior
-        _check_literal_references(text[cursor:start])
-        selected.append((region, payload, newline, line_count))
-        cursor = end
-    _check_literal_references(text[cursor:])
-
-    # Validate all retained source before the legacy adapter makes any writes.
-    chunks: list[str] = []
-    references: list[dict[str, Any]] = []
-    cursor = 0
-    for region, payload, newline, line_count in selected:
-        start, end = region["start"], region["end"]
-        result = client.call({"action": "put", "scope": scope, "text": payload, "role": "tool"})
-        reference = result["reference"]
-        if not isinstance(reference, str) or not reference:
-            raise ValueError("put returned an invalid reference")
-        chunks.extend((text[cursor:start], reference, newline))
-        references.append({"name": region["name"], "id": result["id"], "reference": reference,
-                           "startLine": region["startLine"], "endLine": region["endLine"],
-                           "start": start, "end": end, "lines": line_count})
-        cursor = end
-    chunks.append(text[cursor:])
-    return {"text": "".join(chunks), "references": references, "skipped": skipped}
+    request = {"text": text, "limit": 24000}
+    if language is not None:
+        request["language"] = language
+    if commentStyles is not None:
+        request["commentStyles"] = commentStyles
+    if occurrence is not None:
+        request["occurrence"] = occurrence
+    if requestCycle is not None:
+        request["requestCycle"] = requestCycle
+    result = client.read_source(scope, **request)
+    # The historical adapter has no continuation interface; publish no partial view.
+    if result["nextOffset"] is not None:
+        return {"text": text, "references": [], "skipped": [{"reason": "projection-exceeds-adapter-page"}]}
+    return {"text": result["text"], "references": result.get("foldedRegions", []),
+            "skipped": [] if result.get("delayReason") is None else [{"reason": result["delayReason"]}]}

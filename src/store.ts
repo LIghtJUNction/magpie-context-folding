@@ -6,8 +6,6 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
 import type { Metrics } from './metrics.js';
-import { modeSchema, strategySchema } from './modes.js';
-import { operationSchema } from './operations.js';
 
 const markSchema = z.discriminatedUnion('disposition', [
   z.object({ disposition: z.literal('unmarked') }),
@@ -34,14 +32,18 @@ const entrySchema = z.object({
   version: versionSchema.optional(), manual: z.boolean().optional(),
   protectionReason: z.string().optional(),
   foldedMark: z.string().optional(),
+  annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string() }).optional(),
+  occurrences: z.record(z.string(), z.object({
+    firstSeen: z.number().int().nonnegative(), lastSeen: z.number().int().nonnegative(), folded: z.boolean().optional(),
+  })).optional(),
 });
 const snapshotSchema = z.object({
   version: z.literal(1), entries: z.array(entrySchema), groups: z.array(groupSchema).optional(),
-  configuredMode: modeSchema.optional(), agenticMode: strategySchema.optional(), appliedMode: strategySchema.optional(),
+  cycle: z.number().int().nonnegative().optional(),
+  requestHash: z.string().optional(),
+  projectedHash: z.string().optional(),
   decision: z.record(z.string(), z.unknown()).default({}),
   metrics: metricsSchema.default(emptyMetrics),
-  operations: z.array(operationSchema).max(33)
-    .refine(operations => operations.filter(operation => !operation.delivered).length <= 32).optional(),
 });
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const storedLayerSchema = layerSchema.omit({ text: true }).extend({ textHash: hashSchema });
@@ -377,7 +379,7 @@ export class Store {
       }
     });
 
-    // The callback may await a cost-counting endpoint. Keep SQLite closed while it runs.
+    // Keep SQLite closed while an asynchronous caller prepares its projection.
     const before = JSON.stringify(original.snapshot);
     const previousMetrics = structuredClone(original.snapshot.metrics);
     signal?.throwIfAborted();
@@ -388,7 +390,7 @@ export class Store {
     const after = JSON.stringify(snapshot);
     const payloadBytes = Buffer.byteLength(after);
     // maxBytes is this operation's ceiling. Only the configured request may change
-    // the persisted quota; tools preserve it, and new fold marks also enforce it.
+    // the persisted quota; recovery tools preserve it.
     const sessionLimitBytes = quotaPolicy === 'configure' ? maxBytes
       : original.sessionLimitBytes ?? defaultSessionLimitBytes;
     const operationLimit = quotaPolicy === 'enforce' ? Math.min(maxBytes, sessionLimitBytes) : maxBytes;

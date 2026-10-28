@@ -10,6 +10,8 @@ uv sync
 
 Configure `Config.python` with the absolute path to `context-folding/.venv/bin/python` created by uv, or use another Python interpreter where the package is installed. The default `python3` must itself be able to import `context_folding`.
 
+This is the same engine used by `ctxf fold` and `ctxf mcp`. Point `Config.state` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+
 Add the Rust crate as a path dependency, adjusting the path for your application:
 
 ```toml
@@ -21,15 +23,16 @@ context-folding = { path = "../context-folding/sdks/rust" }
 use context_folding::{serde_json::json, Client, Config};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::new("context-folding-state.json")
+    let config = Config::new("context-folding-state.sqlite")
         .python("python3"); // Or an absolute virtualenv interpreter path.
     let client = Client::with_config(config)?;
-    let stored = client.put("my-session", "Original tool output", json!({
-        "role": "tool", "source": {"path": "example.py"}
-    }))?;
-    let _entries = client.list("my-session", json!(null))?;
-    // Arbitrary engine actions are available without waiting for SDK changes.
-    let _status = client.call(json!({"action": "status", "scope": "my-session"}))?;
+    let text = format!("<!-- @context-fold begin investigation -->\n{}<!-- @context-fold end investigation -->\n",
+        "Completed investigation detail.\n".repeat(40));
+    let folded = client.fold("my-session", &text, json!({}))?;
+    let _resolved = client.resolve("my-session", folded["text"].clone())?;
+    if let Some(id) = folded["references"][0]["id"].as_str() {
+        let _original = client.read("my-session", id, json!({}))?;
+    }
     client.close()?;
     Ok(())
 }
@@ -37,13 +40,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Convenience methods return `serde_json::Value`, preserving the engine's result shape:
 
+- `fold(scope, text, options)` immediately transforms explicit markers, with optional `language` and `commentStyles`. Empty text is valid.
 - `put(scope, text, options)` stores text with optional fields such as role/source.
 - `read(scope, id, options)` reads an entry, forwarding `offset`/`limit` and other optional fields. Offsets count Unicode codepoints, as in Python strings.
 - `list(scope, options)` lists entries, forwarding optional fields.
-- `mark(scope, id, disposition, summary)` sets the entry's disposition and summary.
 - `render(scope, ids, protected)` renders selected entries with protected IDs.
 - `resolve(scope, value)` resolves references in arbitrary JSON values.
-- `call(request)` sends any JSON object, including group, restore, paste, and status actions.
+- `call(request)` sends any JSON object, including read-source, restore, paste, and status actions. `mark` and `group` have been removed.
+
+`fold` returns `scope`, complete `text`, and `references`, each with the full SHA-256 `id`, `sha256`, `label`, short `reference` and `archiveId`. Only newly folded bodies are listed. The caller consumes the result; the bridge does not rewrite model history.
+
+Use `read-source` with both `occurrence` and `requestCycle` for delayed source projection; its default delay remains unchanged by `fold`. A fresh source read needs a fresh occurrence; retries keep the same cycle. The bridge does not observe model requests or advance cycles itself.
 
 Pass `json!(null)` or `json!({})` for empty options. Explicit method arguments override options with the same name. The shared Python engine validates action fields and scope boundaries.
 
@@ -64,3 +71,5 @@ Local process integration tests use a deterministic fake Python engine and requi
 ```sh
 cargo test --offline
 ```
+
+Set `CONTEXT_FOLDING_REAL_CORE_PATH` to the absolute `context-folding/python` directory to additionally exercise immediate `fold`, empty text, complete views and scoped recovery, plus source annotation delay and retry/fresh-occurrence handling against the actual core. Without it, those cases report an explicit skip.

@@ -50,13 +50,21 @@ try
             client.PutAsync("scope", "原文🙂", new Dictionary<string, object?> { ["role"] = "tool", ["action"] = "wrong" }),
             client.ListAsync("scope", new Dictionary<string, object?> { ["depth"] = 2 }),
             client.ReadAsync("scope", "entry"),
-            client.MarkAsync("scope", "entry", "foldable", new Dictionary<string, object?> { ["summary"] = "evidence" }),
+            client.CallAsync(new Dictionary<string, object?> { ["action"] = "read-source", ["scope"] = "scope", ["text"] = "# source", ["occurrence"] = "read-1", ["requestCycle"] = 0 }),
             client.RenderAsync("scope", ["entry"]),
-            client.ResolveAsync("scope", new { content = "[[cf:v1:entry]]" }));
+            client.ResolveAsync("scope", new { content = "[[cf:v1:entry]]" }),
+            client.FoldAsync("scope", "", new Dictionary<string, object?>
+            {
+                ["action"] = "wrong", ["scope"] = "wrong", ["text"] = "wrong",
+                ["language"] = "explicit", ["commentStyles"] = new[] { new { start = ";;" } },
+            }));
         Check(values.Select(v => v.GetProperty("pid").GetInt32()).Distinct().Count() == 1, "Process must persist");
-        Check(values.Select(Action).SequenceEqual(new[] { "put", "list", "read", "mark", "render", "resolve" }), "Wrappers forward actions");
+        Check(values.Select(Action).SequenceEqual(new[] { "put", "list", "read", "read-source", "render", "resolve", "fold" }), "Wrappers forward actions");
         Check(values[0].GetProperty("request").GetProperty("text").GetString() == "原文🙂", "Unicode round trip");
         Check(values[0].GetProperty("argv")[1].GetString()!.EndsWith("state with spaces.sqlite"), "ArgumentList preserves spaces");
+        var foldRequest = values[6].GetProperty("request");
+        Check(foldRequest.GetProperty("scope").GetString() == "scope" && foldRequest.GetProperty("text").GetString() == "", "Fold preserves explicit arguments and empty text");
+        Check(foldRequest.GetProperty("commentStyles")[0].GetProperty("start").GetString() == ";;", "Fold forwards comment styles");
         await Reject(client.CallAsync(new Dictionary<string, object?> { ["action"] = "error", ["scope"] = "s" }), "missing");
         Check(Action(await client.CallAsync(new Dictionary<string, object?> { ["action"] = "stderr", ["scope"] = "s" })) == "stderr", "stderr drained");
         var slow = client.CallAsync(new Dictionary<string, object?> { ["action"] = "slow", ["scope"] = "s" });
@@ -95,18 +103,56 @@ try
         {
             Environment = new Dictionary<string, string?> { ["PYTHONPATH"] = corePath },
         });
-        var item = await real.PutAsync("real", "A🙂B " + string.Concat(Enumerable.Repeat("historical evidence ", 100)),
-            new Dictionary<string, object?> { ["role"] = "tool" });
-        var id = item.GetProperty("id").GetString()!;
-        var read = await real.ReadAsync("real", id, new Dictionary<string, object?> { ["offset"] = 1, ["limit"] = 1 });
+        var text = "# @context-fold begin evidence\n"
+            + string.Concat(Enumerable.Repeat("# 原文🙂 evidence\n", 80))
+            + "# @context-fold end evidence\n";
+        Dictionary<string, object?> SourceRequest(int cycle, string occurrence = "read-1") => new()
+        {
+            ["action"] = "read-source", ["scope"] = "real", ["text"] = text,
+            ["language"] = "python", ["occurrence"] = occurrence, ["requestCycle"] = cycle,
+        };
+        var first = await real.CallAsync(SourceRequest(0));
+        Check(first.GetProperty("text").GetString() == text, "First observation remains complete");
+        Check((await real.CallAsync(SourceRequest(0))).GetProperty("text").GetString() == text, "Retry must not consume delay");
+        var folded = await real.CallAsync(SourceRequest(1));
+        var view = folded.GetProperty("text").GetString()!;
+        Check(view.Contains("[[cf:v2:"), "Explicit source markers fold after delay");
+        Check((await real.CallAsync(SourceRequest(2, "read-2"))).GetProperty("text").GetString() == text, "New occurrence gets its own delay");
+        var resolved = await real.ResolveAsync("real", new { content = view });
+        Check(resolved.GetProperty("value").GetProperty("content").GetString() == text, "Exact annotated source recovery");
+        var id = first.GetProperty("id").GetString()!;
+        Check((await real.ReadAsync("real", id)).GetProperty("text").GetString() == text, "Read returns original");
+        Check((await real.CallAsync(SourceRequest(3))).GetProperty("text").GetString() == text, "Recovered source stays visible");
+        var item = await real.PutAsync("real", "A🙂B", new Dictionary<string, object?> { ["role"] = "tool" });
+        var read = await real.ReadAsync("real", item.GetProperty("id").GetString()!, new Dictionary<string, object?> { ["offset"] = 1, ["limit"] = 1 });
         Check(read.GetProperty("text").GetString() == "🙂" && read.GetProperty("nextOffset").GetInt32() == 2, "Python Unicode code-point offsets");
-        await real.MarkAsync("real", id, "foldable", new Dictionary<string, object?> { ["summary"] = "Historical tool evidence" });
-        var rendered = await real.RenderAsync("real", [id]);
-        Check(rendered.GetProperty("entries").ValueKind == JsonValueKind.Array, "Real render response");
-        var resolved = await real.ResolveAsync("real", new { content = $"[[cf:v1:{id}]]" });
-        Check(resolved.GetProperty("resolved").GetInt32() == 1 && resolved.GetProperty("value").GetProperty("content").GetString()!.StartsWith("A🙂B "), "Real reference resolution");
+        await Reject(real.CallAsync(new Dictionary<string, object?>
+        {
+            ["action"] = "mark", ["scope"] = "real", ["id"] = id,
+            ["disposition"] = "foldable", ["summary"] = "obsolete",
+        }));
         await real.ListAsync("real");
-        Console.WriteLine("PASS: actual Python engine put/read/mark/render/resolve/list and Unicode code-point offsets");
+        Console.WriteLine("PASS: actual Python source marker delay, retry, fresh occurrence, exact recovery, keep and Unicode offsets");
+        var empty = await real.FoldAsync("fold-test", "");
+        Check(empty.GetProperty("scope").GetString() == "fold-test" && empty.GetProperty("text").GetString() == "", "Fold accepts empty text");
+        Check(empty.GetProperty("references").GetArrayLength() == 0, "Empty text has no references");
+        var body = string.Concat(Enumerable.Repeat("completed 中文🙂\n", 80)).TrimEnd('\n');
+        var prefix = string.Concat(Enumerable.Repeat("visible\n", 800)) + "<!-- @context-fold begin evidence -->\r\n";
+        var suffix = "\r\n<!-- @context-fold end evidence -->\r\nlast line without newline";
+        var submitted = prefix + body + suffix;
+        var immediate = await real.FoldAsync("fold-test", submitted);
+        var references = immediate.GetProperty("references");
+        Check(references.GetArrayLength() == 1, "Explicit fold is immediate");
+        var reference = references[0];
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(body))).ToLowerInvariant();
+        Check(reference.GetProperty("id").GetString() == hash && reference.GetProperty("sha256").GetString() == hash, "Fold hashes exact UTF-8 body");
+        Check(reference.GetProperty("label").GetString() == "evidence", "Fold returns marker label");
+        var immediateText = immediate.GetProperty("text").GetString()!;
+        Check(immediateText == prefix + reference.GetProperty("reference").GetString() + suffix, "Fold returns full text without an extra newline");
+        Check((await real.ResolveAsync("fold-test", immediateText)).GetProperty("value").GetString() == submitted, "Immediate fold recovers exact text");
+        Check((await real.ReadAsync("fold-test", hash)).GetProperty("text").GetString() == body, "Fold hash reads original marked body");
+        await Reject(real.ReadAsync("another-scope", hash));
+        Console.WriteLine("PASS: immediate fold, empty input, complete view, Unicode hash and scoped recovery");
     }
     else Console.WriteLine("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH to context-folding/python");
 }

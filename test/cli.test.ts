@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { Store } from '../src/store.js';
+import { digest, Store } from '../src/store.js';
 
 const cli = join(dirname(import.meta.dir), 'src', 'cli.ts');
 async function fixture(run: (scope: string, directory: string, invoke: (args: string[], input?: string) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
@@ -14,6 +14,7 @@ async function fixture(run: (scope: string, directory: string, invoke: (args: st
     const scope = await store.scopeFor('cli-roundtrip');
     await store.transaction(scope, true, 64 * 1024 * 1024, state => {
       state.entries = [{ id: 'a', role: 'assistant', text: '原文🙂\n```ts\nexact();\n```\n',
+        annotation: { sha256: digest('原文🙂\n```ts\nexact();\n```\n'), label: 'exact' },
         mark: { disposition: 'foldable', summary: 'short' }, folded: 'short', layers: [{ id: 'layer', previousId: 'original', text: 'short' }] }];
     });
     const invoke = async (args: string[], input?: string) => {
@@ -27,18 +28,18 @@ async function fixture(run: (scope: string, directory: string, invoke: (args: st
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-test('actual CLI roundtrip handles raw text, stdin marks, paste and JSON navigation', async () => {
+test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigation and forget', async () => {
   await fixture(async (scope, directory, invoke) => {
     const read = await invoke(['read', '--scope', scope, '--id', 'a']);
-    assert.equal(read.code, 0);
+    assert.equal(read.code, 0, read.err);
     assert.equal(read.err, '');
     assert.equal(read.out, '原文🙂\n```ts\nexact();\n```\n');
     const list = await invoke(['list', '--scope', scope, '--json']);
     assert.equal(JSON.parse(list.out).entries[0].disposition, 'keep');
-    const marks = JSON.stringify([{ id: 'a', disposition: 'foldable', summary: 'done again' }]);
-    const mark = await invoke(['mark', '--scope', scope, '--marks', '-'], marks);
-    assert.equal(mark.code, 0);
-    assert.equal(JSON.parse(mark.out).pending, true);
+    const hashed = await invoke(['read', '--scope', scope, '--id', digest(read.out).slice(0, 12), '--json']);
+    assert.equal(hashed.code, 0);
+    assert.equal(JSON.parse(hashed.out).id, 'a');
+    assert.equal(JSON.parse(hashed.out).text, read.out);
     const output = join(directory, 'paste.txt');
     const paste = await invoke(['paste', '--scope', scope, '--id', 'a', '--path', output]);
     assert.equal(paste.code, 0);
@@ -53,19 +54,21 @@ test('actual CLI roundtrip handles raw text, stdin marks, paste and JSON navigat
     assert.equal(JSON.parse(status.out).folded, 0);
     const stats = await invoke(['stats', '--scope', scope, '--json']);
     assert.equal(stats.code, 0);
-    assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 1);
+    assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 2);
     assert.equal((await invoke(['stats'])).code, 0);
+    assert.equal(JSON.parse((await invoke(['forget', '--scope', scope])).out).forgotten, true);
+    assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 1);
   });
 });
 
-test('CLI keeps recovery available with disabled or broken config and redacts effective settings', async () => {
+test('CLI keeps recovery available with disabled, legacy or broken config and explains migration', async () => {
   await fixture(async (scope, directory, invoke) => {
     const config = join(directory, '.context-folding.toml');
-    await writeFile(config, '[folding]\nenabled = false\n[magpie.accounting]\nurl = "https://user:secret@example.test/secret-token"\n');
+    await writeFile(config, '[folding]\nenabled = false\ncontext_window_tokens = 32000\n');
     const effective = await invoke(['config', '--project-dir', directory, '--json']);
     assert.equal(effective.code, 0);
     assert.equal(JSON.parse(effective.out).config.folding.enabled, false);
-    assert.equal(JSON.parse(effective.out).config.magpie.accounting.url, '[redacted]');
+    assert.equal(JSON.parse(effective.out).config.folding.context_window_tokens, 32000);
     assert.ok(!effective.out.includes('secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
     await writeFile(config, '[folding]\nenabled = "private-secret"\n');
@@ -74,7 +77,12 @@ test('CLI keeps recovery available with disabled or broken config and redacts ef
     assert.equal(broken.out, '');
     assert.ok(!broken.err.includes('private-secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
-    assert.equal((await invoke(['mark', '--scope', scope, '--id', 'a', '--disposition', 'keep'])).code, 0);
+    await writeFile(config, '[folding]\nmode = "private-secret"\n');
+    const legacy = await invoke(['config']);
+    assert.equal(legacy.code, 1);
+    assert.match(legacy.err, /removed.*@context-fold/);
+    assert.ok(!legacy.err.includes('private-secret'));
+    assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
   });
 });
 
@@ -86,8 +94,8 @@ test('stats shows folding, detail views and compact token totals with exact JSON
     });
     const result = await invoke(['stats', '--scope', scope]);
     assert.equal(result.code, 0, result.err);
-    assert.ok(result.out.startsWith('净收益：未验证'));
-    assert.ok(result.out.includes('费用证明：暂无（0 次已核实比较）'));
+    assert.ok(result.out.startsWith('统计范围：'));
+    assert.ok(result.out.includes('token 为估算值，不代表实际账单节省。'));
     assert.ok(!result.out.includes('USD 0.000000000'));
     assert.ok(result.out.includes('折叠次数：7'));
     assert.ok(result.out.includes('查看详情次数：5'));
@@ -98,13 +106,7 @@ test('stats shows folding, detail views and compact token totals with exact JSON
       foldCount: 7, detailViewCount: 5,
       foldedTokensEstimated: '1250000000', foldedTokensDisplay: '1.25B',
     });
-    await new Store(join(directory, 'state')).recordMetrics(scope, {
-      certifiedComparisons: 1, savingNanoUsdLower: '1250000000',
-    });
-    const conditional = await invoke(['stats', '--scope', scope]);
-    assert.equal(conditional.code, 0, conditional.err);
-    assert.ok(conditional.out.startsWith('净收益：未验证'));
-    assert.ok(conditional.out.includes('证书假设下的节省下界累计：USD 1.250000000（1 次比较）'));
+
   });
 });
 
@@ -112,7 +114,7 @@ test('CLI invalid commands and arguments use stderr, exit 1 and never leak suppl
   await fixture(async (scope, _directory, invoke) => {
     for (const args of [ ['unknown-private-secret'], ['read'], ['read', '--scope', scope, '--id', 'a', '--offset', '1.5'],
       ['read', '--scope', scope, '--id', 'a', '--offset', '-1'], ['stats', '--scope', 'private-secret'],
-      ['mark', '--scope', scope, '--marks', '{private-secret'], ['mark', '--scope', scope, '--marks', '[]', '--id', 'a'],
+      ['mark', '--scope', scope, '--marks', '{private-secret'], ['mode', '--scope', scope, '--mode', 'private-secret'],
       ['read', '--scope', scope, '--id', 'a', '--keep-folded'], ['read', '--scope', scope, '--id', 'a', '--limit', '24001'] ]) {
       const result = await invoke(args);
       assert.equal(result.code, 1, JSON.stringify(args));
@@ -121,7 +123,10 @@ test('CLI invalid commands and arguments use stderr, exit 1 and never leak suppl
       assert.ok(!result.err.includes('private-secret'));
       assert.ok(!result.err.includes(scope));
     }
-    assert.equal((await invoke(['--help'])).code, 0);
+    const help = await invoke(['--help']);
+    assert.equal(help.code, 0);
+    assert.ok(!/^mark\s|^mode\s/m.test(help.out));
+    assert.match((await invoke(['mode'])).err, /removed/);
     assert.equal((await invoke(['read', '--help'])).code, 0);
   });
 });

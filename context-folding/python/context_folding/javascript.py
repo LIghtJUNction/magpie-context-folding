@@ -91,7 +91,7 @@ def annotate_javascript_functions(text: str, language: str = "javascript") -> di
     from .annotations import _MARKER, _comment_marker, _source_lines, discover_source
 
     tree, data = parse_source(text, language)
-    discover_source(text, language)  # Validate existing explicit region nesting.
+    discover_source(text, language, strict=True)  # Validate existing explicit region nesting.
     lines = _source_lines(text)
     existing = []
     stack = []
@@ -135,6 +135,10 @@ def annotate_javascript_functions(text: str, language: str = "javascript") -> di
         # add a duplicate even when edits have changed the inferred name.
         if any(begin == first + 1 and end == last - 1 for begin, end, _ in existing):
             continue
+        if any(first < end and last > begin for begin, end, _ in existing) or any(
+                first < item["endLine"] and last > item["startLine"] for item in added):
+            skipped.append({"startLine": first, "reason": "nested_or_overlapping_region"})
+            continue
         name_node = node.child_by_field_name("name")
         if name_node is None and node.parent is not None and node.parent.type in {"variable_declarator", "pair"}:
             name_node = node.parent.child_by_field_name("name") or node.parent.child_by_field_name("key")
@@ -164,7 +168,7 @@ def annotate_javascript_functions(text: str, language: str = "javascript") -> di
     output_tree, output_data = parse_source(output, language)
     if _syntax(tree, data) != _syntax(output_tree, output_data):
         raise ValueError("Annotations would change JavaScript/TypeScript syntax; annotations unchanged")
-    discover_source(output, language)
+    discover_source(output, language, strict=True)
     return {"text": output, "added": added, "skipped": skipped, "skippedNested": 0,
             "parser": "tree-sitter", "limitations": [
                 "Requires complete syntactically valid source and the optional javascript extra.",

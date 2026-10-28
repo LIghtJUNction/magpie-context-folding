@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Store, digest } from '../src/store.js';
+import { Store } from '../src/store.js';
 import type { Entry, Snapshot } from '../src/store.js';
 import { emptyMetrics } from '../src/metrics.js';
 import { execute } from '../src/tool.js';
@@ -11,7 +11,6 @@ import { browse, latestVersions, restoreAncestors } from '../src/tree.js';
 import { ContextFoldingPlugin } from '../src/index.js';
 
 const entry = (id: string, text = id): Entry => ({ id, text, role: 'tool', mark: { disposition: 'unmarked' }, layers: [] });
-const groupId = (ids: string[], summary: string) => `g-${digest(JSON.stringify([ids, summary])).slice(0, 24)}`;
 const call = async (args: unknown) => JSON.parse(await execute(args));
 const group = (id: string, children: string[], summary = id) => ({ id, children, summary, enabled: true });
 const snapshot = (): Snapshot => ({ version: 1, entries: [entry('a', 'alpha Needle'), entry('b', 'beta'), entry('c', 'gamma'), entry('d')],
@@ -37,59 +36,16 @@ async function fixture(run: (store: Store, scope: string, directory: string) => 
 
 const load = (store: Store, scope: string) => store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
 
-test('group marks support multiple rounds, nested same-batch groups and exact reuse', async () => {
-  await fixture(async (store, scope) => {
-    const first = groupId(['a', 'b'], 'first round');
-    const outer = groupId([first, 'c'], 'second round');
-    const result = await call({ action: 'mark', scope, marks: [
-      { ids: ['a', 'b'], disposition: 'foldable', summary: 'first round' },
-      { ids: [first, 'c'], disposition: 'foldable', summary: 'second round' },
-    ] });
-    assert.deepEqual(result.groups, [first, outer]);
-    assert.equal((await load(store, scope)).groups?.length, 2);
-    assert.equal((await call({ action: 'mark', scope, marks: [{ ids: ['a', 'b'], disposition: 'foldable', summary: 'first round' }] })).error, undefined);
-    assert.equal((await load(store, scope)).groups?.length, 2);
-    const final = await call({ action: 'mark', scope, marks: [{ ids: [outer, 'd'], disposition: 'foldable', summary: 'third round' }] });
-    assert.deepEqual(final.groups, [groupId([outer, 'd'], 'third round')]);
-    assert.equal((await call({ action: 'status', scope })).groups, 3);
-  });
-});
-
-test('invalid grouping and mixed batches fail atomically without losing manual overrides', async () => {
-  await fixture(async (store, scope) => {
-    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
-      state.entries[3]!.mark = { disposition: 'keep' };
-      state.entries[2]!.version = { series: 'file', number: 2, kind: 'file', automatic: true };
-    });
-    const before = await load(store, scope);
-    for (const ids of [['a', 'missing'], ['a', 'a'], ['a', 'd'], ['a', 'c']]) {
-      const result = await call({ action: 'mark', scope, marks: [
-        { id: 'a', disposition: 'foldable', summary: 'must not persist' },
-        { ids, disposition: 'foldable', summary: 'invalid group' },
-      ] });
-      assert.ok(result.error);
-      assert.deepEqual(await load(store, scope), before);
-    }
-    const first = groupId(['a', 'b'], 'valid');
-    await call({ action: 'mark', scope, marks: [{ ids: ['a', 'b'], disposition: 'foldable', summary: 'valid' }] });
-    const grouped = await load(store, scope);
-    assert.ok((await call({ action: 'mark', scope, marks: [{ ids: ['a', first], disposition: 'foldable', summary: 'already parented' }] })).error);
-    assert.deepEqual(await load(store, scope), grouped);
-    await call({ action: 'mark', scope, marks: [{ id: 'c', disposition: 'keep' }] });
-    assert.equal((await load(store, scope)).entries[2]?.version?.automatic, false);
-  });
-});
-
-test('groups accept historical versions and reject user descendants', async () => {
+test('legacy grouped historical versions retain their exact version links', async () => {
   await fixture(async (store, scope) => {
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.entries[0]!.version = { series: 'file', number: 1, kind: 'file', path: '/source.ts' };
       state.entries[2]!.version = { series: 'file', number: 2, kind: 'file', previousId: 'a' };
       state.entries[3]!.role = 'user';
     });
-    const id = groupId(['a', 'b'], 'old version');
-    assert.deepEqual((await call({ action: 'mark', scope, marks: [{ ids: ['a', 'b'], disposition: 'foldable', summary: 'old version' }] })).groups, [id]);
-    assert.ok((await call({ action: 'mark', scope, marks: [{ ids: [id, 'd'], disposition: 'foldable', summary: 'user forbidden' }] })).error);
+    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+      state.groups = [group('legacy-group', ['a', 'b'], 'old version')];
+    });
     const read = await call({ action: 'read', scope, id: 'a' });
     assert.equal(read.version.path, '/source.ts');
     assert.equal(read.latestVersion, false);
@@ -127,7 +83,7 @@ test('archive rejects multiple latest markers and cyclic or reversed revision ch
   });
 });
 
-test('restoring a nested member releases every ancestor and group marks can re-enable it', async () => {
+test('reading a nested legacy member releases every ancestor and preserves its historical metadata', async () => {
   await fixture(async (store, scope) => {
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.groups = [group('g-one', ['a', 'b']), group('g-two', ['g-one', 'c'])];
@@ -135,18 +91,13 @@ test('restoring a nested member releases every ancestor and group marks can re-e
       state.entries[0]!.folded = 'entry folded';
       state.entries[0]!.version = { series: 'series', number: 1, kind: 'similar', automatic: true };
     });
-    const result = await call({ action: 'mark', scope, marks: [{ id: 'a', disposition: 'keep' }] });
+    const result = await call({ action: 'read', scope, id: 'a' });
     assert.equal(result.error, undefined);
-    let state = await load(store, scope);
+    const state = await load(store, scope);
     assert.equal(state.entries[0]?.folded, undefined);
     assert.equal(state.entries[0]?.version?.automatic, false);
     assert.equal(state.metrics.itemsRestored, 3);
     assert.ok(state.groups?.every(node => !node.enabled && node.folded === undefined));
-    await call({ action: 'mark', scope, marks: [{ id: 'g-one', disposition: 'foldable', summary: 'updated' }] });
-    state = await load(store, scope);
-    assert.equal(state.groups?.[0]?.enabled, true);
-    assert.equal(state.groups?.[0]?.summary, 'updated');
-    assert.equal(state.groups?.[1]?.enabled, false);
     state.groups![1]!.folded = 'again';
     state.groups![1]!.enabled = true;
     assert.equal(restoreAncestors(state, 'g-one'), 1);
@@ -156,8 +107,10 @@ test('restoring a nested member releases every ancestor and group marks can re-e
 
 test('group read/paste return only the manifest and forget protects folded groups', async () => {
   await fixture(async (store, scope, directory) => {
-    const id = groupId(['a', 'b'], 'bounded summary');
-    await call({ action: 'mark', scope, marks: [{ ids: ['a', 'b'], disposition: 'foldable', summary: 'bounded summary' }] });
+    const id = 'legacy-group';
+    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+      state.groups = [group(id, ['a', 'b'], 'bounded summary')];
+    });
     const manifest = { id, summary: 'bounded summary', children: ['a', 'b'] };
     const read = await call({ action: 'read', scope, id });
     assert.deepEqual(JSON.parse(read.text), manifest);
@@ -169,7 +122,10 @@ test('group read/paste return only the manifest and forget protects folded group
     await store.transaction(scope, false, 64 * 1024 * 1024, state => { state.groups![0]!.folded = 'active'; });
     assert.ok((await call({ action: 'forget', scope })).error);
     assert.equal((await load(store, scope)).groups?.length, 1);
-    await call({ action: 'mark', scope, marks: [{ id, disposition: 'keep' }] });
+    const outsideScope = await call({ action: 'read', scope: '0'.repeat(64), id });
+    assert.match(outsideScope.error, /Unknown context scope/);
+    assert.equal(outsideScope.text, undefined);
+    await call({ action: 'read', scope, id });
     assert.equal((await call({ action: 'forget', scope })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
   });
@@ -287,6 +243,6 @@ test('runtime list bounds, read default and public schema stay explicit', async 
     assert.equal(read.text.length, 4000);
     assert.equal(read.nextOffset, 4000);
     const plugin = await ContextFoldingPlugin();
-    assert.equal(plugin.tool.context_folding.args.oneOf.length, 8);
+    assert.equal(plugin.tool.context_folding.args.oneOf.length, 6);
   });
 });

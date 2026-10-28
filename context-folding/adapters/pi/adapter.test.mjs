@@ -10,7 +10,7 @@ import { createCore, createReadAdapter, restoreOriginal, scopeFor, entryType } f
 function context(cwd, session = 'one', entries = []) {
   return { cwd, sessionManager: { getSessionId: () => session, getBranch: () => entries } };
 }
-const source = `def example():\n${Array.from({ length: 180 }, (_, i) => `    value_${i} = '原文 ${i} 🐦'`).join('\n')}\n    return value_0\n`;
+const source = `# @context-fold begin example\ndef example():\n${Array.from({ length: 180 }, (_, i) => `    value_${i} = '原文 ${i} 🐦'`).join('\n')}\n    return value_0\n# @context-fold end example\n`;
 function event(text, input = { path: 'sample.py' }) {
   return { toolName: 'read', isError: false, input, content: [{ type: 'text', text }], details: { untouched: true } };
 }
@@ -33,7 +33,8 @@ test('core sends large private payload through stdin, never process argv', async
 test('real core round trip, scope and branch isolation, immutable snapshot', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'pi-fold-'));
   try {
-    const call = createCore({ statePath: join(directory, 'archive.sqlite') });
+    await writeFile(join(directory, '.context-folding.toml'), '[folding]\ndelay_requests=0\n');
+    const call = createCore({ statePath: join(directory, 'archive.sqlite'), projectDir: directory });
     const entries = [], ctx = context(directory, 'one', entries);
     const adapter = createReadAdapter({ call, appendEntry: (customType, data) => entries.push({ type: 'custom', customType, data }) });
     const original = event(source);
@@ -79,7 +80,8 @@ test('installed Pi read uses exact offset/limit output, no file reread by adapte
     ctx.sessionManager.getBranch = () => entries;
     const actual = await createReadToolDefinition(directory).execute('read-1', input, undefined, undefined, ctx);
     const output = event(actual.content[0].text, input);
-    const call = createCore({ statePath: join(directory, 'state.sqlite') });
+    await writeFile(join(directory, '.context-folding.toml'), '[folding]\ndelay_requests=0\n');
+    const call = createCore({ statePath: join(directory, 'state.sqlite'), projectDir: directory });
     const adapter = createReadAdapter({ call, appendEntry: (customType, data) => entries.push({ type: 'custom', customType, data }) });
     await writeFile(file, 'changed after tool read');
     const folded = await adapter(output, ctx);
@@ -120,12 +122,27 @@ test('no-benefit and persistence failures preserve existing pin state', async ()
 test('publication requires complete restoration and persistence', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'pi-persist-'));
   try {
-    const call = createCore({ statePath: join(directory, 'state.sqlite') });
+    await writeFile(join(directory, '.context-folding.toml'), '[folding]\ndelay_requests=0\n');
+    const call = createCore({ statePath: join(directory, 'state.sqlite'), projectDir: directory });
     const adapter = createReadAdapter({ call, appendEntry() { throw Error('session persistence failed'); } });
     assert.equal(await adapter(event(source), context(directory)), undefined);
     const broken = createReadAdapter({ call: async request => request.action === 'annotate'
       ? { id: 'fake' } : { id: 'fake', offset: 0, text: '', nextOffset: null, totalChars: 99, sha256: 'invalid' },
     appendEntry() { assert.fail('must not publish'); } });
     assert.equal(await broken(event(source), context(directory)), undefined);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test('default delay preserves fresh reads without a replay-cycle hook', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'pi-default-'));
+  try {
+    const call = createCore({ statePath: join(directory, 'state.sqlite'), projectDir: directory });
+    let records = 0;
+    const adapter = createReadAdapter({ call, appendEntry() { records++; } });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assert.equal(await adapter(event(source), context(directory)), undefined);
+    }
+    assert.equal(records, 0);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

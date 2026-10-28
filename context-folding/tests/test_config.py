@@ -39,44 +39,12 @@ class ConfigTests(unittest.TestCase):
     def load(self, overrides=None):
         return load_config(self.project, overrides)
 
-    def test_missing_sources_return_independent_defaults_without_writing(self):
-        settings = self.load()
-        self.assertEqual(set(settings), {"folding", "annotations", "gc", "magpie", "policy"})
-        self.assertEqual(settings["policy"], {"mode": "bytes", "auto_roles": ["tool"],
-                                             "min_chars": 12000, "summary_chars": 1600, "minimum_saving_usd": 0.000001})
-        self.assertEqual(settings["folding"], {
-            "mode": "intelligence", "enabled": True, "threshold_tokens": 64000, "keep_recent_messages": 12,
-            "head_chars": 400, "max_session_bytes": 67108864,
-            "minimum_saving_usd": 0.000001,
-        })
-        self.assertEqual(settings["annotations"], {"enabled": True, "default_fold": True, "keep": []})
-        self.assertEqual(settings["gc"], {
-            "enabled": False, "strength": "conservative", "idle_seconds": 2592000,
-            "max_uses": 2, "retention_seconds": 2592000, "auto_purge": False,
-        })
-        self.assertEqual(settings["magpie"], {})
-        settings["annotations"]["keep"].append("changed")
-        self.assertEqual(self.load()["annotations"]["keep"], [])
-        self.assertFalse(self.global_path.exists())
-        self.assertFalse(self.project_path.exists())
-        self.assertFalse(self.xdg.exists())
 
-    def test_model_capacity_cannot_be_set_by_shared_configuration(self):
-        self.assertNotIn("context_window_tokens", self.load()["folding"])
-        with self.assertRaises(ConfigError):
-            self.load({"folding": {"context_window_tokens": 128000}})
-        self.write(self.global_path, "[folding]\ncontext_window_tokens=128000\n")
-        with self.assertRaises(ConfigError):
-            self.load()
-        self.global_path.unlink()
-        self.write(self.project_path, "[folding]\ncontext_window_tokens=1\n")
-        with self.assertRaises(ConfigError):
-            self.load()
 
     def test_global_location_and_home_fallback(self):
         self.assertEqual(global_config_path(), self.global_path)
         fallback = self.home / ".config" / "context-folding" / "config.toml"
-        self.write(fallback, "[folding]\nhead_chars=20\n")
+        self.write(fallback, "[folding]\ndelay_requests=20\n")
         for xdg in (None, ""):
             with self.subTest(xdg=xdg), patch.dict(os.environ):
                 if xdg is None:
@@ -84,40 +52,23 @@ class ConfigTests(unittest.TestCase):
                 else:
                     os.environ["XDG_CONFIG_HOME"] = xdg
                 self.assertEqual(global_config_path(), fallback)
-                self.assertEqual(self.load()["folding"]["head_chars"], 20)
+                self.assertEqual(self.load()["folding"]["delay_requests"], 20)
 
-    def test_precedence_deep_merge_and_inputs_are_not_mutated(self):
-        self.write(self.global_path, 'version=1\n[folding]\nhead_chars=10\nthreshold_tokens=100\n'
-                   '[magpie.accounting]\nurl="https://example.test/cost"\ntimeout_ms=700\n')
-        self.write(self.project_path, '[folding]\nhead_chars=20\n'
-                   '[magpie.accounting]\ntimeout_ms=800\n')
-        overrides = {"folding": {"head_chars": 30}, "annotations": {"keep": ["*.keep"]},
-                     "magpie": {"accounting": {"timeout_ms": 900}}}
-        before = copy.deepcopy(overrides)
-        settings = self.load(overrides)
-        self.assertEqual(settings["folding"]["head_chars"], 30)
-        self.assertEqual(settings["folding"]["threshold_tokens"], 100)
-        self.assertEqual(settings["magpie"]["accounting"], {
-            "url": "https://example.test/cost", "timeout_ms": 900,
-        })
-        settings["annotations"]["keep"].append("other")
-        self.assertEqual(overrides, before)
-        self.assertNotIn("version", settings)
 
     def test_only_nearest_project_file_is_loaded(self):
-        self.write(self.project_path, "[folding]\nhead_chars=20\nthreshold_tokens=100\n")
+        self.write(self.project_path, "[folding]\ndelay_requests=20\nreserve_output_tokens=100\n")
         child = self.project / "nested"
         child.mkdir()
-        nearest = self.write(child / ".context-folding.toml", "[folding]\nhead_chars=30\n")
+        nearest = self.write(child / ".context-folding.toml", "[folding]\ndelay_requests=30\n")
         grandchild = child / "deep"
         grandchild.mkdir()
         self.assertEqual(project_config_path(grandchild), nearest)
         settings = load_config(grandchild)
-        self.assertEqual(settings["folding"]["head_chars"], 30)
-        self.assertEqual(settings["folding"]["threshold_tokens"], 64000)
+        self.assertEqual(settings["folding"]["delay_requests"], 30)
+        self.assertEqual(settings["folding"]["reserve_output_tokens"], 0)
 
     def test_git_root_checked_but_never_its_parent_for_git_directory_or_file(self):
-        self.write(self.root / ".context-folding.toml", "[folding]\nhead_chars=999\n")
+        self.write(self.root / ".context-folding.toml", "[folding]\ndelay_requests=999\n")
         child = self.project / "nested"
         child.mkdir()
         for kind in ("directory", "file"):
@@ -127,9 +78,9 @@ class ConfigTests(unittest.TestCase):
                     marker.rmdir()
                     marker.write_text("gitdir: /unused\n", encoding="utf-8")
                 self.assertIsNone(project_config_path(child))
-                self.assertEqual(load_config(child)["folding"]["head_chars"], 400)
-                self.write(self.project_path, "[folding]\nhead_chars=20\n")
-                self.assertEqual(load_config(child)["folding"]["head_chars"], 20)
+                self.assertEqual(load_config(child)["folding"]["delay_requests"], 1)
+                self.write(self.project_path, "[folding]\ndelay_requests=20\n")
+                self.assertEqual(load_config(child)["folding"]["delay_requests"], 20)
                 self.project_path.unlink()
 
     def test_cwd_is_default_start_directory(self):
@@ -139,8 +90,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_without_git_root_searches_parents(self):
         (self.project / ".git").rmdir()
-        self.write(self.root / ".context-folding.toml", "[folding]\nhead_chars=42\n")
-        self.assertEqual(self.load()["folding"]["head_chars"], 42)
+        self.write(self.root / ".context-folding.toml", "[folding]\ndelay_requests=42\n")
+        self.assertEqual(self.load()["folding"]["delay_requests"], 42)
 
     def test_invalid_toml_utf8_and_version_include_source_path(self):
         for text in ("broken = [", "version=2", "version=true", 'version="1"', "version=1.0",
@@ -154,89 +105,14 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "TOML"):
             self.load()
 
-    def test_unknown_sections_keys_and_table_types_include_source_path(self):
-        for text, key in (
-            ("unknown=1", "unknown"),
-            ("[folding]\nunknown=1", "folding.unknown"),
-            ("folding=false", "folding"),
-            ("[magpie.accounting]\nsecret='no'", "magpie.accounting.secret"),
-            ("[magpie]\naccounting='url'", "magpie.accounting"),
-            ("[annotations]\nkeep=[1]", "annotations.keep"),
-        ):
-            with self.subTest(text=text):
-                self.write(self.project_path, text)
-                with self.assertRaises(ConfigError) as raised:
-                    self.load()
-                self.assertIn(str(self.project_path), str(raised.exception))
-                self.assertIn(key, str(raised.exception))
 
     def test_invalid_global_not_hidden_by_valid_override(self):
-        self.write(self.global_path, '[folding]\nhead_chars="invalid"\n')
-        with self.assertRaisesRegex(ConfigError, "folding.head_chars"):
-            self.load({"folding": {"head_chars": 30}})
+        self.write(self.global_path, '[folding]\ndelay_requests="invalid"\n')
+        with self.assertRaisesRegex(ConfigError, "folding.delay_requests"):
+            self.load({"folding": {"delay_requests": 30}})
 
-    def test_override_validation_rejects_wrong_types_and_out_of_range_values(self):
-        invalid = {
-            "folding.enabled": [0, "true", None],
-            "folding.threshold_tokens": [True, 0, -1, 1.0],
-            "folding.keep_recent_messages": [False, -1, 2.5],
-            "folding.head_chars": [-1, 1001, True, 10.0],
-            "folding.max_session_bytes": [0, 67108865, False],
-            "folding.minimum_saving_usd": [-0.1, True, float("inf"), float("nan")],
-            "annotations.enabled": [1],
-            "annotations.default_fold": ["false"],
-            "annotations.keep": ["name", [1], [""], ["bad\x00name"]],
-            "gc.enabled": [1],
-            "gc.strength": ["invalid", 1, []],
-            "gc.idle_seconds": [-1, 315576001, float("inf"), True],
-            "gc.retention_seconds": [-1, 315576001, float("nan"), False],
-            "gc.max_uses": [-1, 1000000001, 1.0, True],
-            "gc.auto_purge": [0],
-            "magpie.gateway_timeout_ms": [99, 10001, 500.0, True],
-        }
-        for name, values in invalid.items():
-            section, key = name.split(".")
-            for value in values:
-                with self.subTest(name=name, value=value):
-                    with self.assertRaises(ConfigError) as raised:
-                        self.load({section: {key: value}})
-                    self.assertIn("<overrides>", str(raised.exception))
-                    self.assertIn(name, str(raised.exception))
-        for value in (False, [], "bad", {"version": True}, {"folding": []}, {"unknown": {}}):
-            with self.subTest(value=value), self.assertRaises(ConfigError):
-                self.load(value)
 
-    def test_valid_boundaries(self):
-        settings = self.load({
-            "folding": {"threshold_tokens": 1, "keep_recent_messages": 0, "head_chars": 0,
-                        "max_session_bytes": 1, "minimum_saving_usd": 0},
-            "gc": {"idle_seconds": 0.5, "retention_seconds": 315576000, "max_uses": 1000000000},
-            "magpie": {"gateway_timeout_ms": 100},
-        })
-        self.assertEqual(settings["gc"]["idle_seconds"], 0.5)
-        self.assertEqual(self.load({"folding": {"head_chars": 1000}})["folding"]["head_chars"], 1000)
-        self.assertEqual(self.load({"magpie": {"gateway_timeout_ms": 10000}})["magpie"]["gateway_timeout_ms"], 10000)
 
-    def test_accounting_optional_defaults_and_partial_merge(self):
-        self.assertNotIn("accounting", self.load()["magpie"])
-        for url in ("http://localhost:8080/cost", "https://example.test/cost", "http://[::1]/"):
-            with self.subTest(url=url):
-                self.assertEqual(self.load({"magpie": {"accounting": {"url": url}}})["magpie"]["accounting"],
-                                 {"url": url, "timeout_ms": 500})
-        for timeout in (50, 10000):
-            settings = self.load({"magpie": {"accounting": {"url": "https://example.test", "timeout_ms": timeout}}})
-            self.assertEqual(settings["magpie"]["accounting"]["timeout_ms"], timeout)
-        for value in (None, {}, {"timeout_ms": 500}, {"url": ""}, {"url": "ftp://example.test"},
-                      {"url": "https:///path"}, {"url": "https://exa mple.test"}, {"url": 5},
-                      {"url": "https://[broken"}, {"url": "https://example.test", "timeout_ms": True},
-                      {"url": "https://example.test", "timeout_ms": 49},
-                      {"url": "https://example.test", "timeout_ms": 10001}):
-            with self.subTest(value=value), self.assertRaises(ConfigError):
-                self.load({"magpie": {"accounting": value}})
-        self.write(self.project_path, "[magpie.accounting]\ntimeout_ms=500\n")
-        with self.assertRaises(ConfigError) as raised:
-            self.load()
-        self.assertIn(str(self.project_path), str(raised.exception))
 
     def test_strength_and_numeric_gc_settings_merge_independently(self):
         self.write(self.global_path, "[gc]\nidle_seconds=123\n")
@@ -254,92 +130,9 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(settings["enabled"])
         self.assertEqual(self.load({"gc": {"strength": "off"}})["gc"]["idle_seconds"], 123)
 
-    def test_policy_nested_merge_defaults_and_minimum_inheritance(self):
-        self.write(self.global_path, '[folding]\nminimum_saving_usd=0.2\n'
-                   '[policy]\nauto_roles=["assistant","tool"]\n'
-                   '[policy.cost.input]\nlower=2\nupper=4\n'
-                   '[policy.cost.cache_read]\nlower=0.1\nupper=0.2\n'
-                   '[policy.cost.cache_write]\nlower=2\nupper=4\n'
-                   '[policy.script]\ncommand=["/usr/bin/node","--secret=hidden-token"]\n')
-        self.write(self.project_path, '[policy.cost.input]\nupper=5\n')
-        policy = self.load({"policy": {"min_chars": 30, "cost": {"overhead_usd": 0.01}}})["policy"]
-        self.assertEqual(policy["minimum_saving_usd"], 0.2)
-        self.assertEqual(policy["cost"]["input"], {"lower": 2, "upper": 5})
-        self.assertEqual(policy["cost"]["bytes_per_token_upper"], 8)
-        self.assertEqual(policy["script"]["timeout_ms"], 1000)
-        self.assertEqual(policy["min_chars"], 30)
-        self.assertEqual(self.load({"folding": {"minimum_saving_usd": 0.4}})["policy"]["minimum_saving_usd"], 0.4)
-        self.assertEqual(self.load({"policy": {"minimum_saving_usd": 0}})["policy"]["minimum_saving_usd"], 0)
-        self.write(self.project_path, '[policy]\nminimum_saving_usd=0.3\n')
-        self.assertEqual(self.load({"folding": {"minimum_saving_usd": 0.9}})["policy"]["minimum_saving_usd"], 0.3)
 
-    def test_incremental_bounds_merge_across_sources_without_zero_defaults(self):
-        self.write(self.global_path, '[policy.cost.input]\nlower=1\nupper=2\n'
-                   '[policy.cost.cache_read]\nlower=0.1\nupper=0.2\n'
-                   '[policy.cost.cache_write]\nlower=1\nupper=2\n'
-                   '[policy.cost.incremental]\ntool_calls=0\nmodel_round_trips=0\ninput_tokens=0\n')
-        self.write(self.project_path, '[policy.cost.incremental]\noutput_tokens=0\n'
-                   'input_price_per_million=0\noutput_price_per_million=0\n')
-        with self.assertRaisesRegex(ConfigError, "incremental"):
-            self.load()
-        settings = self.load({"policy": {"cost": {"incremental": {"tool_fees_usd": 0}}}})
-        self.assertEqual(settings["policy"]["cost"]["incremental"], {
-            "tool_calls": 0, "model_round_trips": 0, "input_tokens": 0,
-            "output_tokens": 0, "input_price_per_million": 0,
-            "output_price_per_million": 0, "tool_fees_usd": 0,
-        })
-        self.assertEqual(settings["policy"]["mode"], "cost")
 
-    def test_incremental_bounds_reject_missing_unknown_and_invalid_values(self):
-        cost = {key: {"lower": 0, "upper": 1} for key in ("input", "cache_read", "cache_write")}
-        incremental = {key: 0 for key in (
-            "tool_calls", "model_round_trips", "input_tokens", "output_tokens",
-            "input_price_per_million", "output_price_per_million", "tool_fees_usd",
-        )}
-        self.assertNotIn("incremental", self.load({"policy": {"cost": cost}})["policy"]["cost"])
-        for key in incremental:
-            incomplete = {name: value for name, value in incremental.items() if name != key}
-            with self.subTest(missing=key), self.assertRaises(ConfigError):
-                self.load({"policy": {"cost": {**cost, "incremental": incomplete}}})
-        for key, values in {
-            "tool_calls": [True, -1, 0.5, 9007199254740992],
-            "model_round_trips": [False, -1, 1.0],
-            "input_tokens": [None, float("inf")],
-            "output_tokens": [float("nan"), "0"],
-            "input_price_per_million": [True, -1, float("inf")],
-            "output_price_per_million": [False, float("nan")],
-            "tool_fees_usd": [-0.01, None], "unknown": [0],
-        }.items():
-            for value in values:
-                with self.subTest(key=key, value=value), self.assertRaises(ConfigError):
-                    self.load({"policy": {"cost": {**cost, "incremental": {**incremental, key: value}}}})
 
-    def test_policy_validation_never_executes_commands_or_echoes_values(self):
-        invalid = [
-            {"mode": "hidden-token"}, {"auto_roles": ["tool", "tool"]},
-            {"auto_roles": [{}]}, {"min_chars": True}, {"min_chars": 9007199254740992},
-            {"minimum_saving_usd": float("nan")}, {"cost": {}},
-            {"cost": {"input": {"lower": 2, "upper": 1}}},
-            {"script": {}}, {"script": {"command": ["relative", "hidden-token"]}},
-            {"script": {"command": ["/not/executed", "bad\x00argument"]}},
-            {"certificate_script": {"command": ["/not/executed"], "timeout_ms": 0}},
-            {"script": {"unknown": "hidden-token"}},
-        ]
-        for value in invalid:
-            with self.subTest(value=value), self.assertRaises(ConfigError) as raised:
-                self.load({"policy": value})
-            self.assertIn("<overrides>", str(raised.exception))
-            self.assertNotIn("hidden-token", str(raised.exception))
-        policy = self.load({"policy": {"script": {"command": ["/not/executed", ""]}}})["policy"]
-        self.assertEqual(policy["script"]["max_summary_chars"], 2000)
-        self.write(self.project_path, '[policy.script]\ntimeout_ms=100\n')
-        with self.assertRaises(ConfigError) as raised:
-            self.load()
-        self.assertIn(str(self.project_path), str(raised.exception))
-        self.write(self.project_path, 'hidden-token = [')
-        with self.assertRaises(ConfigError) as raised:
-            self.load()
-        self.assertNotIn("hidden-token", str(raised.exception))
 
     def test_file_limit_and_read_errors(self):
         self.global_path.parent.mkdir(parents=True)
@@ -364,6 +157,60 @@ class ConfigTests(unittest.TestCase):
         with patch("context_folding.config.Path.stat", side_effect=PermissionError("denied")):
             with self.assertRaises(ConfigError):
                 project_config_path(self.project)
+
+
+    def test_annotation_only_defaults_and_input_isolation(self):
+        settings = self.load()
+        self.assertEqual(settings["folding"], {"enabled": True, "delay_requests": 1,
+                         "max_session_bytes": 67108864, "reserve_output_tokens": 0})
+        self.assertEqual(set(settings), {"folding", "annotations", "gc", "magpie"})
+        self.assertNotIn("context_window_tokens", settings["folding"])
+        settings["annotations"]["keep"].append("changed")
+        self.assertEqual(self.load()["annotations"]["keep"], [])
+        self.assertFalse(self.global_path.exists())
+        self.assertFalse(self.project_path.exists())
+
+    def test_budget_and_delay_merge_without_changing_inputs(self):
+        self.write(self.global_path, "[folding]\ndelay_requests=2\ncontext_window_tokens=128000\n")
+        self.write(self.project_path, "[folding]\ndelay_requests=3\nreserve_output_tokens=8000\n")
+        overrides = {"folding": {"delay_requests": 1}, "annotations": {"keep": ["result"]}}
+        original = copy.deepcopy(overrides)
+        settings = self.load(overrides)
+        self.assertEqual(settings["folding"]["context_window_tokens"], 128000)
+        self.assertEqual(settings["folding"]["reserve_output_tokens"], 8000)
+        self.assertEqual(settings["folding"]["delay_requests"], 1)
+        settings["annotations"]["keep"].append("other")
+        self.assertEqual(overrides, original)
+
+    def test_removed_strategies_and_policy_report_migration(self):
+        for field in ("mode", "threshold_tokens", "head_chars", "keep_recent_messages", "minimum_saving_usd"):
+            with self.subTest(field=field), self.assertRaisesRegex(ConfigError, "removed"):
+                self.load({"folding": {field: "economy"}})
+        for config in ({"policy": {}}, {"magpie": {"accounting": {"url": "secret"}}}):
+            with self.assertRaisesRegex(ConfigError, "removed") as raised:
+                self.load(config)
+            self.assertNotIn("secret", str(raised.exception))
+
+    def test_strict_types_unknown_fields_and_safe_ranges(self):
+        invalid = {"folding.delay_requests": [True, -1, 0.5, 9007199254740992],
+                   "folding.context_window_tokens": [False, 0, -1, 1.5],
+                   "folding.reserve_output_tokens": [True, -1, 1.5],
+                   "folding.max_session_bytes": [False, 0, 67108865],
+                   "folding.enabled": ["true", 1], "annotations.keep": [[""], ["a\0b"], "a"],
+                   "magpie.gateway_timeout_ms": [99, 10001],
+                   "magpie.recovery_tool_name": ["", "bad name", "a" * 201]}
+        for key, values in invalid.items():
+            section, field = key.split(".")
+            for value in values:
+                with self.subTest(key=key, value=value), self.assertRaises(ConfigError):
+                    self.load({section: {field: value}})
+        for config in ({"surprise": {}}, {"folding": {"unknown": 1}}, {"folding": []}, []):
+            with self.assertRaises(ConfigError):
+                self.load(config)
+        valid = self.load({"folding": {"delay_requests": 0, "context_window_tokens": 1,
+                            "reserve_output_tokens": 0, "max_session_bytes": 1},
+                           "magpie": {"recovery_tool_name": "context_folding", "gateway_timeout_ms": 100}})
+        self.assertEqual(valid["folding"]["delay_requests"], 0)
 
 
 if __name__ == "__main__":

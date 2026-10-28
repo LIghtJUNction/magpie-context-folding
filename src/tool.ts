@@ -5,36 +5,21 @@ import { ScopeConflictError, Store, digest } from './store.js';
 import type { Snapshot } from './store.js';
 import { addMetrics } from './metrics.js';
 import { statistics } from './statistics.js';
-import { browse, latestVersions, parentIndex, restoreAncestors } from './tree.js';
-import { loadOptions } from './config.js';
-import { strategySchema } from './modes.js';
-import { foldedFingerprint, markFingerprint, operationReceipt, recordOperation } from './operations.js';
-import type { OperationTarget } from './operations.js';
+import { browse, latestVersions, restoreAncestors } from './tree.js';
 
 const peek = z.boolean().default(false);
 const serialize = (value: object): string => JSON.stringify({ ...value, _contextFolding: 'control-result' });
 
-// Zod's string bounds count code points; the folding contract uses UTF-16 offsets.
-// Enforce the new-input limit explicitly while leaving legacy archive decoding intact.
-const summary = z.string().trim().min(1).superRefine((text, ctx) => {
-  if (text.length > 2000) ctx.addIssue({ code: 'too_big', origin: 'string', maximum: 2000, inclusive: true });
-});
-const markSchema = z.union([
-  z.object({ id: z.string(), disposition: z.literal('foldable'), summary }).strict(),
-  z.object({ id: z.string(), disposition: z.enum(['keep', 'unmarked']) }).strict(),
-  z.object({ ids: z.array(z.string()).min(2).max(100), disposition: z.literal('foldable'), summary }).strict(),
-]);
 const scope = z.string().regex(/^[a-f0-9]{64}$/);
+const id = z.string().min(1);
 const argsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('stats'), scope: scope.optional() }).strict(),
-  z.object({ action: z.literal('mode'), scope, mode: strategySchema.optional() }).strict(),
-  z.object({ action: z.literal('list'), scope, id: z.string().optional(), depth: z.number().int().min(0).max(8).default(1),
+  z.object({ action: z.literal('list'), scope, id: id.optional(), depth: z.number().int().min(0).max(8).default(1),
     query: z.string().max(200).optional(), sort: z.enum(['chronological', 'size', 'id', 'version']).default('chronological'),
     order: z.enum(['asc', 'desc']).default('asc'), offset: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(100).default(20) }).strict(),
-  z.object({ action: z.literal('mark'), scope, marks: z.array(markSchema).min(1).max(100) }).strict(),
-  z.object({ action: z.literal('read'), scope, id: z.string(), layer: z.string().default('original'), peek, offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(4000) }).strict(),
-  z.object({ action: z.literal('paste'), scope, id: z.string(), layer: z.string().default('original'), peek,
+  z.object({ action: z.literal('read'), scope, id, layer: z.string().default('original'), peek, offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(4000) }).strict(),
+  z.object({ action: z.literal('paste'), scope, id, layer: z.string().default('original'), peek,
     path: z.string().refine(isAbsolute, 'Use an absolute destination path'),
     offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).optional() }).strict(),
   z.object({ action: z.literal('status'), scope }).strict(),
@@ -58,7 +43,6 @@ export function diagnostic(error: unknown): string {
   if (error instanceof Error && [
     'Unknown context scope', 'Context scope changed concurrently; retry request',
     'Session archive full; original request retained', 'Global archive full; original request retained',
-    'Too many unacknowledged mark operations; complete the next request before marking more',
   ].includes(error.message)) return error.message;
   return 'Context archive unavailable; check settings, archive access and destination permissions';
 }
@@ -67,110 +51,48 @@ function splitsPair(text: string, offset: number): boolean {
   return offset > 0 && /[\uD800-\uDBFF]/.test(text[offset - 1] ?? '') && /[\uDC00-\uDFFF]/.test(text[offset] ?? '');
 }
 
-function applyMarks(snapshot: Snapshot, marks: z.infer<typeof markSchema>[], receipt = false) {
-  // Stage the whole batch, including groups created earlier in this same batch.
-  const next = structuredClone(snapshot);
-  const entries = new Map(next.entries.map(entry => [entry.id, entry]));
-  const groups = new Map((next.groups ?? []).map(group => [group.id, group]));
-  const latest = latestVersions(next);
-  const created: string[] = [];
-  const targets: OperationTarget[] = [];
-  const protection = (id: string): string | undefined => {
-    const group = groups.get(id);
-    return group ? group.children.map(protection).find(reason => reason !== undefined) : entries.get(id)?.protectionReason;
-  };
-  let restored = 0;
-  for (const mark of marks) {
-    if ('ids' in mark) {
-      if (new Set(mark.ids).size !== mark.ids.length) throw new ToolError('Group children must be distinct; no marks changed');
-      const id = `g-${digest(JSON.stringify([mark.ids, mark.summary])).slice(0, 24)}`;
-      const existing = groups.get(id);
-      if (existing && (existing.summary !== mark.summary || JSON.stringify(existing.children) !== JSON.stringify(mark.ids))) {
-        throw new ToolError('Group ID collision; no marks changed');
-      }
-      const parents = parentIndex(next);
-      for (const child of mark.ids) {
-        if (!entries.has(child) && !groups.has(child)) throw new ToolError('Unknown entry or group; no marks changed');
-        if (!existing && parents.has(child)) throw new ToolError('Group member already has a parent; no marks changed');
-      }
-      const pending = [...mark.ids];
-      while (pending.length) {
-        const child = pending.pop()!;
-        const group = groups.get(child);
-        if (group) { pending.push(...group.children); continue; }
-        const entry = entries.get(child)!;
-        if (entry.role === 'user' || entry.mark.disposition === 'keep' || latest.has(child)) {
-          throw new ToolError('Protected entry cannot be grouped; no marks changed');
-        }
-      }
-      const protectedReason = mark.ids.map(protection).find(reason => reason !== undefined);
-      if (protectedReason) {
-        targets.push({ id, state: 'skipped', reason: protectedReason, markRetained: false });
-        continue;
-      }
-      if (!existing) {
-        const group = { id, children: [...mark.ids], summary: mark.summary, enabled: true };
-        (next.groups ??= []).push(group);
-        groups.set(id, group);
-      } else existing.enabled = true;
-      created.push(id);
-      targets.push({ id, state: 'queued', reason: 'awaiting-next-request', expected: markFingerprint(next, id)!,
-        ...(existing?.folded !== undefined && existing.foldedMark !== markFingerprint(next, id)
-          ? { previousFolded: foldedFingerprint(existing.folded) } : {}) });
-      continue;
-    }
-    const entry = entries.get(mark.id);
-    const group = groups.get(mark.id);
-    if (!entry && !group) throw new ToolError('Unknown entry or group; no marks changed');
-    const protectedReason = mark.disposition === 'foldable' ? protection(mark.id) : undefined;
-    if (protectedReason) {
-      targets.push({ id: mark.id, state: 'skipped', reason: protectedReason, markRetained: false });
-      continue;
-    }
-    const previousFolded = entry?.folded ?? group?.folded;
-    const appliedMark = entry?.foldedMark ?? group?.foldedMark;
-    if (entry) {
-      entry.manual = true;
-      if (entry.version) entry.version.automatic = false;
-      entry.mark = mark.disposition === 'foldable'
-        ? { disposition: 'foldable', summary: mark.summary }
-        : { disposition: mark.disposition };
-      if (mark.disposition !== 'foldable') {
-        if (entry.folded !== undefined) restored++;
-        delete entry.folded;
-      }
-    } else if (group) {
-      group.enabled = mark.disposition === 'foldable';
-      if (mark.disposition === 'foldable') group.summary = mark.summary;
-      else {
-        if (group.folded !== undefined) restored++;
-        delete group.folded;
-      }
-    }
-    if (mark.disposition !== 'foldable') restored += restoreAncestors(next, mark.id);
-    targets.push(mark.disposition === 'foldable'
-      ? { id: mark.id, state: 'queued', reason: 'awaiting-next-request', expected: markFingerprint(next, mark.id)!,
-        ...(previousFolded !== undefined && appliedMark !== markFingerprint(next, mark.id)
-          ? { previousFolded: foldedFingerprint(previousFolded) } : {}) }
-      : { id: mark.id, state: 'applied', reason: mark.disposition === 'keep' ? 'kept-expanded' : 'unmarked-expanded' });
+/** Exact legacy IDs win over hash prefixes. Identical content aliases are one result. */
+function resolveEntry(snapshot: Snapshot, id: string) {
+  const exact = snapshot.entries.find(entry => entry.id === id);
+  if (exact || snapshot.groups?.some(group => group.id === id)) return { id, aliases: exact ? [exact] : [] };
+  if (!/^[a-f0-9]{12,64}$/.test(id)) throw new ToolError('Unknown entry or group; hash prefixes require at least 12 hex digits');
+  const aliases = snapshot.entries.filter(entry => entry.annotation?.sha256.startsWith(id));
+  const first = aliases[0];
+  if (!first) throw new ToolError('Unknown entry or group');
+  if (aliases.some(entry => entry.annotation!.sha256 !== first.annotation!.sha256 || entry.text !== first.text)) {
+    throw new ToolError('Ambiguous content hash prefix; provide more hex digits or an exact archive ID');
   }
-  next.metrics = addMetrics(next.metrics, { itemsRestored: restored });
-  const operation = receipt ? recordOperation(next, targets) : undefined;
-  snapshot.entries = next.entries;
-  if (next.groups !== undefined) snapshot.groups = next.groups;
-  snapshot.metrics = next.metrics;
-  if (next.operations !== undefined) snapshot.operations = next.operations;
-  const pending = targets.some(target => target.state === 'queued');
-  return { marked: targets.filter(target => target.state !== 'skipped').length, ...(created.length ? { groups: created } : {}),
-    pending, ...(operation ?? {}),
-    message: pending ? 'Marks saved. The next request automatically reports its folding attempt; foldable marks persist until changed.'
-      : targets.some(target => target.state === 'skipped') ? 'Protected items were left unchanged; see each target reason.' : 'Marks applied; originals remain expanded.' };
+  return { id: first.id, aliases };
+}
+
+/** Recovery is deliberately independent of current configuration and folding policy. */
+function keepExpanded(snapshot: Snapshot, id: string): void {
+  const entry = snapshot.entries.find(entry => entry.id === id);
+  const group = snapshot.groups?.find(group => group.id === id);
+  let restored = 0;
+  if (entry) {
+    if (entry.folded !== undefined) restored++;
+    entry.mark = { disposition: 'keep' };
+    entry.manual = true;
+    if (entry.version) entry.version.automatic = false;
+    delete entry.folded;
+    delete entry.foldedMark;
+    for (const occurrence of Object.values(entry.occurrences ?? {})) delete occurrence.folded;
+  }
+  if (group) {
+    if (group.folded !== undefined) restored++;
+    group.enabled = false;
+    delete group.folded;
+    delete group.foldedMark;
+  }
+  restored += restoreAncestors(snapshot, id);
+  snapshot.metrics = addMetrics(snapshot.metrics, { itemsRestored: restored });
 }
 
 /** Report numeric bounds without exposing supplied text or arbitrary Zod messages. */
 function validationDetails(error: z.ZodError, input: unknown) {
   const details: { path: PropertyKey[]; code: string; limit?: number | bigint; actual?: number;
-    unit?: string; hint?: string }[] = [];
+    unit?: string }[] = [];
   const visit = (issues: readonly z.core.$ZodIssue[], prefix: PropertyKey[] = []) => {
     for (const issue of issues) {
       const path = [...prefix, ...issue.path];
@@ -186,8 +108,8 @@ function validationDetails(error: z.ZodError, input: unknown) {
         const limit = issue.code === 'too_big' ? issue.maximum : issue.minimum;
         detail.limit = limit;
         if (typeof value === 'string') {
-          detail.actual = path.at(-1) === 'summary' ? value.trim().length : [...value].length;
-          detail.unit = path.at(-1) === 'summary' ? 'UTF-16 code units' : 'Unicode code points';
+          detail.actual = [...value].length;
+          detail.unit = 'Unicode code points';
         } else if (Array.isArray(value)) {
           detail.actual = value.length;
           detail.unit = 'items';
@@ -195,9 +117,6 @@ function validationDetails(error: z.ZodError, input: unknown) {
           detail.actual = value;
           detail.unit = 'value';
         }
-        if (path.at(-1) === 'summary') detail.hint = issue.code === 'too_big'
-          ? `Shorten summary to at most ${limit} UTF-16 code units after trimming.`
-          : 'Provide a non-empty summary after trimming.';
       }
       if (!details.some(previous => JSON.stringify(previous) === JSON.stringify(detail))) details.push(detail);
     }
@@ -215,8 +134,9 @@ export async function execute(input: unknown): Promise<string> {
     const store = new Store();
     if (args.action === 'read' || args.action === 'paste') {
       const recover = () => store.transaction(args.scope, false, 64 * 1024 * 1024, snapshot => {
-        let entry = snapshot.entries.find(entry => entry.id === args.id);
-        const group = snapshot.groups?.find(group => group.id === args.id);
+        const resolved = resolveEntry(snapshot, args.id);
+        const entry = snapshot.entries.find(entry => entry.id === resolved.id);
+        const group = snapshot.groups?.find(group => group.id === resolved.id);
         if (!entry && !group) throw new ToolError('Unknown entry or group');
         if (group && args.layer !== 'original') throw new ToolError('Groups expose only the original manifest');
         const layer = args.layer === 'original' ? undefined : entry?.layers.find(layer => layer.id === args.layer);
@@ -229,11 +149,11 @@ export async function execute(input: unknown): Promise<string> {
         }
         // Protect the source itself and every enclosing group, including historical-layer reads.
         if (!args.peek) {
-          applyMarks(snapshot, [{ id: args.id, disposition: 'keep' }]);
-          entry = snapshot.entries.find(entry => entry.id === args.id);
+          if (resolved.aliases.length) for (const alias of resolved.aliases) keepExpanded(snapshot, alias.id);
+          else keepExpanded(snapshot, resolved.id);
         }
         return {
-          id: args.id, layer: args.layer, previousId: layer?.previousId ?? null, kept: !args.peek,
+          id: resolved.id, layer: args.layer, previousId: layer?.previousId ?? null, kept: !args.peek,
           currentLayer: args.peek ? entry?.layers.find(layer => layer.text === entry.folded)?.id ?? 'original' : 'original',
           ...(entry?.version ? { version: entry.version, latestVersion: latestVersions(snapshot).has(entry.id) } : {}),
           text: text.slice(args.offset, end), offset: args.offset,
@@ -258,32 +178,15 @@ export async function execute(input: unknown): Promise<string> {
       }
       return serialize(source);
     }
-    const quotaPolicy = args.action === 'mark' && args.marks.some(mark => mark.disposition === 'foldable')
-      ? 'enforce' : 'preserve';
-    const maxBytes = quotaPolicy === 'enforce' ? (await loadOptions()).maxSessionBytes : 64 * 1024 * 1024;
-    const operation = () => store.transaction(args.scope, false, maxBytes, (snapshot) => {
+    const operation = () => store.transaction(args.scope, false, 64 * 1024 * 1024, (snapshot) => {
       switch (args.action) {
-        case 'mode': {
-          if (args.mode !== undefined) {
-            if (snapshot.configuredMode !== 'agentic') throw new ToolError('Mode switching requires configured mode=agentic');
-            snapshot.agenticMode = args.mode;
-          }
-          return {
-            configuredMode: snapshot.configuredMode ?? 'unknown',
-            activeMode: snapshot.configuredMode === 'agentic' ? snapshot.agenticMode ?? 'intelligence' : snapshot.configuredMode ?? 'unknown',
-            availableModes: ['intelligence', 'balanced', 'economy'],
-            effectiveOnNextRequest: args.mode !== undefined,
-          };
-        }
         case 'list': return browse(snapshot, args);
-        case 'mark': return applyMarks(snapshot, args.marks, true);
         case 'status': return { entries: snapshot.entries.length, groups: snapshot.groups?.length ?? 0,
           folded: snapshot.entries.filter(entry => entry.folded !== undefined).length + (snapshot.groups ?? []).filter(group => group.folded !== undefined).length,
-          decision: snapshot.decision, metrics: snapshot.metrics,
-          operations: (snapshot.operations ?? []).map(operationReceipt) };
+          decision: snapshot.decision, metrics: snapshot.metrics };
         case 'forget': {
           if (snapshot.entries.some(entry => entry.folded !== undefined) || snapshot.groups?.some(group => group.folded !== undefined)) {
-            throw new ToolError('Restore folded entries and groups with mark keep before forgetting recovery data');
+            throw new ToolError('Read folded entries and group manifests without peek before forgetting recovery data');
           }
           // Explicit scope disposal; future requests may archive the client's original history again.
           snapshot.entries = [];
@@ -292,7 +195,7 @@ export async function execute(input: unknown): Promise<string> {
           return { forgotten: true };
         }
       }
-    }, undefined, quotaPolicy);
+    }, undefined, 'preserve');
     const result = args.action === 'list' || args.action === 'status'
       ? await retryArchiveRead(operation) : await operation();
     return serialize(result);

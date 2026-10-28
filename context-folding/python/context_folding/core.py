@@ -11,10 +11,9 @@ import re
 import sqlite3
 import threading
 import time
-from collections import Counter
 from typing import Any
 
-REFERENCE = re.compile(r"\[\[cf:v1:([a-f0-9]{24})\]\]")
+REFERENCE = re.compile(r"\[\[cf:(v1|v2):([a-f0-9]{12,64})\]\]")
 MAX_STATE = 64 * 1024 * 1024
 MAX_TEXT = 4 * 1024 * 1024
 
@@ -57,9 +56,33 @@ def _nodes(snapshot: dict) -> dict:
     return {node["id"]: node for node in snapshot["entries"] + snapshot["groups"]}
 
 
-def _entry(snapshot: dict, node_id: Any, trash: bool = False) -> dict:
+def _content_hash(node: dict) -> str:
+    return hashlib.sha256(node["text"].encode("utf-8")).hexdigest()
+
+
+def _short_hash(snapshot: dict, full: str) -> str:
+    texts = {}
+    for node in snapshot["entries"]:
+        sha256 = _content_hash(node)
+        if sha256 in texts and texts[sha256] != node["text"]:
+            raise FoldingError("hash_collision", "Different originals have the same content hash")
+        texts[sha256] = node["text"]
+    hashes = texts.keys()
+    length = 12
+    while any(other != full and other.startswith(full[:length]) for other in hashes):
+        length += 2
+    return full[:length]
+
+
+def _entry(snapshot: dict, node_id: Any, trash: bool = False, *, content_hash: bool = False) -> dict:
     _string(node_id, "id", 100)
-    node = _nodes(snapshot).get(node_id)
+    node = None if content_hash else _nodes(snapshot).get(node_id)
+    if node is None and re.fullmatch(r"[a-f0-9]{12,64}", node_id):
+        matches = [n for n in snapshot["entries"] if _content_hash(n).startswith(node_id)
+                   and (trash or n.get("trashedAt") is None)]
+        if len({n["text"] for n in matches}) > 1:
+            raise FoldingError("ambiguous_hash", "Ambiguous content hash; supply a longer prefix")
+        node = next(iter(matches), None)
     if node is None or (node.get("trashedAt") is not None and not trash):
         raise FoldingError("not_found", "Archive item unavailable in this scope")
     return node
@@ -155,12 +178,21 @@ class Client:
                               "retention_seconds": "retentionSeconds", "auto_purge": "autoPurge"}
                     snapshot["config"]["gc"] = {dest: self.config["gc"][src] for src, dest in fields.items()}
                 result = self._dispatch(snapshot, request, now)
+                if request["action"] == "fold" and not result["references"]:
+                    # A literal/no-benefit pass creates no archive or lifecycle
+                    # writes and is not blocked by a quota for new payloads.
+                    self._db.rollback()
+                    return result
                 from .lifecycle import maintain_lifecycle
                 maintain_lifecycle(snapshot, now, collect=request["action"] not in ("gc", "skills", "restore"))
                 if gc_default and not (request["action"] == "gc" and request.get("mode") == "configure"):
                     del snapshot["config"]["gc"]
                 encoded = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
-                if len(encoded.encode()) > MAX_STATE:
+                # Lowering the next-write quota must not make existing originals
+                # unreadable. Recovery cannot add archived payloads.
+                recovery = request["action"] in ("read", "paste", "resolve", "restore")
+                ceiling = MAX_STATE if recovery else min(MAX_STATE, self.config["folding"]["max_session_bytes"])
+                if len(encoded.encode()) > ceiling:
                     raise FoldingError("quota", "Scope quota exceeded")
                 total = self._db.execute("SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM scopes WHERE scope<>?", (scope,)).fetchone()[0]
                 if total + len(encoded.encode()) > MAX_STATE * 4:
@@ -181,14 +213,15 @@ class Client:
     def put(self, scope: str, text: str, **options):
         return self.call({**options, "action": "put", "scope": scope, "text": text})
 
+    def fold(self, scope: str, text: str, **options):
+        """Immediately fold explicitly annotated text in one durable transaction."""
+        return self.call({**options, "action": "fold", "scope": scope, "text": text})
+
     def read(self, scope: str, id: str, **options):
         return self.call({**options, "action": "read", "scope": scope, "id": id})
 
     def list(self, scope: str, **options):
         return self.call({**options, "action": "list", "scope": scope})
-
-    def mark(self, scope: str, id: str, disposition: str, **options):
-        return self.call({**options, "action": "mark", "scope": scope, "id": id, "disposition": disposition})
 
     def render(self, scope: str, ids: list[str], **options):
         return self.call({**options, "action": "render", "scope": scope, "ids": ids})
@@ -211,7 +244,15 @@ class Client:
             if any(key in request for key in ("text", "path", "id")) or any("files" in f for f in files):
                 _error("Ambiguous source batch")
             defaults = {k: v for k, v in request.items() if k != "files"}
-            return {"files": [self._source(snapshot, {**defaults, **item, "action": request["action"], "scope": request["scope"]}, now) for item in files]}
+            results = []
+            for index, item in enumerate(files):
+                fields = {**defaults, **item, "action": request["action"], "scope": request["scope"]}
+                if "occurrence" in defaults and "occurrence" not in item:
+                    # Batch positions are separate appearances even when their
+                    # content is equal. Reorders safely restart affected delays.
+                    fields["occurrence"] = _hash([defaults["occurrence"], "file", index])
+                results.append(self._source(snapshot, fields, now))
+            return {"files": results}
         inputs = [key for key in ("text", "path", "id") if key in request]
         if len(inputs) != 1:
             _error("Supply exactly one source text, path or id")
@@ -246,7 +287,7 @@ class Client:
             if path:
                 options["source"] = {"path": str(Path(path).absolute()), "range": "full"}
             node = _entry(snapshot, self._put(snapshot, options, now)["id"])
-        if not self.config["annotations"]["enabled"] and request["action"] == "read-source":
+        if (not self.config["folding"]["enabled"] or not self.config["annotations"]["enabled"]) and request["action"] == "read-source":
             return self._read(snapshot, {**request, "action": "read", "id": node["id"], "mode": request.get("mode", "original")}, now)
         if language is not None:
             from .javascript import normalize_language
@@ -261,32 +302,27 @@ class Client:
                            for r in annotation["regions"] if r.get("manual")})
         styles = comment_styles(request["commentStyles"]) if "commentStyles" in request else (
             annotation.get("commentStyles", []) if annotation else [])
-        if annotation is None or (language is not None and annotation["language"] != language) or styles != annotation.get("commentStyles", []):
+        if annotation is None or annotation.get("version") != 2 or (language is not None and annotation["language"] != language) or styles != annotation.get("commentStyles", []):
             annotation = discover_source(text, language or (annotation["language"] if annotation else None), path, styles)
+            annotation["version"] = 2
             # Payloads and the exact original commit together in Client.call.
             for region in annotation["regions"]:
                 disposition = manual.get((region["name"], region["start"], region["end"]))
                 if disposition is not None:
                     region.update(disposition=disposition, manual=True)
                 result = self._put(snapshot, {"scope": request["scope"], "text": text[region["start"]:region["end"]]}, now)
-                region.update(archiveId=result["id"], reference=result["reference"])
+                region.update(archiveId=result["id"])
             node["annotation"] = annotation
+        for region in annotation["regions"]:
+            region["reference"] = f"[[cf:v2:{_short_hash(snapshot, region['sha256'])}]]"
         keep = select_regions(annotation["regions"], request.get("keep", []))
+        keep |= select_regions(annotation["regions"], request.get("expand", []))
         for region in annotation["regions"]:
             if region["id"] in keep:
                 region["disposition"] = "keep"
                 region["manual"] = True
-        marks = request.get("marks", [])
-        if not isinstance(marks, list) or len(marks) > 10000:
-            _error("Invalid source marks")
-        for mark in marks:
-            if not isinstance(mark, dict) or mark.get("disposition") not in ("foldable", "keep", "unmarked"):
-                _error("Invalid source mark")
-            selected = select_regions(annotation["regions"], [mark.get("id", mark.get("name"))])
-            for region in annotation["regions"]:
-                if region["id"] in selected:
-                    region["disposition"] = mark["disposition"]
-                    region["manual"] = True
+        if "marks" in request:
+            _error("Source marks were removed; use explicit annotations and expand/keep selectors")
         manual.update({(r["name"], r["start"], r["end"]): r["disposition"]
                        for r in annotation["regions"] if r.get("manual")})
         if manual:
@@ -294,12 +330,14 @@ class Client:
                                         "disposition": disposition}
                                        for (name, start, end), disposition in manual.items()]
         if request["action"] == "read-source":
-            return self._read(snapshot, {**request, "action": "read", "id": node["id"]}, now)
+            return self._read(snapshot, {**request, "action": "read", "id": node["id"], "_sourceProjection": True}, now)
         return {"id": node["id"], "reference": _ref(node["id"]),
                 "sha256": hashlib.sha256(text.encode()).hexdigest(), **annotation}
 
     def _dispatch(self, snapshot: dict, request: dict, now: float) -> Any:
         action = request["action"]
+        if action == "fold":
+            return self._fold(snapshot, request, now)
         if action in ("annotate", "read-source"):
             return self._source(snapshot, request, now)
         if action == "put":
@@ -309,36 +347,11 @@ class Client:
             return dispatch_lifecycle(snapshot, request, now)
         if action == "list":
             return self._browse(snapshot, request)
-        if action == "mark":
-            marks = request.get("marks", [request])
-            if not isinstance(marks, list) or not 1 <= len(marks) <= 100:
-                _error("Invalid marks")
-            for mark in marks:
-                if not isinstance(mark, dict):
-                    _error("Invalid mark")
-                node = _entry(snapshot, mark.get("id"))
-                disposition = mark.get("disposition")
-                if disposition not in ("foldable", "keep", "unmarked"):
-                    _error("Invalid disposition")
-                if disposition == "foldable":
-                    summary = _string(mark.get("summary"), "summary").strip()
-                    if not summary:
-                        _error("Empty summary")
-                    node["manual"] = True
-                    if "children" in node:
-                        node.update(summary=summary, enabled=True)
-                    else:
-                        node["mark"] = {"disposition": disposition, "summary": summary}
-                else:
-                    _restore(snapshot, node["id"])
-                    if "text" in node:
-                        node["mark"] = {"disposition": disposition}
-            return {"marked": len(marks)}
+        if action in ("mark", "group"):
+            _error("mark/group were removed; use explicit @context-fold begin/end annotations")
         if action == "restore":
             _restore(snapshot, request.get("id"))
             return {"restored": True}
-        if action == "group":
-            return self._group(snapshot, request, now)
         if action == "render":
             return self._render(snapshot, request, now)
         if action == "resolve":
@@ -351,6 +364,49 @@ class Client:
                     "trashed": sum(n.get("trashedAt") is not None for n in _nodes(snapshot).values()),
                     "offsetUnit": "unicode-code-points"}
         _error("Unknown action")
+
+    def _fold(self, snapshot: dict, request: dict, now: float) -> dict:
+        """An explicit operation, independent of host-driven projection cycles.
+
+        The caller publishes this complete projection only after Client.call has
+        committed every referenced original. Existing references remain literal.
+        """
+        from .annotations import compact_source, discover_source
+        if set(request) - {"action", "scope", "text", "language", "commentStyles"}:
+            _error("fold accepts only scope, text, language and commentStyles")
+        text = request.get("text")
+        if text != "":
+            _string(text, "text", MAX_TEXT)
+        language = request.get("language")
+        if language is not None:
+            _string(language, "language", 100)
+        annotation = discover_source(text, language, styles=request.get("commentStyles"))
+        # Allocate prefixes against the complete candidate batch without storing
+        # tiny blocks that cannot make the UTF-8 output shorter.
+        candidates = [(region, text[region["start"]:region["end"]]) for region in annotation["regions"]]
+        candidates = [(region, payload) for region, payload in candidates
+                      if len(payload.encode("utf-8")) > len(f"[[cf:v2:{region['id']}]]")]
+        catalog = {"entries": [*snapshot["entries"], *({"text": payload} for _, payload in candidates)]}
+        annotation["regions"] = []
+        for region, payload in candidates:
+            region["reference"] = f"[[cf:v2:{_short_hash(catalog, region['sha256'])}]]"
+            if len(region["reference"]) >= len(payload.encode("utf-8")):
+                continue
+            archived = self._put(snapshot, {"scope": request["scope"], "text": payload}, now)
+            region["archiveId"] = archived["id"]
+            # The reference can outlive the current roots list (for example in a
+            # piped file). Keep its original live under the existing GC rules.
+            _entry(snapshot, archived["id"])["folded"] = region["reference"]
+            annotation["regions"].append(region)
+        view = compact_source(text, annotation, allow_reference_literals=True)
+        by_location = {(r["id"], r["startLine"], r["endLine"]): r for r in annotation["regions"]}
+        references = []
+        for item in view["foldedRegions"]:
+            region = by_location[item["id"], item["startLine"], item["endLine"]]
+            references.append({"id": region["sha256"], "label": region["name"],
+                               "sha256": region["sha256"], "reference": region["reference"],
+                               "archiveId": region["archiveId"]})
+        return {"scope": request["scope"], "text": view["text"], "references": references}
 
     def _put(self, snapshot: dict, request: dict, now: float) -> dict:
         text = _string(request.get("text"), "text", MAX_TEXT)
@@ -389,119 +445,37 @@ class Client:
         kind = "file" if source else "similar"
         if source:
             entry["source"] = source
-        else:
-            if role != "user" and 1024 <= len(text) <= 262144:
-                right = Counter(text.splitlines())
-                best = 0.92
-                for candidate in snapshot["entries"][-64:]:
-                    if candidate["role"] != role or candidate.get("source") or candidate.get("trashedAt") is not None:
-                        continue
-                    left = Counter(candidate["text"].splitlines())
-                    if min(len(left), len(right)) < 8:
-                        continue
-                    overlap = sum((len(line) + 1) * count for line, count in (left & right).items())
-                    score = overlap / (max(len(text), len(candidate["text"])) + 1)
-                    if score >= best:
-                        best, previous = score, candidate
-                if previous:
-                    series = previous.get("version", {}).get("series", _hash([previous["id"]])[:24])
-                    previous.setdefault("version", {"series": series, "number": 1, "kind": kind})
-                    previous = max((n for n in snapshot["entries"] if
-                                    n.get("version", {}).get("series") == series),
-                                   key=lambda n: n["version"]["number"])
         if series is not None:
             entry["version"] = {"series": series, "number": previous["version"]["number"] + 1 if previous else 1, "kind": kind}
             if previous:
                 entry["version"]["previousId"] = previous["id"]
-                if not previous.get("manual") and previous["mark"]["disposition"] != "keep":
-                    remaining = Counter(text.splitlines())
-                    removed = []
-                    for line in previous["text"].splitlines():
-                        if remaining[line]:
-                            remaining[line] -= 1
-                        else:
-                            removed.append(line)
-                    delta = json.dumps(removed, ensure_ascii=False)
-                    if len(delta) <= 1400:
-                        qualifier = "Old file observation" if source else "Similar earlier observation; similarity is not supersession"
-                        previous["mark"] = {"disposition": "foldable", "summary": f"{qualifier}; newer version {entry['version']['number']}. Old-only lines: {delta}"}
         snapshot["entries"].append(entry)
         snapshot["roots"].append(node_id)
         return {"id": node_id, "reference": _ref(node_id), "version": entry.get("version")}
 
-    def _group(self, snapshot: dict, request: dict, now: float) -> dict:
-        children = _ids(request.get("ids"), 2)
-        if len(children) > 100:
-            _error("Too many group children")
-        summary = _string(request.get("summary"), "summary").strip()
-        if not summary:
-            _error("Empty summary")
-        parents = {child for group in snapshot["groups"] for child in group["children"]}
-        latest = _latest(snapshot)
-        pending = list(children)
-        while pending:
-            node = _entry(snapshot, pending.pop())
-            if "children" in node:
-                pending.extend(node["children"])
-            elif node["role"] == "user" or node["mark"]["disposition"] == "keep" or node["id"] in latest:
-                _error("Protected entry cannot be grouped")
-        node_id = _hash([request["scope"], children, summary])[:24]
-        existing = _nodes(snapshot).get(node_id)
-        if existing:
-            existing["enabled"] = True
-            existing.pop("trashedAt", None)
-            existing["lastUsedAt"] = now
-            return {"id": node_id, "reference": _ref(node_id)}
-        if parents.intersection(children):
-            _error("Group children must be root nodes")
-        snapshot["groups"].append({"id": node_id, "children": children, "summary": summary, "enabled": True,
-                                   "createdAt": now, "lastUsedAt": now, "reads": 0, "folds": 0})
-        return {"id": node_id, "reference": _ref(node_id)}
-
     def _render(self, snapshot: dict, request: dict, now: float) -> dict:
+        """Project only explicit annotations; legacy marks/groups never choose text."""
         ids = _ids(request.get("ids"))
         protected = set(_ids(request.get("protected", [])))
-        latest = _latest(snapshot)
-        nodes = [_entry(snapshot, node_id) for node_id in ids]
-        def descendants(node):
-            members, seen, pending = [], set(), [node]
-            while pending:
-                current = pending.pop()
-                if current["id"] in seen:
-                    _error("Overlapping or cyclic group")
-                seen.add(current["id"])
-                members.append(current)
-                pending.extend(_entry(snapshot, child) for child in reversed(current.get("children", [])))
-            return members
         output = []
-        occupied = set()
         before = after = 0
-        for node in nodes:
-            descendants_ = descendants(node)
-            member_ids = {n["id"] for n in descendants_}
-            if occupied & member_ids:
-                _error("Overlapping render selections")
-            occupied.update(member_ids)
-            members = [n for n in descendants_ if "children" not in n]
-            original = (json.dumps([{key: n[key] for key in ("id", "role", "text")} for n in members],
-                                   ensure_ascii=False, separators=(",", ":"))
-                        if "children" in node else node["text"])
-            safe = not (member_ids & protected) and all(
-                n["role"] != "user" and n["mark"]["disposition"] != "keep" and n["id"] not in latest
-                and not (n.get("manual") and n["mark"]["disposition"] == "unmarked") for n in members)
-            safe = safe and all(n.get("enabled", True) for n in descendants_ if "children" in n)
-            enabled = node.get("enabled", False) if "children" in node else node["mark"]["disposition"] == "foldable"
-            summary = node.get("summary", node.get("mark", {}).get("summary", ""))
-            folded = _ref(node["id"]) + " " + summary
-            use = enabled and safe and len(folded) < len(original)
-            if use:
-                node["folded"] = folded
-                node["folds"] = node.get("folds", 0) + 1
+        for identifier in ids:
+            node = _entry(snapshot, identifier)
+            original = _text(node)
+            if "children" in node or identifier in protected or node["role"] == "user":
+                value = original
             else:
-                node.pop("folded", None)
-            node["lastUsedAt"] = now
-            value = folded if use else original
-            output.append({"id": node["id"], "text": value, "folded": use})
+                fields = {**request, "action": "read-source", "id": identifier, "limit": 24000}
+                fields.pop("ids", None)
+                if "occurrence" in fields:
+                    fields["occurrence"] = _hash([fields["occurrence"], identifier])
+                view = self._source(snapshot, fields, now)
+                if view["nextOffset"] is not None:
+                    # Render has no paging contract; avoid publishing a truncated projection.
+                    value = original
+                else:
+                    value = view["text"]
+            output.append({"id": identifier, "text": value, "folded": value != original})
             before += len(original)
             after += len(value)
         return {"entries": output, "beforeChars": before, "afterChars": after}
@@ -528,7 +502,10 @@ class Client:
                     literal = value[start:match.start()]
                     if "[[cf:" in literal:
                         _error("Malformed or unsupported reference")
-                    node = _entry(snapshot, match.group(1))
+                    version, identifier = match.groups()
+                    if version == "v1" and len(identifier) != 24:
+                        _error("Malformed or unsupported reference")
+                    node = _entry(snapshot, identifier, content_hash=version == "v2")
                     if "children" in node:
                         _error("Group manifests cannot be substituted into tool parameters")
                     charge(len(literal.encode("utf-8")) + len(node["text"].encode("utf-8")))
@@ -569,16 +546,50 @@ class Client:
         text = _text(node)
         original = text
         source_view = {}
-        default_fold = self.config["annotations"]["enabled"] and self.config["annotations"]["default_fold"]
-        mode = request.get("mode", "folded" if node.get("annotation") and request["action"] == "read" and default_fold else "original")
+        if "peek" in request and type(request["peek"]) is not bool:
+            _error("peek must be boolean")
+        default_fold = self.config["folding"]["enabled"] and self.config["annotations"]["enabled"] and self.config["annotations"]["default_fold"]
+        mode = request.get("mode", "folded" if request.get("_sourceProjection") and node.get("annotation") and default_fold else "original")
+        ready = self.config["folding"]["delay_requests"] == 0
+        occurrence, cycle = request.get("occurrence"), request.get("requestCycle")
+        if (occurrence is None) != (cycle is None):
+            _error("Source projection requires occurrence and requestCycle together")
+        if occurrence is not None:
+            _string(occurrence, "occurrence", 200)
+            _integer(cycle, "requestCycle", 0, 9007199254740991)
+            observations = snapshot.setdefault("sourceOccurrences", {})
+            previous = observations.get(occurrence)
+            if previous and cycle < previous["lastCycle"]:
+                _error("requestCycle cannot move backwards")
+            if previous is None or previous["id"] != node["id"]:
+                previous = {"id": node["id"], "firstCycle": cycle, "lastCycle": cycle}
+                observations[occurrence] = previous
+            # A retry with the same cycle does not consume delay. The host owns
+            # request-cycle progression; a new read must use a fresh occurrence.
+            previous["lastCycle"] = cycle
+            ready = cycle - previous["firstCycle"] >= self.config["folding"]["delay_requests"]
+        if mode == "folded" and (not ready or not self.config["folding"]["enabled"] or not self.config["annotations"]["enabled"]):
+            mode = "original"
         if mode not in ("folded", "original"):
             _error("Invalid read mode")
+        if node.get("annotation") and node["annotation"].get("version") != 2:
+            # Legacy AST-discovered regions remain recoverable, never newly folded.
+            mode = "original"
+        if mode == "original" and request["action"] == "read" and not request.get("_sourceProjection") and not request.get("peek", False):
+            full = _content_hash(node) if "text" in node else None
+            for owner in snapshot["entries"]:
+                for region in owner.get("annotation", {}).get("regions", []):
+                    if region.get("archiveId") == node["id"] or (full and region.get("sha256") == full):
+                        region.update(disposition="keep", manual=True)
         if node.get("annotation") and request["action"] == "read":
             from .annotations import ReferenceLiteralError, compact_source, select_regions
             expand_mode = request.get("expandMode", "recursive")
             if expand_mode not in ("single", "recursive"):
                 _error("Invalid source expand mode")
             select_regions(node["annotation"]["regions"], request.get("expand", []))
+            if mode == "original" and not request.get("_sourceProjection") and not request.get("peek", False):
+                _restore(snapshot, node["id"])
+                node["mark"] = {"disposition": "keep"}
             if mode == "folded":
                 annotation = {**node["annotation"], "regions": [dict(r) for r in node["annotation"]["regions"]]}
                 for region in annotation["regions"]:
@@ -595,7 +606,9 @@ class Client:
                 source_view = view
             source_view.update(mode=mode, reference=_ref(node["id"]),
                                originalChars=len(original), originalSha256=hashlib.sha256(original.encode()).hexdigest(),
-                               parser=node["annotation"]["parser"], limitations=node["annotation"]["limitations"])
+                               parser=node["annotation"]["parser"], limitations=node["annotation"]["limitations"],
+                               foldedRegions=source_view.get("foldedRegions", []),
+                               delayReason=None if ready else "host-request-cycle-required" if occurrence is None else "waiting-for-request-cycle")
         offset = _integer(request.get("offset", 0), "offset", 0, len(text))
         limit = _integer(request.get("limit", len(text) or 1) if request["action"] == "paste" else request.get("limit", 4000), "limit", 1, MAX_TEXT if request["action"] == "paste" else 24000)
         end = min(len(text), offset + limit)
