@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "checked_date": "2026-10-28",
+  "timezone": "Asia/Taipei",
+  "measurement": "scripted-smoke",
+  "model_inference_performed": false,
+  "harbor_version": "0.25.0",
+  "workflow_run_url": "https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/40612866824",
+  "tested_pr_head": "b601b26a190ee6130e75cf0ded58792446ce3293",
+  "artifact_id": 12783801662,
+  "artifact_sha256": "99816b255d427b3704eb9190fb55286ae6fa32c4008d03d30e9c683a2cbaebf7",
+  "workflow_conclusion": "success",
+  "actual_container_trials": 8,
+  "exceptions": 0,
+  "all_expected_controls_passed": true,
+  "report_generated_from_real_results": true,
+  "model_efficiency_comparisons_eligible": 0,
+  "trials": [
+    {
+      "task_name": "config-precedence",
+      "task_checksum": "c9f021219900e470a4f5479c690a01a3228af34efdb60581ae8aa40a2da493d6",
+      "agent": "magpie-scripted-smoke",
+      "mode": "baseline",
+      "reward": 1.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": 5,
+      "folded_requests": 0,
+      "recovery_calls": 0,
+      "measurement": "scripted-smoke",
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": "e4c14849f23ea11486c654d54c15a51f8b3abe7b",
+      "source_tree_sha256": "76b1df1f74e83c32b970c705b68c7501b17847a9203d5b20383e348d081052d3"
+    },
+    {
+      "task_name": "config-precedence",
+      "task_checksum": "c9f021219900e470a4f5479c690a01a3228af34efdb60581ae8aa40a2da493d6",
+      "agent": "magpie-scripted-smoke",
+      "mode": "folding",
+      "reward": 1.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": 5,
+      "folded_requests": 1,
+      "recovery_calls": 1,
+      "measurement": "scripted-smoke",
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": "e4c14849f23ea11486c654d54c15a51f8b3abe7b",
+      "source_tree_sha256": "76b1df1f74e83c32b970c705b68c7501b17847a9203d5b20383e348d081052d3"
+    },
+    {
+      "task_name": "config-precedence",
+      "task_checksum": "c9f021219900e470a4f5479c690a01a3228af34efdb60581ae8aa40a2da493d6",
+      "agent": "nop",
+      "mode": null,
+      "reward": 0.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": null,
+      "folded_requests": null,
+      "recovery_calls": null,
+      "measurement": null,
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": null,
+      "source_tree_sha256": null
+    },
+    {
+      "task_name": "config-precedence",
+      "task_checksum": "c9f021219900e470a4f5479c690a01a3228af34efdb60581ae8aa40a2da493d6",
+      "agent": "oracle",
+      "mode": null,
+      "reward": 1.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": null,
+      "folded_requests": null,
+      "recovery_calls": null,
+      "measurement": null,
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": null,
+      "source_tree_sha256": null
+    },
+    {
+      "task_name": "ledger-reconciliation",
+      "task_checksum": "942cb2236562f66292b8dc8d1f8e742511c5b74adbbaf2cd0b265534f1b7d2a8",
+      "agent": "magpie-scripted-smoke",
+      "mode": "baseline",
+      "reward": 1.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": 5,
+      "folded_requests": 0,
+      "recovery_calls": 0,
+      "measurement": "scripted-smoke",
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": "e4c14849f23ea11486c654d54c15a51f8b3abe7b",
+      "source_tree_sha256": "76b1df1f74e83c32b970c705b68c7501b17847a9203d5b20383e348d081052d3"
+    },
+    {
+      "task_name": "ledger-reconciliation",
+      "task_checksum": "942cb2236562f66292b8dc8d1f8e742511c5b74adbbaf2cd0b265534f1b7d2a8",
+      "agent": "magpie-scripted-smoke",
+      "mode": "folding",
+      "reward": 1.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": 5,
+      "folded_requests": 1,
+      "recovery_calls": 1,
+      "measurement": "scripted-smoke",
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": "e4c14849f23ea11486c654d54c15a51f8b3abe7b",
+      "source_tree_sha256": "76b1df1f74e83c32b970c705b68c7501b17847a9203d5b20383e348d081052d3"
+    },
+    {
+      "task_name": "ledger-reconciliation",
+      "task_checksum": "942cb2236562f66292b8dc8d1f8e742511c5b74adbbaf2cd0b265534f1b7d2a8",
+      "agent": "nop",
+      "mode": null,
+      "reward": 0.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": null,
+      "folded_requests": null,
+      "recovery_calls": null,
+      "measurement": null,
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": null,
+      "source_tree_sha256": null
+    },
+    {
+      "task_name": "ledger-reconciliation",
+      "task_checksum": "942cb2236562f66292b8dc8d1f8e742511c5b74adbbaf2cd0b265534f1b7d2a8",
+      "agent": "oracle",
+      "mode": null,
+      "reward": 1.0,
+      "exception": null,
+      "verifier_environment_mode": "separate",
+      "requests": null,
+      "folded_requests": null,
+      "recovery_calls": null,
+      "measurement": null,
+      "usage": {
+        "n_input_tokens": null,
+        "n_output_tokens": null,
+        "n_cache_tokens": null,
+        "cost_usd": null
+      },
+      "source_revision": null,
+      "source_tree_sha256": null
+    }
+  ]
+}
