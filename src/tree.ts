@@ -110,9 +110,13 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
   const latest = latestVersions(snapshot);
   const metadata = new Map<string, { position: number; size: number }>();
   snapshot.entries.forEach((entry, position) => metadata.set(entry.id, { position, size: entry.text.length }));
+  const active = new Set<string>();
   const size = (id: string): { position: number; size: number } => {
     if (metadata.has(id)) return metadata.get(id)!;
+    if (active.has(id)) return { position: Number.MAX_SAFE_INTEGER, size: 0 };
+    active.add(id);
     const childMeta = childrenOf(nodes.get(id)!).map(size);
+    active.delete(id);
     const result = { position: Math.min(...childMeta.map(child => child.position)), size: childMeta.reduce((sum, child) => sum + child.size, 0) };
     metadata.set(id, result); return result;
   };
@@ -202,11 +206,15 @@ export function physicalLines(text: string): { text: string; start: number; end:
 export function grep(snapshot: Snapshot, options: { query: string; id?: string | undefined; recursive?: boolean; offset?: number; limit?: number; caseSensitive?: boolean }) {
   const nodes = new Map<string, ArchiveNode>([...snapshot.entries, ...(snapshot.groups ?? [])].map(node => [node.id, node]));
   if (options.id !== undefined && !nodes.has(options.id)) throw new Error('Unknown entry or group');
-  const roots = options.id === undefined ? snapshot.entries.map(entry => entry.id) : [options.id];
+  const parents = allParents(snapshot);
+  const roots = options.id === undefined
+    ? [...nodes.keys()].filter(id => !parents.has(id))
+    : [options.id];
   const pending = [...roots].reverse(); const visited = new Set<string>();
   const pattern = literalPattern(options.query, options.caseSensitive);
   const offset = options.offset ?? 0; const limit = options.limit ?? 10;
   const matches: { id: string; key: string; label: string; line: number; text: string; textOffset: number; offset: number; endOffset: number }[] = []; let total = 0;
+  let skipped = 0;
   while (pending.length) {
     const id = pending.pop()!;
     if (visited.has(id)) continue;
@@ -216,13 +224,14 @@ export function grep(snapshot: Snapshot, options: { query: string; id?: string |
     lines.forEach((line, index) => {
       const match = pattern.exec(line.text);
       if (!match) return;
-      if (total >= offset && matches.length < limit) {
+      total++;
+      if (skipped < offset) { skipped++; return; }
+      if (matches.length < limit) {
         const part = excerpt(line.text, match.index, 160);
         matches.push({ id, key: queryKey(snapshot, node), label: 'text' in node ? (node.annotation?.label ?? '').slice(0, 80) : node.summary.slice(0, 80),
           line: index + 1, text: part.text, textOffset: part.start,
           offset: line.start + match.index, endOffset: line.start + match.index + match[0].length });
       }
-      total++;
     });
     if (options.recursive !== false) pending.push(...childrenOf(node).reverse());
   }
