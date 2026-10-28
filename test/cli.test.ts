@@ -35,7 +35,7 @@ test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigatio
     assert.equal(read.err, '');
     assert.equal(read.out, '原文🙂\n```ts\nexact();\n```\n');
     const list = await invoke(['list', '--scope', scope, '--json']);
-    assert.equal(JSON.parse(list.out).entries[0].disposition, 'keep');
+    assert.equal(JSON.parse(list.out).entries[0].disposition, 'foldable');
     const hashed = await invoke(['read', '--scope', scope, '--id', digest(read.out).slice(0, 12), '--json']);
     assert.equal(hashed.code, 0);
     assert.equal(JSON.parse(hashed.out).id, 'a');
@@ -115,7 +115,9 @@ test('CLI invalid commands and arguments use stderr, exit 1 and never leak suppl
     for (const args of [ ['unknown-private-secret'], ['read'], ['read', '--scope', scope, '--id', 'a', '--offset', '1.5'],
       ['read', '--scope', scope, '--id', 'a', '--offset', '-1'], ['stats', '--scope', 'private-secret'],
       ['mark', '--scope', scope, '--marks', '{private-secret'], ['mode', '--scope', scope, '--mode', 'private-secret'],
-      ['read', '--scope', scope, '--id', 'a', '--keep-folded'], ['read', '--scope', scope, '--id', 'a', '--limit', '24001'] ]) {
+      ['read', '--scope', scope, '--id', 'a', '--keep-folded'], ['read', '--scope', scope, '--id', 'a', '--limit', '24001'],
+      ['read', '--scope', scope, '--id', 'a', '--all', '--limit', '10'],
+      ['read', '--scope', scope, '--id', 'a', '--restore', '--peek'] ]) {
       const result = await invoke(args);
       assert.equal(result.code, 1, JSON.stringify(args));
       assert.equal(result.out, '');

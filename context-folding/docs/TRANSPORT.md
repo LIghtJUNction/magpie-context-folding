@@ -1,4 +1,4 @@
-# CLI, RPC and MCP transport contract
+# CLI and SDK RPC transport contract
 
 All three interfaces call the same local Python `Client` and SQLite archive. They do not run a model, select historical text, or create a network listener. **Only explicit paired folding comments select new regions**, in submitted text or source. `mark` and `group` have been removed.
 
@@ -13,14 +13,13 @@ uv sync --project context-folding
 uv run --project context-folding ctxf status \
   --state /absolute/private/archive.sqlite --scope example
 uv run --project context-folding ctxf rpc --state /absolute/private/archive.sqlite
-uv run --project context-folding ctxf mcp --state /absolute/private/archive.sqlite
 ```
 
 Install `ctxf` on PATH with `uv tool install ./context-folding`. The old `context-folding` command and `python -m context_folding` retain their explicit command/state arguments and JSON management behavior. All three use the Python implementation; only `ctxf` adds the pipe-friendly defaults, and the root Bun plugin does not install another `ctxf`.
 
-`--state` selects a SQLite file and may appear before or after the command. It is not a request field. `ctxf` uses `CTXF_STATE` when no flag is given; otherwise it defaults to `$XDG_DATA_HOME/context-folding/archive.sqlite3`, or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. Keep that file and its parent directory private and persistent. RPC/MCP processes and SDK clients must point to the same state file to share references.
+`--state` selects a SQLite file and may appear before or after the command. It is not a request field. `ctxf` uses `CTXF_STATE` when no flag is given; otherwise it defaults to `$XDG_DATA_HOME/context-folding/archive.sqlite3`, or `~/.local/share/context-folding/archive.sqlite3` when XDG is unset. Keep that file and its parent directory private and persistent. RPC processes and SDK clients must point to the same state file to share references.
 
-Each core/API/RPC/MCP request requires a nonempty `scope` of at most 200 characters. CLI action commands default to `default`; `--scope` overrides that value before or after the command. Scopes separate local archive namespaces; they are not authentication. A reference is resolved only against the selected state file and scope. Configure process and file access at the host boundary.
+Each core/API/RPC request requires a nonempty `scope` of at most 200 characters. CLI action commands default to `default`; `--scope` overrides that value before or after the command. Scopes separate local archive namespaces; they are not authentication. A reference is resolved only against the selected state file and scope. Configure process and file access at the host boundary.
 
 ## Raw text folding
 
@@ -36,7 +35,7 @@ Raw output is the **complete** folded text, without JSON framing, pagination or 
 
 `fold` and `read --raw` report operation errors on stderr with a nonzero exit status. They collect a successful result before writing it, so failed recovery or folding does not write a JSON error into the text pipeline.
 
-The API/RPC/MCP operation is:
+The API/RPC operation is:
 
 ```json
 {"action":"fold","scope":"investigation","text":"<!-- @context-fold begin evidence -->\nCompleted observations and comparisons that remain recoverable after folding.\n<!-- @context-fold end evidence -->"}
@@ -180,26 +179,6 @@ Offsets and limits always count **Python Unicode code points**, including throug
 
 Transport codes include `invalid_json`, `invalid_request`, `input_too_large` and `internal_error`. Core failures preserve their safe `code` and `message`. Malformed UTF-8/JSON and unexpected internal errors do not echo input or tracebacks. A single failed call does not close the service; EOF ends it normally.
 
-## MCP stdio
-
-MCP uses newline-delimited JSON-RPC 2.0, without `Content-Length` headers. Stdout contains protocol messages only. Initialize before tool discovery or calls:
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"example-host","version":"1"}}}
-{"jsonrpc":"2.0","method":"notifications/initialized"}
-{"jsonrpc":"2.0","id":2,"method":"tools/list"}
-{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"context_folding","arguments":{"action":"status","scope":"example"}}}
-{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"context_folding","arguments":{"action":"fold","scope":"example","text":"<!-- @context-fold begin evidence -->\nCompleted observations and comparisons that remain recoverable after folding.\n<!-- @context-fold end evidence -->"}}}
-```
-
-Supported protocol versions are `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`. A supported requested version is echoed; otherwise the server proposes `2025-11-25`. Capabilities advertise tools only. `ping` returns an empty object. Valid notifications are silent and cannot perform archive operations.
-
-`tools/list` returns one `context_folding` tool. Its schema requires action/scope and advertises `fold`, its text/parser fields, and the separate source occurrence/cycle fields. Core validation remains authoritative. A successful `tools/call` contains the raw core result serialized into `content[0].text`, with `isError: false`. An application failure uses `isError: true` and an ordinary `{"error":...}` envelope in that text.
-
-The caller consumes the returned folded text. MCP does not replace earlier messages, rewrite a host's history or display the result in a particular history slot. That requires an explicit host integration; an immediate `fold` call alone does not install one.
-
-Malformed JSON/UTF-8 produces `-32700`; invalid envelopes or oversized frames produce `-32600`; invalid parameters or unknown tool names produce `-32602`; unknown methods produce `-32601`; missing initialization produces `-32000`; unexpected server failures produce `-32603`. Errors use `id: null` where no usable request ID exists. Individual errors leave the stream open.
-
 ## Framing and resource limits
 
 JSON requests are limited to 8 MiB per frame or single-call input. Oversized lines are drained through their newline in bounded chunks, yielding one error before accepting the next frame. LF, CRLF and a final frame without newline are accepted. Embedded newlines inside strings must be JSON escaped.
@@ -210,7 +189,7 @@ Empty lines, batch arrays, malformed UTF-8 and `NaN`/`Infinity` literals are rej
 
 Rust, TypeScript and C# clients each keep one Python subprocess alive and transport this protocol. Their `fold(scope, text, fields)` / `FoldAsync` wrappers forward the immediate action without implementing another folding engine. Generic `call` / `CallAsync` forwards `read-source`, including occurrence/cycle fields; wrappers for archive reads do not infer request progress. A bridge knows its RPC calls, not the host's model requests.
 
-A host must retain the original source observation, choose its occurrence identity, update request cycles, and apply returned views to the correct editable history slots. Installing MCP or a skill provides none of those hooks. The server does not replace the host's default compaction.
+A host must retain the original source observation, choose its occurrence identity, update request cycles, and apply returned views to the correct editable history slots. Installing the CLI or a skill provides none of those hooks. The RPC subprocess does not replace the host's default compaction.
 
 When a tool argument intentionally contains a fold reference, an integrating host may resolve the **final argument value** and submit the resolved value through normal approval and current-file checks. Do this only when reference expansion is needed. Do not add an extra resolve call before unrelated tool calls, and do not forward unresolved references after an error.
 

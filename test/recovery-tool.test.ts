@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
-import { extractSpans, type Protocol } from '../src/protocol.js';
+import { extractSpans, recoveryShellName, type Protocol } from '../src/protocol.js';
 
 type Body = Record<string, unknown>;
 const original = '@context-fold begin evidence\n' + 'Verified earlier evidence: keep the exact identifier available for recovery.\n'.repeat(200) + '@context-fold end evidence';
-const canonical = 'context_folding';
-const mcpName = 'mcp__magpie__magpie_context_folding_context_folding';
+const canonical = 'exec_command';
+const alternate = 'bash';
 const protocols: Protocol[] = ['chat', 'responses', 'anthropic', 'gemini'];
 
 function declaration(protocol: Protocol, name: string, extra: Body = {}): Body {
@@ -63,7 +63,7 @@ async function fixture(run: (directory: string, invoke: (protocol: Protocol, bod
     await run(directory, async (protocol, body, configured) => await onRequest(body, {
       protocol, model: 'synthetic', session: protocol, cwd: directory,
       options: { delayRequests: 0,
-        ...(configured ? { recoveryToolName: configured } : {}),
+        ...(configured ? { shellToolName: configured } : {}),
       },
     }) as Body);
   } finally {
@@ -77,23 +77,23 @@ async function fixture(run: (directory: string, invoke: (protocol: Protocol, bod
 
 function assertOriginal(body: Body, protocol: Protocol): void {
   assert.equal(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text, original);
-  assert.ok(!JSON.stringify(body).includes(' scope='));
+  assert.ok(!JSON.stringify(body).includes('--scope '));
 }
 
 function assertFolded(body: Body, protocol: Protocol, _name: string): void {
   assert.match(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text ?? '', /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
-  assert.match(JSON.stringify(body), /scope=[a-f0-9]{64}/);
+  assert.match(JSON.stringify(body), /--scope [a-f0-9]{64}/);
 }
 
 for (const protocol of protocols) {
   test(`${protocol}: mentions and similar tool names do not advertise recovery`, async () => {
     await fixture(async (directory, invoke) => {
       for (const body of [
-        request(protocol, 'other', { description: 'Use context_folding only if installed.' }),
+        request(protocol, 'other', { description: 'Use exec_command only if installed.' }),
         request(protocol, 'other', { [protocol === 'anthropic' ? 'input_schema' : 'parameters']:
-          { type: 'object', properties: { context_folding: { type: 'string' } } } }),
-        request(protocol, 'not_context_folding'), request(protocol, 'context_folding_extra'),
-        request(protocol, 'mcp__other__context_folding'),
+          { type: 'object', properties: { exec_command: { type: 'string' } } } }),
+        request(protocol, 'not_exec_command'), request(protocol, 'exec_command_extra'),
+        request(protocol, 'context_folding'), request(protocol, 'mcp__magpie__magpie_context_folding_context_folding'),
       ]) {
         assertOriginal(await invoke(protocol, body), protocol);
         assert.deepEqual(await readdir(directory), [], 'unavailable recovery must not create an archive');
@@ -112,7 +112,7 @@ for (const protocol of protocols) {
 
   test(`${protocol}: real declarations and allowed choices keep recovery usable`, async () => {
     await fixture(async (_directory, invoke) => {
-      for (const name of [canonical, mcpName]) {
+      for (const name of [canonical, alternate]) {
         for (const choice of [{}, ...restricted(protocol, name)]) {
           const body = { ...request(protocol, name), ...choice };
           const unchanged = structuredClone(body);
@@ -133,13 +133,17 @@ for (const protocol of protocols) {
     });
   });
 
-  test(`${protocol}: explicit wrapped recovery respects global tool disabling`, async () => {
+  test(`${protocol}: explicit shell wrappers must be declared and allowed`, async () => {
     await fixture(async (directory, invoke) => {
       const body = request(protocol, 'exec');
-      assertOriginal(await invoke(protocol, { ...body, ...disabled(protocol) }, mcpName), protocol);
+      assertOriginal(await invoke(protocol, body, 'not_declared'), protocol);
+      assertOriginal(await invoke(protocol, { ...body, ...disabled(protocol) }, 'exec'), protocol);
+      for (const choice of restricted(protocol, 'other')) {
+        assertOriginal(await invoke(protocol, { ...body, ...choice }, 'exec'), protocol);
+      }
       assert.deepEqual(await readdir(directory), []);
       for (const choice of [{}, ...restricted(protocol, 'exec')]) {
-        assertFolded(await invoke(protocol, { ...body, ...choice }, mcpName), protocol, mcpName);
+        assertFolded(await invoke(protocol, { ...body, ...choice }, 'exec'), protocol, 'exec');
       }
     });
   });
@@ -154,4 +158,29 @@ test('Gemini SDK config uses actual function declarations and calling restrictio
     assert.deepEqual(await readdir(directory), []);
     assertFolded(await invoke('gemini', { ...contents, config: { tools } }), 'gemini', canonical);
   });
+});
+
+test('shell discovery supports known names and native Anthropic bash without schema inspection', () => {
+  for (const protocol of protocols) {
+    for (const name of ['exec_command', 'shell_command', 'bash', 'Bash', 'shell', 'run_shell_command',
+      'functions.exec_command', 'functions.shell_command']) {
+      assert.equal(recoveryShellName(request(protocol, name), protocol), name);
+    }
+    assert.equal(recoveryShellName(request(protocol, 'exec'), protocol), undefined);
+    assert.equal(recoveryShellName(request(protocol, 'exec'), protocol, 'exec'), 'exec');
+    assert.equal(recoveryShellName(request(protocol, 'exec'), protocol, 'unknown'), undefined);
+  }
+  assert.equal(recoveryShellName({ tools: [{ name: 'bash', type: 'bash_20250124' }] }, 'anthropic'), 'bash');
+  assert.equal(recoveryShellName({ tools: [{ name: 'bash', type: 'web_search_20250305' }] }, 'anthropic'), undefined);
+});
+
+test('Responses custom shell declarations respect forced and allowed tool choices', () => {
+  const body = { tools: [{ type: 'custom', name: 'shell' }, { type: 'custom', name: 'exec' }] };
+  assert.equal(recoveryShellName(body, 'responses'), 'shell');
+  assert.equal(recoveryShellName(body, 'responses', 'exec'), 'exec');
+  assert.equal(recoveryShellName({ ...body, tool_choice: { type: 'custom', name: 'exec' } }, 'responses'), undefined);
+  assert.equal(recoveryShellName({ ...body, tool_choice: { type: 'custom', name: 'exec' } }, 'responses', 'exec'), 'exec');
+  const choice = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'custom', name: 'exec' }] };
+  assert.equal(recoveryShellName({ ...body, tool_choice: choice }, 'responses'), undefined);
+  assert.equal(recoveryShellName({ ...body, tool_choice: choice }, 'responses', 'exec'), 'exec');
 });
