@@ -12,6 +12,18 @@ const countGuides = (value: unknown) => JSON.stringify(value).match(/<context-fo
 const folded = (body: Record<string, unknown>, protocol: Protocol) => extractSpans(body, protocol)
   .some(span => span.text.includes('[[cf:v2:'));
 
+test('guidance keeps an independent summary above details and folds completed stages early', () => {
+  const text = guidanceText(options);
+  assert.match(text, /Actively manage context with folding; do not wait for pressure/);
+  assert.match(text, /first write a concise, current summary outside the markers/);
+  assert.match(text, /block immediately below it/);
+  assert.match(text, /Keep conclusions, constraints, failures, decisions and next steps visible above\/outside/);
+  assert.match(text, /A task-wide outer block is optional/);
+  assert.match(text, /little extra byte reduction over milestone-only folding/);
+  assert.match(text, /an unclosed pair cannot fold/);
+  assert.match(text, /If the host reports compaction/);
+});
+
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
   test(`${protocol}: legacy scope-only metadata upgrades to one CLI guide without budgets`, async () => {
     await fixture(async ({ context }) => {

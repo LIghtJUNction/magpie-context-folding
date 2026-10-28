@@ -14,6 +14,15 @@ SCRIPT = PLUGIN / "scripts/post-compact.py"
 
 
 class PostCompactionTests(unittest.TestCase):
+    def test_reminder_drives_early_marking_and_names_compaction_as_fallback(self):
+        self.assertIn("这是回退信号", POST_COMPACTION_REMINDER)
+        self.assertIn("先在标记外写一段简明且可独立理解的当前摘要", POST_COMPACTION_REMINDER)
+        self.assertIn("总任务外层标记可选", POST_COMPACTION_REMINDER)
+        self.assertIn("始终把当前摘要放在外面", POST_COMPACTION_REMINDER)
+        self.assertIn("未闭合的标记不能折叠", POST_COMPACTION_REMINDER)
+        self.assertIn("不同宿主未必能报告压缩事件", POST_COMPACTION_REMINDER)
+        self.assertIn("不要猜测或重建", POST_COMPACTION_REMINDER)
+
     def run_hook(self, payload, *, raw=False, cwd=None, env=None):
         return subprocess.run(
             [sys.executable, str(SCRIPT)],
