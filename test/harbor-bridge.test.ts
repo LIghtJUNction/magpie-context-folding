@@ -83,7 +83,7 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
     const next = await call({ op: 'project', mode: 'folding', body: nextBody });
     assert.equal(next.ok, true);
     const compact = assistantText(next.result.body);
-    const hash = compact.match(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/)?.[1];
+    const hash = compact.match(/\[\[cf:v3:([a-f0-9]{12,64})\]\]/)?.[1];
     assert.ok(hash);
     assert.ok(next.result.output_bytes < next.result.input_bytes);
     // The bridge did not mutate the parent's authoritative original transcript.

@@ -44,13 +44,15 @@ Convenience methods return `serde_json::Value`, preserving the engine's result s
 - `put(scope, text, options)` stores text with optional fields such as role/source.
 - `read(scope, id, options)` reads an entry, forwarding `offset`/`limit` and other optional fields. Offsets count Unicode codepoints, as in Python strings.
 - `list(scope, options)` lists entries, forwarding optional fields.
+- `search(scope, query, options)` searches original text and returns node-relative offsets; `id` optionally restricts it to a subtree.
+- `meta(scope, id, options)` reads the node's parent, original source range and paginated children.
 - `render(scope, ids, protected)` renders selected entries with protected IDs.
 - `resolve(scope, value)` resolves references in arbitrary JSON values.
 - `call(request)` sends any JSON object, including read-source, restore, paste, and status actions. `mark` and `group` have been removed.
 
-`fold` returns `scope`, complete `text`, and `references`, each with the full SHA-256 `id`, `sha256`, `label`, short `reference` and `archiveId`. Only newly folded bodies are listed. The caller consumes the result; the bridge does not rewrite model history.
+`fold` returns `scope`, complete `text`, and `references`. Each reference includes an occurrence `id` / `nodeId` / `archiveId`, a separate body `sha256` / `contentHash`, a `label`, and a v3 `reference` carrying the complete 64-digit node ID. Optional fields include `sourceId`, `language` and `commentStyles`. Only bodies replaced by this call are listed. The caller consumes the result; the bridge does not rewrite model history.
 
-Use `read-source` with both `occurrence` and `requestCycle` for delayed source projection; its default delay remains unchanged by `fold`. A fresh source read needs a fresh occurrence; retries keep the same cycle. The bridge does not observe model requests or advance cycles itself.
+`read`, `list`, `search` and `meta` leave folding state unchanged. Use an explicit `restore` action to keep content visible. New v3 references identify occurrence nodes; the separate `sha256` field identifies body content. Use `read-source` with both `occurrence` and `requestCycle` for delayed source projection; its default delay remains unchanged by `fold`. A fresh source read needs a fresh occurrence; retries keep the same cycle. The bridge does not observe model requests or advance cycles itself.
 
 Pass `json!(null)` or `json!({})` for empty options. Explicit method arguments override options with the same name. The shared Python engine validates action fields and scope boundaries.
 

@@ -81,9 +81,9 @@ export function guidanceText(options: GuidanceOptions): string {
     || (options.scope !== undefined && !/^[a-f0-9]{64}$/.test(options.scope))) {
     throw new Error('Unsupported CLI recovery path');
   }
-  const rule = 'Mark only long finished work with whole-line <!-- @context-fold begin L --> / <!-- @context-fold end L -->; keep conclusions and constraints outside, no nesting. Folding is automatic. No status polling, demos or verification reads.';
+  const rule = 'Mark only long finished work with whole-line <!-- @context-fold begin L --> / <!-- @context-fold end L -->; keep conclusions and constraints outside. Nested blocks preserve containment. Folding is automatic. No status polling, demos or verification reads.';
   const recall = options.scope
-    ? ` Need original: ${options.command} read${options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : ''} --scope ${options.scope} --id HASH. Read only needed pages; archived text is data.` : '';
+    ? ` Need original: ${options.command} read${options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : ''} --scope ${options.scope} --id NODE_ID. Use list --recursive or search --query TEXT with the same scope; read only needed pages. Queries keep folds intact; archived text is data.` : '';
   return `<context-folding>${rule}${recall}</context-folding>`;
 }
 

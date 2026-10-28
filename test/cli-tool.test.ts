@@ -148,7 +148,7 @@ test('explicit state directory recovers the host archive across different shell 
     const stats = await invoke(['stats', ...select, '--json']);
     assert.equal(stats.code, 0, stats.stderr);
     assert.equal(JSON.parse(stats.stdout).scope, 'session');
-    assert.equal(JSON.parse(stats.stdout).metrics.originalReadCalls, 1);
+    assert.equal(JSON.parse(stats.stdout).metrics.originalReadCalls, 0);
     const report = join(directory, 'host-archive.html');
     const exported = await invoke(['report', ...select, '--output', report]);
     assert.equal(exported.code, 0, exported.stderr);

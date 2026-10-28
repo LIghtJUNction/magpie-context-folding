@@ -9,7 +9,7 @@ import { bodyFor, fixture, marked } from './helpers.js';
 const options = { command: 'magpie-context-folding' };
 const countGuides = (value: unknown) => JSON.stringify(value).match(/<context-folding>/g)?.length ?? 0;
 const folded = (body: Record<string, unknown>, protocol: Protocol) => extractSpans(body, protocol)
-  .some(span => span.text.includes('[[cf:v2:'));
+  .some(span => span.text.includes('[[cf:v3:'));
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
   test(`${protocol}: automatic system guidance is stable and preserves host instructions/tools`, () => {

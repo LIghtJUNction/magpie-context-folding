@@ -35,10 +35,10 @@ async function fixture(run: (store: Store, scope: string, directory: string) => 
 const load = (store: Store, scope: string) => store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
 
 for (const action of ['read', 'paste']) for (const layer of ['original', 'layer']) {
-  test(`${action} ${layer} keeps recovered content expanded and restores legacy ancestors`, async () => {
+  test(`${action} ${layer} explicit restore keeps content expanded and restores legacy ancestors`, async () => {
     await fixture(async (store, scope, directory) => {
       const path = join(directory, 'out');
-      const result = await call({ action, scope, id: 'a', layer, ...(action === 'paste' ? { path } : {}) });
+      const result = await call({ action, restore: true, scope, id: 'a', layer, ...(action === 'paste' ? { path } : {}) });
       assert.equal(result.error, undefined);
       assert.equal(result.kept, true);
       if (action === 'paste') assert.equal(await readFile(path, 'utf8'), layer === 'original' ? 'a🙂 original\n' : 'short');
@@ -65,14 +65,14 @@ test('peek read and paste leave annotations, marks, occurrences and folded group
     assert.deepEqual(after.entries, before.entries);
     assert.deepEqual(after.groups, before.groups);
     assert.equal(after.metrics.itemsRestored, 0);
-    assert.equal(after.metrics.layerReadCalls, 1);
+    assert.equal(after.metrics.layerReadCalls, 0);
   });
 });
 
 test('short and full content hashes resolve exact text and return the actual archive ID', async () => {
   await fixture(async (store, scope, directory) => {
     const hash = (await load(store, scope)).entries[0]!.annotation!.sha256;
-    const read = await call({ action: 'read', scope, id: hash.slice(0, 12) });
+    const read = await call({ action: 'read', restore: true, scope, id: hash.slice(0, 12) });
     assert.equal(read.id, 'a');
     assert.equal(read.text, 'a🙂 original\n');
     assert.equal(read.sha256, hash);
@@ -80,7 +80,7 @@ test('short and full content hashes resolve exact text and return the actual arc
     assert.equal((await call({ action: 'paste', scope, id: hash, path })).id, 'a');
     assert.equal(await readFile(path, 'utf8'), read.text);
     for (const id of [hash.slice(0, 11), 'f'.repeat(65), 'unrecognized-private-secret']) {
-      const result = await call({ action: 'read', scope, id });
+      const result = await call({ action: 'read', restore: true, scope, id });
       assert.ok(result.error);
       assert.ok(!result.error.includes(id));
     }
@@ -99,13 +99,13 @@ test('ambiguous hash prefixes are rejected atomically and exact legacy IDs take 
         annotation: { sha256: otherHash, label: 'other' } });
     });
     const before = await load(store, scope);
-    assert.match((await call({ action: 'read', scope, id: prefix })).error, /Ambiguous/);
+    assert.match((await call({ action: 'read', restore: true, scope, id: prefix })).error, /Ambiguous/);
     assert.deepEqual(await load(store, scope), before);
     assert.equal((await call({ action: 'read', scope, id: hash.slice(0, 13), peek: true })).text, 'a🙂 original\n');
     await store.transaction(scope, false, 64 * 1024 * 1024, state => {
       state.entries.push({ id: prefix, role: 'assistant', text: 'legacy exact ID', layers: [], mark: { disposition: 'unmarked' } });
     });
-    assert.equal((await call({ action: 'read', scope, id: prefix })).text, 'legacy exact ID');
+    assert.equal((await call({ action: 'read', restore: true, scope, id: prefix })).text, 'legacy exact ID');
     assert.equal((await load(store, scope)).entries[0]!.mark.disposition, 'foldable');
   });
 });
@@ -119,7 +119,7 @@ test('identical hash/content aliases resolve together and remain expanded after 
       state.entries.push(alias);
     });
     const hash = (await load(store, scope)).entries[0]!.annotation!.sha256;
-    assert.equal((await call({ action: 'read', scope, id: hash.slice(0, 12) })).text, 'a🙂 original\n');
+    assert.equal((await call({ action: 'read', restore: true, scope, id: hash.slice(0, 12) })).text, 'a🙂 original\n');
     const state = await load(store, scope);
     for (const entry of state.entries.filter(entry => entry.annotation?.sha256 === hash)) {
       assert.equal(entry.mark.disposition, 'keep');
@@ -130,7 +130,7 @@ test('identical hash/content aliases resolve together and remain expanded after 
 
 test('legacy group manifests and previous layers remain available', async () => {
   await fixture(async (store, scope) => {
-    const manifest = await call({ action: 'read', scope, id: 'inner' });
+    const manifest = await call({ action: 'read', restore: true, scope, id: 'inner' });
     assert.deepEqual(JSON.parse(manifest.text).children, ['a', 'b']);
     const state = await load(store, scope);
     assert.ok(state.groups!.every(group => !group.enabled && group.folded === undefined));
@@ -138,20 +138,20 @@ test('legacy group manifests and previous layers remain available', async () => 
     const layer = await call({ action: 'read', scope, id: 'a', layer: 'layer', peek: true });
     assert.equal(layer.previousId, 'original');
     assert.equal(layer.text, 'short');
-    assert.match((await call({ action: 'read', scope, id: 'inner', layer: 'layer' })).error, /manifest/);
+    assert.match((await call({ action: 'read', restore: true, scope, id: 'inner', layer: 'layer' })).error, /manifest/);
   });
 });
 
 test('forget requires restored entries and groups, then removes recovery data', async () => {
   await fixture(async (store, scope) => {
-    assert.match((await call({ action: 'forget', scope })).error, /without peek/);
-    for (const id of ['a', 'b', 'c']) await call({ action: 'read', scope, id });
+    assert.match((await call({ action: 'forget', scope })).error, /Restore folded/);
+    for (const id of ['a', 'b', 'c']) await call({ action: 'read', restore: true, scope, id });
     const status = await call({ action: 'status', scope });
     assert.equal(status.folded, 0);
     assert.equal(status.operations, undefined);
     assert.equal((await call({ action: 'forget', scope })).forgotten, true);
     await assert.rejects(load(store, scope), /Unknown context scope/);
-    assert.ok((await call({ action: 'read', scope, id: 'a' })).error);
+    assert.ok((await call({ action: 'read', restore: true, scope, id: 'a' })).error);
   });
 });
 
@@ -159,16 +159,16 @@ test('invalid reads do not mutate archives; bounds and filesystem failures keep 
   await fixture(async (store, scope, directory) => {
     const before = await load(store, scope);
     for (const args of [
-      { action: 'read', scope, id: 'a', layer: 'private-secret' },
-      { action: 'read', scope, id: 'a', offset: 999 },
+      { action: 'read', restore: true, scope, id: 'a', layer: 'private-secret' },
+      { action: 'read', restore: true, scope, id: 'a', offset: 999 },
       { action: 'paste', scope, id: 'a', offset: 2, path: join(directory, 'unicode') },
     ]) {
       assert.ok((await call(args)).error);
       assert.deepEqual(await load(store, scope), before);
     }
-    const bad = await call({ action: 'read', scope, id: 'a', privateSecret: 'never-echo-this' });
+    const bad = await call({ action: 'read', restore: true, scope, id: 'a', privateSecret: 'never-echo-this' });
     assert.ok(!JSON.stringify(bad).includes('never-echo-this'));
-    const bound = await call({ action: 'read', scope, id: 'a', limit: 24001 });
+    const bound = await call({ action: 'read', restore: true, scope, id: 'a', limit: 24001 });
     assert.deepEqual(bound.details, [{ path: ['limit'], code: 'too_big', limit: 24000, actual: 24001, unit: 'value' }]);
     const dest = join(directory, 'secret-existing-path');
     await writeFile(dest, 'existing');

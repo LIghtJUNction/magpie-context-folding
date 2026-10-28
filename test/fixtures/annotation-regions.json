@@ -117,7 +117,10 @@
   {
     "name": "nested",
     "text": "# @context-fold begin x\n# @context-fold begin y\na\n# @context-fold end y\n# @context-fold end x",
-    "payloads": []
+    "payloads": [
+      "# @context-fold begin y\na\n# @context-fold end y",
+      "a"
+    ]
   },
   {
     "name": "mismatch",
@@ -135,7 +138,9 @@
     "name": "later-nested",
     "text": "# @context-fold begin a\ncompleted\n# @context-fold end a\n# @context-fold begin b\n# @context-fold begin c\nactive\n# @context-fold end c\n# @context-fold end b",
     "payloads": [
-      "completed"
+      "completed",
+      "# @context-fold begin c\nactive\n# @context-fold end c",
+      "active"
     ]
   },
   {

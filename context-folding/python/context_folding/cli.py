@@ -16,7 +16,7 @@ from .annotations import annotate_python_functions
 from .core import Client, FoldingError
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
-ACTIONS = ("fold", "put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
+ACTIONS = ("fold", "put", "list", "search", "grep", "meta", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
 
 
 class InputError(Exception):
@@ -154,6 +154,7 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
             continue
         if command == "fold":
             sub.add_argument("--scope", required=not ctxf, default=argparse.SUPPRESS)
+            sub.add_argument("--source-id", default=argparse.SUPPRESS, help="Stable message or document identity; identical input retries reuse nodes")
             sub.add_argument("--text", default=argparse.SUPPRESS, help="UTF-8 text; '-' or omission reads stdin")
             sub.add_argument("--language", default=argparse.SUPPRESS)
             sub.add_argument("--comment-styles", default=argparse.SUPPRESS, help="Additional comment delimiters as JSON")
@@ -170,6 +171,11 @@ def _parser(*, ctxf: bool = False) -> argparse.ArgumentParser:
         for name in ("id", "text", "role", "occurrence", "query", "name", "description", "path", "mode", "body", "sort", "order", "language"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS)
         sub.add_argument("--request-cycle", type=int, default=argparse.SUPPRESS)
+        sub.add_argument("--source-id", default=argparse.SUPPRESS)
+        sub.add_argument("--parent", "--parent-id", dest="parentId", default=argparse.SUPPRESS,
+                         help="List or search the directly contained nodes")
+        sub.add_argument("--recursive", action=argparse.BooleanOptionalAction, default=argparse.SUPPRESS)
+        sub.add_argument("--ignore-case", dest="caseSensitive", action="store_false", default=argparse.SUPPRESS)
         sub.add_argument("--expand-mode", choices=("single", "recursive"), default=argparse.SUPPRESS,
                          help="Expansion depth for read and read-source (default: recursive)")
         for name in ("ids", "protected", "keep", "expand"):
@@ -210,6 +216,8 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
     request["action"] = args.command
     if "request_cycle" in request:
         request["requestCycle"] = request.pop("request_cycle")
+    if "source_id" in request:
+        request["sourceId"] = request.pop("source_id")
     if "expand_mode" in request:
         request["expandMode"] = request.pop("expand_mode")
     if args.command in ("put", "fold") and "text" not in request:

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Context Folding RPC v2",
-  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls.",
+  "title": "Context Folding local RPC: occurrence archive",
+  "description": "Local UTF-8 JSON Lines transport: one ordered request and result/error response per line. Run ctxf rpc --state /absolute/private/archive.sqlite. CLI and SDKs share the Python engine and SQLite archive. State is selected outside the request. API calls require scope even though the CLI defaults it to default. Core validation defines action-specific constraints. No network listener or model calls. Queries read/list/search/grep/meta are bounded and do not change folding state. New references use cf:v3 occurrence IDs; cf:v1 entry IDs and cf:v2 content hashes remain readable.",
   "type": "object",
   "required": [
     "action",
@@ -14,6 +14,9 @@
         "fold",
         "put",
         "list",
+        "search",
+        "grep",
+        "meta",
         "read",
         "render",
         "restore",
@@ -90,7 +93,8 @@
       }
     },
     "id": {
-      "type": "string"
+      "type": "string",
+      "description": "Exact archived occurrence ID. New fold nodes use 64 hexadecimal digits. Legacy IDs and content hashes remain readable. A content hash shared by multiple occurrences can recover their common text; read reports ambiguousOccurrence, matchingNodeCount and up to 20 matchingNodeIds, with parentId and sourceRange set to null. Tree navigation and explicit restore must identify a unique occurrence."
     },
     "ids": {
       "type": "array",
@@ -112,7 +116,10 @@
     },
     "value": {},
     "query": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Literal text to search for, including inside folded originals. Required for search and its grep alias."
     },
     "path": {
       "type": "string"
@@ -131,16 +138,19 @@
     },
     "limit": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "Maximum characters for read or maximum rows for list/search/meta. Read defaults to 4000 Unicode code points; metadata and search default to 20 rows."
     },
     "offset": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "For read, a Unicode code-point offset within the original node text. For list/search/meta, a zero-based row offset. Continue with nextOffset."
     },
     "depth": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 8
+      "maximum": 10000,
+      "description": "Maximum descendant depth for list; the default is 0 unless recursive=true."
     },
     "sort": {
       "type": "string",
@@ -175,7 +185,27 @@
       "maximum": 9007199254740991
     },
     "peek": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Legacy compatibility flag. read is non-mutating by default; use the explicit restore action to keep content expanded."
+    },
+    "parentId": {
+      "type": "string",
+      "description": "For list/search, select the children of this occurrence. Omit id when using parentId; recursive=true also visits their descendants."
+    },
+    "sourceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Stable source identity for fold. Different sources with the same text retain separate occurrence nodes. Without sourceId the complete input content identifies the source."
+    },
+    "recursive": {
+      "type": "boolean",
+      "description": "List defaults to false (roots or the selected node); search defaults to true. Explicit depth limits list traversal."
+    },
+    "caseSensitive": {
+      "type": "boolean",
+      "default": true,
+      "description": "Literal search is case-sensitive by default. Set false for case-insensitive search; returned offsets always address the original node text."
     }
   },
   "additionalProperties": true,
@@ -183,24 +213,76 @@
     {
       "if": {
         "properties": {
-          "action": { "const": "fold" }
+          "action": {
+            "const": "fold"
+          }
         },
-        "required": ["action"]
+        "required": [
+          "action"
+        ]
       },
       "then": {
-        "required": ["text"]
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "search",
+              "grep"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "read",
+              "meta"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "id"
+        ]
       }
     }
   ],
   "$defs": {
     "foldReference": {
       "type": "object",
-      "required": ["id", "label", "sha256", "reference", "archiveId"],
+      "required": [
+        "id",
+        "label",
+        "sha256",
+        "reference",
+        "archiveId"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$",
-          "description": "Complete body SHA-256; usable with read in the same state and scope."
+          "description": "Occurrence node ID, distinct from the body content hash. Pass this ID to read, list, search and meta in the same state and scope."
         },
         "label": {
           "type": "string",
@@ -208,23 +290,49 @@
         },
         "sha256": {
           "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 of the exact original body UTF-8 bytes; repeated occurrences may share this hash."
         },
         "reference": {
           "type": "string",
-          "pattern": "^\\[\\[cf:v2:[a-f0-9]{12,64}\\]\\]$"
+          "pattern": "^\\[\\[cf:v3:[a-f0-9]{64}\\]\\]$",
+          "description": "Reference to the exact occurrence; old v1/v2 references remain supported by the read/resolve compatibility paths."
         },
         "archiveId": {
           "type": "string",
           "minLength": 1,
-          "description": "The backing archive entry identifier."
+          "description": "Alias for id, retained for older SDK callers."
+        },
+        "nodeId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Alias for id."
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Alias for sha256; used for content identity, not parentage."
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Nearest enclosing folded occurrence, or null for a root."
+        },
+        "sourceRange": {
+          "$ref": "#/$defs/sourceRange"
         }
       },
       "additionalProperties": true
     },
     "foldResult": {
       "type": "object",
-      "required": ["scope", "text", "references"],
+      "required": [
+        "scope",
+        "text",
+        "references"
+      ],
       "properties": {
         "scope": {
           "type": "string",
@@ -237,7 +345,9 @@
         },
         "references": {
           "type": "array",
-          "items": { "$ref": "#/$defs/foldReference" },
+          "items": {
+            "$ref": "#/$defs/foldReference"
+          },
           "description": "Only bodies folded by this call; existing literal references are left intact."
         }
       },
@@ -280,13 +390,246 @@
           "additionalProperties": false
         }
       ]
+    },
+    "sourceRange": {
+      "type": "object",
+      "required": [
+        "sourceId",
+        "sourceHash",
+        "start",
+        "end",
+        "offsetUnit"
+      ],
+      "properties": {
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Inclusive offset in the complete original source."
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Exclusive offset in the complete original source."
+        },
+        "offsetUnit": {
+          "const": "unicode-code-points"
+        }
+      },
+      "additionalProperties": true
+    },
+    "nodeMetadata": {
+      "type": "object",
+      "required": [
+        "id",
+        "parentId"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sourceRange": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sourceRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offsetUnit": {
+          "const": "unicode-code-points"
+        },
+        "chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "childCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "folded": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "searchMatch": {
+      "type": "object",
+      "required": [
+        "id",
+        "offset",
+        "text",
+        "offsetUnit"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Match start within this node original; pass it directly to read(id, offset)."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "description": "Bounded match preview; not the full archived body."
+        },
+        "sourceRange": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sourceRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offsetUnit": {
+          "const": "unicode-code-points"
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Match length in Unicode code points; read(id,offset,limit=length) returns exactly the match."
+        },
+        "textOffset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Offset of the first character in the bounded preview, relative to this node original."
+        }
+      },
+      "additionalProperties": true
+    },
+    "searchResult": {
+      "type": "object",
+      "required": [
+        "matches",
+        "nextOffset"
+      ],
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/searchMatch"
+          }
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Next row offset, or null when this query is complete."
+        },
+        "offsetUnit": {
+          "const": "unicode-code-points"
+        }
+      },
+      "additionalProperties": true
+    },
+    "listResult": {
+      "type": "object",
+      "required": [
+        "entries",
+        "nextOffset"
+      ],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nodeMetadata"
+          }
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Next row offset, or null when this query is complete."
+        },
+        "offsetUnit": {
+          "const": "unicode-code-points"
+        }
+      },
+      "additionalProperties": true
+    },
+    "metaResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/nodeMetadata"
+        },
+        {
+          "type": "object",
+          "required": [
+            "children",
+            "nextOffset"
+          ],
+          "properties": {
+            "children": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "description": "Direct child occurrence ID, ordered by original source position."
+              }
+            },
+            "nextOffset": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "Next row offset, or null when this query is complete."
+            }
+          }
+        }
+      ]
     }
   },
   "examples": [
     {
       "action": "fold",
       "scope": "example",
-      "text": "<!-- @context-fold begin result -->\nCompleted evidence that can be recovered through its content hash.\n<!-- @context-fold end result -->"
+      "text": "<!-- @context-fold begin result -->\nCompleted evidence that can be recovered through its occurrence ID.\n<!-- @context-fold end result -->"
     },
     {
       "action": "fold",
@@ -311,12 +654,44 @@
     {
       "action": "read",
       "scope": "example",
-      "id": "CONTENT_HASH_PREFIX"
+      "id": "NODE_ID"
     },
     {
       "action": "resolve",
       "scope": "example",
-      "value": "[[cf:v2:CONTENT_HASH_PREFIX]]"
+      "value": "[[cf:v3:NODE_ID]]"
+    },
+    {
+      "action": "list",
+      "scope": "example",
+      "recursive": true,
+      "limit": 20
+    },
+    {
+      "action": "list",
+      "scope": "example",
+      "parentId": "NODE_ID",
+      "limit": 20
+    },
+    {
+      "action": "search",
+      "scope": "example",
+      "query": "previous error",
+      "caseSensitive": true,
+      "limit": 20
+    },
+    {
+      "action": "meta",
+      "scope": "example",
+      "id": "NODE_ID",
+      "limit": 20
+    },
+    {
+      "action": "read",
+      "scope": "example",
+      "id": "NODE_ID",
+      "offset": 0,
+      "limit": 4000
     }
   ]
 }

@@ -220,10 +220,10 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     original = "Synthetic recoverable note. " * 80
                     self.assertIn(original, all_text(agent.received[1]))
                     if mode == "folding":
-                        self.assertIn("[[cf:v2:", all_text(agent.received[2]))
+                        self.assertIn("[[cf:v3:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[3]))
-                        self.assertIn("[[cf:v2:", all_text(agent.received[3]))
+                        self.assertIn("[[cf:v3:", all_text(agent.received[3]))
                     else:
                         self.assertIn(original, all_text(agent.received[2]))
                     metrics = context.metadata["magpie_harbor"]
@@ -276,15 +276,15 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     return assistant(calls=[tool_call(call_id="advance")])
                 if step == 2:
                     text = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
-                    self.test.assertIn("[[cf:v2:", text)
-                    reference = text.split("[[cf:v2:", 1)[1].split("]]", 1)[0]
+                    self.test.assertIn("[[cf:v3:", text)
+                    reference = text.split("[[cf:v3:", 1)[1].split("]]", 1)[0]
                     return assistant(calls=[tool_call("exec_command",
                         {"cmd": f"magpie-context-folding read --id {reference} --limit 24000 --json"}, "recover-source")])
                 output = json.loads(request["messages"][-1]["content"])
                 self.test.assertEqual(output["exit_code"], 0)
                 self.test.assertEqual(json.loads(output["stdout"])["text"], payload.rstrip("\n"))
                 restored = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
-                self.test.assertIn("[[cf:v2:", restored)
+                self.test.assertIn("[[cf:v3:", restored)
                 self.test.assertNotIn(payload, restored)
                 return assistant()
 

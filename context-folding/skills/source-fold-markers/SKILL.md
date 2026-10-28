@@ -15,9 +15,9 @@ let payload = read_payload(input, header.length)?;
 // @context-fold end decode-frame
 ```
 
-Use the same non-whitespace label and comment delimiters for both markers. Leave a short description and necessary declarations outside. Preserve the source's indentation and line endings. Do not nest, cross, leave empty regions, insert markers in strings, annotate trivial one-line code, or obscure work still needed for the next decision.
+Use the same non-whitespace label and comment delimiters for both markers. Leave a short description and necessary declarations outside. Preserve the source's indentation and line endings. Nest only complete regions whose containment is useful; do not cross ranges, leave empty regions, insert markers in strings, annotate trivial one-line code, or obscure work still needed for the next decision.
 
-Annotations are the only folding permission. The reader does not infer foldable functions from their size, AST, age or token pressure. A compact view uses a generated `[[cf:v2:HASH]]` reference; the source file stays complete. Read the actual reference or expand a named region when its details are needed. Do not guess hashes or write folded views over real source.
+Annotations are the only folding permission. The reader does not infer foldable functions from their size, AST, age or token pressure. A compact view uses a generated `[[cf:v3:NODE_ID]]` reference; the source file stays complete. Browse a node's children or search original text before reading the needed page. Inspection does not persistently expand history. Use explicit restore when that change is intended. Do not guess IDs or write folded views over real source.
 
 `annotate-functions` is an optional, explicit batch editing command for Python/JS/TS. Preview its proposed changes, respect repository edit scope, and validate the resulting program. It is separate from reading: discovery alone never adds comments or folds unmarked functions. For language-aware source adapters, Python comments are tokenized and JS/TS comments use the optional parser; generic explicit text has no universal language lexer. Avoid generic projection when marker-looking text inside literals is ambiguous.
 
