@@ -198,8 +198,8 @@ main();
             state = Path(temporary) / 'state.sqlite'
             # Reproduce a pre-parser snapshot using the actual generic discovery
             # format, but the original recorded JavaScript language metadata.
-            def legacy_discover(text, language=None, path=None, styles=None):
-                result = real_discover(text, 'explicit', path, styles)
+            def legacy_discover(text, language=None, path=None, styles=None, **options):
+                result = real_discover(text, 'explicit', path, styles, **options)
                 result['language'] = 'javascript'
                 return result
             with Client(state, config={"folding": {"delay_requests": 0}}) as client:
@@ -212,12 +212,16 @@ main();
                 self.assertTrue(current['foldedRegions'])
                 self.assertEqual(marked, client.resolve('new', current['text'])['value'])
             with patch.dict(sys.modules, {'tree_sitter': None}), Client(state) as client:
-                self.assertEqual(source, client.read('legacy', old['id'], mode='original')['text'])
+                before = client._db.execute('SELECT scope,data FROM scopes ORDER BY scope').fetchall()
+                self.assertEqual(old['text'], client.read('legacy', old['id'])['text'])
+                self.assertEqual(before, client._db.execute('SELECT scope,data FROM scopes ORDER BY scope').fetchall())
+                self.assertEqual(source, client.resolve('legacy', old['reference'])['value'])
                 reused = client.read_source('legacy', id=old['id'])
                 self.assertEqual('explicit-regions', reused['parser'])
                 self.assertEqual(source, client.resolve('legacy', reused['text'])['value'])
-                self.assertEqual(source, client.read('legacy', old['id'], expand=['legacy'])['text'])
-                self.assertEqual(marked, client.read('new', current['id'], mode='original')['text'])
+                self.assertEqual(old['text'], client.read('legacy', old['id'])['text'])
+                self.assertEqual(current['text'], client.read('new', current['id'])['text'])
+                self.assertEqual(marked, client.resolve('new', current['reference'])['value'])
                 self.assertEqual(marked, client.resolve('new', client.read_source('new', id=current['id'])['text'])['value'])
 
     def test_project_cli_preview_apply_and_preflight(self):

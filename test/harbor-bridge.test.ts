@@ -102,8 +102,9 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
     const kept = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
     assert.equal(assistantText(kept.result.body), compact);
     await call({ op: 'response', success: true });
-    const restored = await cli(call, ['read', '--id', hash!, '--limit', '1', '--restore', '--json']);
+    const restored = await cli(call, ['read', '--id', hash!, '--restore', '--json']);
     assert.equal(restored.result.kept, true);
+    assert.equal(restored.result.text, payload);
     const expanded = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
     assert.equal(assistantText(expanded.result.body), marked());
     await call({ op: 'response', success: true });

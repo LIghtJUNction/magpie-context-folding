@@ -5,25 +5,32 @@ import { ScopeConflictError, Store, digest } from './store.js';
 import type { Snapshot } from './store.js';
 import { addMetrics } from './metrics.js';
 import { statistics } from './statistics.js';
-import { browse, latestVersions, restoreAncestors } from './tree.js';
+import { archiveView, browse, grep, latestVersions, nodeMeta, physicalLines, versionMetadata } from './tree.js';
 
-const peek = z.boolean().default(false);
+const peek = z.boolean().default(true); // Explicit false remains an opt-in restore.
 const serialize = (value: object): string => JSON.stringify({ ...value, _contextFolding: 'control-result' });
 
 const scope = z.string().regex(/^[a-f0-9]{64}$/);
 const id = z.string().min(1);
+const lineRange = { startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional() };
 const argsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('stats'), scope: scope.optional() }).strict(),
-  z.object({ action: z.literal('list'), scope, id: id.optional(), depth: z.number().int().min(0).max(8).default(1),
-    query: z.string().max(200).optional(), sort: z.enum(['chronological', 'size', 'id', 'version']).default('chronological'),
+  z.object({ action: z.literal('list'), scope, id: id.optional(), depth: z.number().int().min(0).max(64).optional(),
+    recursive: z.boolean().default(false), query: z.string().max(200).optional(), sort: z.enum(['chronological', 'size', 'id', 'version']).default('chronological'),
     order: z.enum(['asc', 'desc']).default('asc'), offset: z.number().int().nonnegative().default(0),
-    limit: z.number().int().min(1).max(100).default(20) }).strict(),
-  z.object({ action: z.literal('read'), scope, id, layer: z.string().default('original'), peek, offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(4000) }).strict(),
-  z.object({ action: z.literal('paste'), scope, id, layer: z.string().default('original'), peek,
+    limit: z.number().int().min(1).max(100).default(10) }).strict(),
+  z.object({ action: z.literal('grep'), scope, id: id.optional(), query: z.string().min(1).max(200),
+    recursive: z.boolean().default(true), caseSensitive: z.boolean().default(false),
+    offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(100).default(10) }).strict(),
+  z.object({ action: z.literal('meta'), scope, id, offset: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(100).default(10) }).strict(),
+  z.object({ action: z.literal('read'), scope, id, layer: z.string().default('view'), peek, ...lineRange,
+    offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).default(1200) }).strict(),
+  z.object({ action: z.literal('paste'), scope, id, layer: z.string().default('view'), peek, ...lineRange,
     path: z.string().refine(isAbsolute, 'Use an absolute destination path'),
     offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(24000).optional() }).strict(),
   z.object({ action: z.literal('status'), scope }).strict(),
-  z.object({ action: z.literal('forget'), scope }).strict(),
+  z.object({ action: z.literal('forget'), scope, force: z.boolean().default(false) }).strict(),
 ]);
 
 class ToolError extends Error {}
@@ -67,30 +74,48 @@ function resolveEntry(snapshot: Snapshot, id: string) {
   // @context-fold end resolveEntry-db244eec2c
 }
 
-/** Recovery is deliberately independent of current configuration and folding policy. */
+/** Explicit restoration protects the selected subtree and every enclosing fold. */
 function keepExpanded(snapshot: Snapshot, id: string): void {
-  // @context-fold begin keepExpanded-21cffb3d7c
-  const entry = snapshot.entries.find(entry => entry.id === id);
-  const group = snapshot.groups?.find(group => group.id === id);
+  const entries = new Map(snapshot.entries.map(entry => [entry.id, entry]));
+  const groups = new Map((snapshot.groups ?? []).map(group => [group.id, group]));
+  const selected = new Set<string>();
+  const pending = [id];
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (selected.has(current)) continue;
+    selected.add(current);
+    pending.push(...entries.get(current)?.annotation?.children?.map(child => child.id) ?? []);
+  }
+  const parents = new Map<string, string[]>();
+  for (const node of [...snapshot.entries, ...(snapshot.groups ?? [])]) {
+    const children = 'children' in node ? node.children : node.annotation?.children?.map(child => child.id) ?? [];
+    for (const child of children) parents.set(child, [...parents.get(child) ?? [], node.id]);
+  }
+  pending.push(...selected);
+  while (pending.length) for (const parent of parents.get(pending.pop()!) ?? []) {
+    if (!selected.has(parent)) { selected.add(parent); pending.push(parent); }
+  }
   let restored = 0;
-  if (entry) {
-    if (entry.folded !== undefined) restored++;
-    entry.mark = { disposition: 'keep' };
-    entry.manual = true;
-    if (entry.version) entry.version.automatic = false;
-    delete entry.folded;
-    delete entry.foldedMark;
-    for (const occurrence of Object.values(entry.occurrences ?? {})) delete occurrence.folded;
+  for (const selectedId of selected) {
+    const entry = entries.get(selectedId);
+    if (entry) {
+      if (entry.folded !== undefined) restored++;
+      entry.mark = { disposition: 'keep' };
+      entry.manual = true;
+      if (entry.version) entry.version.automatic = false;
+      delete entry.folded;
+      delete entry.foldedMark;
+      for (const occurrence of Object.values(entry.occurrences ?? {})) delete occurrence.folded;
+    }
+    const group = groups.get(selectedId);
+    if (group) {
+      if (group.folded !== undefined) restored++;
+      group.enabled = false;
+      delete group.folded;
+      delete group.foldedMark;
+    }
   }
-  if (group) {
-    if (group.folded !== undefined) restored++;
-    group.enabled = false;
-    delete group.folded;
-    delete group.foldedMark;
-  }
-  restored += restoreAncestors(snapshot, id);
   snapshot.metrics = addMetrics(snapshot.metrics, { itemsRestored: restored });
-  // @context-fold end keepExpanded-21cffb3d7c
 }
 
 /** Report numeric bounds without exposing supplied text or arbitrary Zod messages. */
@@ -145,61 +170,71 @@ export async function execute(input: unknown): Promise<string> {
         const entry = snapshot.entries.find(entry => entry.id === resolved.id);
         const group = snapshot.groups?.find(group => group.id === resolved.id);
         if (!entry && !group) throw new ToolError('Unknown entry or group');
-        if (group && args.layer !== 'original') throw new ToolError('Groups expose only the original manifest');
-        const layer = args.layer === 'original' ? undefined : entry?.layers.find(layer => layer.id === args.layer);
-        if (args.layer !== 'original' && !layer) throw new ToolError('Unknown layer');
-        const text = group ? JSON.stringify({ id: group.id, summary: group.summary, children: group.children }) : layer?.text ?? entry!.text;
-        if (args.offset > text.length) throw new ToolError('Offset exceeds archived text length');
-        let end = args.limit === undefined ? text.length : Math.min(text.length, args.offset + args.limit);
-        if (args.action === 'paste' && (splitsPair(text, args.offset) || splitsPair(text, end))) {
-          throw new ToolError('Paste range splits a Unicode character');
+        if (group && args.layer !== 'original' && args.layer !== 'view') throw new ToolError('Groups expose only the original manifest');
+        const layer = args.layer === 'original' || args.layer === 'view' ? undefined : entry?.layers.find(layer => layer.id === args.layer);
+        if (args.layer !== 'original' && args.layer !== 'view' && !layer) throw new ToolError('Unknown layer');
+        const original = group ? archiveView(snapshot, group) : layer?.text ?? entry!.text;
+        const text = args.layer === 'view' ? archiveView(snapshot, entry ?? group!) : original;
+        const lines = physicalLines(text);
+        let offset = args.offset;
+        let stop = text.length;
+        if (args.startLine !== undefined || args.endLine !== undefined) {
+          if (Object.hasOwn(input as object, 'offset')) throw new ToolError('Use either offset or a line range');
+          const first = args.startLine ?? 1;
+          const last = args.endLine ?? Math.max(1, lines.length);
+          if (first > Math.max(1, lines.length) || last < first) throw new ToolError('Invalid view line range');
+          offset = lines[first - 1]?.start ?? 0;
+          stop = lines[Math.min(last, lines.length) - 1]?.end ?? 0;
         }
-        if (args.action === 'read') {
-          if (splitsPair(text, args.offset)) throw new ToolError('Read offset splits a Unicode character');
-          // UTF-16 offsets remain explicit, but each raw page must encode without
-          // turning half an emoji into U+FFFD. A one-unit page still makes progress.
-          if (splitsPair(text, end)) end += end === args.offset + 1 ? 1 : -1;
-        }
-        // Protect the source itself and every enclosing group, including historical-layer reads.
+        if (offset > text.length) throw new ToolError('Offset exceeds archived text length');
+        let end = args.limit === undefined ? stop : Math.min(stop, offset + args.limit);
+        if (splitsPair(text, offset) || (args.action === 'paste' && splitsPair(text, end))) throw new ToolError('Query range splits a Unicode character');
+        if (splitsPair(text, end)) end += end === offset + 1 ? 1 : -1;
+        if (end === offset && stop > offset) throw new ToolError('Limit is too small for the next Unicode character');
         if (!args.peek) {
           if (resolved.aliases.length) for (const alias of resolved.aliases) keepExpanded(snapshot, alias.id);
           else keepExpanded(snapshot, resolved.id);
         }
         return {
-          id: resolved.id, layer: args.layer, previousId: layer?.previousId ?? null, kept: !args.peek,
-          currentLayer: args.peek ? entry?.layers.find(layer => layer.text === entry.folded)?.id ?? 'original' : 'original',
-          ...(entry?.version ? { version: entry.version, latestVersion: latestVersions(snapshot).has(entry.id) } : {}),
-          text: text.slice(args.offset, end), offset: args.offset,
-          nextOffset: end < text.length ? end : null, totalChars: text.length, sha256: digest(text),
+          id: resolved.id, kept: !args.peek, label: (entry?.annotation?.label ?? '').slice(0, 80), layer: args.layer,
+          ...(layer ? { previousId: layer.previousId } : {}),
+          ...(entry?.version ? { version: versionMetadata(entry.version), latestVersion: latestVersions(snapshot).has(entry.id) } : {}),
+          text: text.slice(offset, end), offset, nextOffset: end < stop ? end : null, totalChars: text.length,
+          totalLines: lines.length,
+          startLine: end > offset ? Math.max(0, lines.findIndex(line => line.end > offset)) + 1 : 0,
+          endLine: end > offset ? Math.max(0, lines.findIndex(line => line.end >= end)) + 1 : 0,
+          sha256: digest(original), viewSha256: digest(text), offsetUnit: 'utf16',
         };
       }, undefined, 'preserve');
-      // Re-read current state and reapply keep; file creation stays outside retries.
       const source = await retryArchiveRead(recover);
       if (args.action === 'paste') {
-        // Exclusive creation also refuses symlinks and never truncates an existing destination.
         await writeFile(args.path, source.text, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-        return serialize({ id: source.id, layer: source.layer, kept: source.kept, path: args.path, offset: source.offset,
-          nextOffset: source.nextOffset, chars: source.text.length, bytes: Buffer.byteLength(source.text), sha256: digest(source.text),
-          ...(source.version ? { version: source.version, latestVersion: source.latestVersion } : {}) });
+        return serialize({ id: source.id, layer: source.layer, path: args.path, offset: source.offset,
+          nextOffset: source.nextOffset, chars: source.text.length, bytes: Buffer.byteLength(source.text), sha256: digest(source.text) });
       }
       try {
         await store.recordMetrics(args.scope, {
-          ...(args.layer === 'original' ? { originalReadCalls: 1 } : { layerReadCalls: 1 }), readChars: source.text.length,
+          ...(args.layer === 'original' || args.layer === 'view' ? { originalReadCalls: 1 } : { layerReadCalls: 1 }), readChars: source.text.length,
         });
-      } catch {
-        // Recovery must remain available even when statistics cannot grow or commit.
-      }
+      } catch { /* Queries remain available when usage statistics cannot commit. */ }
       return serialize(source);
     }
     const operation = () => store.transaction(args.scope, false, 64 * 1024 * 1024, (snapshot) => {
       switch (args.action) {
-        case 'list': return browse(snapshot, args);
+        case 'list': return browse(snapshot, { ...args, ...(args.id ? { id: resolveEntry(snapshot, args.id).id } : {}) });
+        case 'grep': return grep(snapshot, { ...args, ...(args.id ? { id: resolveEntry(snapshot, args.id).id } : {}) });
+        case 'meta': {
+          const id = resolveEntry(snapshot, args.id).id;
+          const node = snapshot.entries.find(entry => entry.id === id) ?? snapshot.groups?.find(group => group.id === id);
+          if (!node) throw new ToolError('Unknown entry or group');
+          return nodeMeta(snapshot, node, args.offset, args.limit);
+        }
         case 'status': return { entries: snapshot.entries.length, groups: snapshot.groups?.length ?? 0,
           folded: snapshot.entries.filter(entry => entry.folded !== undefined).length + (snapshot.groups ?? []).filter(group => group.folded !== undefined).length,
-          decision: snapshot.decision, metrics: snapshot.metrics };
+          cycle: snapshot.cycle ?? 0 };
         case 'forget': {
-          if (snapshot.entries.some(entry => entry.folded !== undefined) || snapshot.groups?.some(group => group.folded !== undefined)) {
-            throw new ToolError('Read folded entries and group manifests without peek before forgetting recovery data');
+          if (!args.force && (snapshot.entries.some(entry => entry.folded !== undefined) || snapshot.groups?.some(group => group.folded !== undefined))) {
+            throw new ToolError('Folded references still depend on this archive; force=true explicitly discards their originals');
           }
           // Explicit scope disposal; future requests may archive the client's original history again.
           snapshot.entries = [];
@@ -209,7 +244,7 @@ export async function execute(input: unknown): Promise<string> {
         }
       }
     }, undefined, 'preserve');
-    const result = args.action === 'list' || args.action === 'status'
+    const result = args.action !== 'forget'
       ? await retryArchiveRead(operation) : await operation();
     return serialize(result);
   } catch (error) {

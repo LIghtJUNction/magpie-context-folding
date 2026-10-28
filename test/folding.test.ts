@@ -3,18 +3,18 @@ import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
-import { withoutBudget } from '../src/budget.js';
+import { withoutRecoveryMetadata } from '../src/recovery.js';
 import { withoutGuidance } from '../src/guidance.js';
 import { digest } from '../src/store.js';
 import { bodyFor, fixture, marked, payload, progress } from './helpers.js';
-const withoutMetadata = (body: Record<string, unknown>, protocol: Protocol) => withoutGuidance(withoutBudget(body, protocol), protocol);
+const withoutMetadata = (body: Record<string, unknown>, protocol: Protocol) => withoutGuidance(withoutRecoveryMetadata(body, protocol), protocol);
 
 
 const folded = (value: unknown) => JSON.stringify(value).includes('[[cf:v2:');
 const tool = async (args: unknown) => JSON.parse(await execute(args));
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
-  test(`${protocol}: markers fold after a distinct request, retries keep the grace period, and exact read keeps originals`, async () => {
+  test(`${protocol}: markers fold after a distinct request, retries keep the grace period, and read queries originals without unfolding history`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const input = bodyFor(protocol);
       const first = await onRequest(input, context) as Record<string, unknown>;
@@ -33,21 +33,20 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const recovered = await tool({ action: 'read', scope, id: digest(payload).slice(0, 12), limit: 24000 });
       assert.equal(recovered.text, payload);
       assert.equal(recovered.sha256, digest(payload));
-      assert.equal(recovered.kept, true);
-      assert.equal(folded(await onRequest(nextInput, context)), false, 'recovered content stays visible');
+      assert.equal(folded(await onRequest(nextInput, context)), true, 'querying content never unfolds history');
     }, protocol);
   });
 }
 
-test('large unmarked history stays byte-for-byte intact even with no available budget', async () => {
+test('large unmarked history stays byte-for-byte intact without token budgeting', async () => {
   await fixture(async ({ context, scope, store }) => {
     const input = bodyFor('chat', payload.repeat(10));
-    const output = await onRequest(input, { ...context, options: { contextWindowTokens: 10, reserveOutputTokens: 10, delayRequests: 0, budgetHints: true } }) as Record<string, unknown>;
+    const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
     assert.equal(folded(output), false);
     assert.deepEqual(withoutMetadata(output, 'chat'), input);
     const snapshot = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
     assert.equal(snapshot.entries.length, 0, 'unmarked text does not incur archive work');
-    assert.match(JSON.stringify(output), /available_estimate=0/);
+    assert.doesNotMatch(JSON.stringify(output), /context-budget|used_estimate|available_estimate|output_reserved|capacity=/);
   });
 });
 
@@ -109,8 +108,7 @@ test('without a callable shell the request is unchanged and emits no metadata', 
 
 test('malformed and tiny annotated blocks remain readable', async () => {
   await fixture(async ({ context }) => {
-    for (const text of [marked('x'), '@context-fold begin x\n' + payload,
-      '@context-fold begin x\n@context-fold begin y\n' + payload + '\n@context-fold end y\n@context-fold end x']) {
+    for (const text of [marked('x'), '@context-fold begin x\n' + payload]) {
       const input = bodyFor('chat', text);
       const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
       assert.deepEqual(withoutMetadata(output, 'chat'), input);

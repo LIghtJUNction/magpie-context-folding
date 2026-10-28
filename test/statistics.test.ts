@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { onRequest, onResponse } from '../src/context.hooks.js';
-import { estimateTokens, withoutBudget } from '../src/budget.js';
+import { estimateTokens } from '../src/metrics.js';
+import { withoutRecoveryMetadata } from '../src/recovery.js';
 import { withoutGuidance } from '../src/guidance.js';
 import { execute } from '../src/tool.js';
 import { Store, digest } from '../src/store.js';
@@ -50,7 +51,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.equal(metrics.itemsFolded, 2);
     assert.equal(metrics.recursiveItemsFolded, 0);
     const firstFoldedTokens = metrics.foldedTokensEstimated;
-    assert.equal(firstFoldedTokens, String(estimateTokens(body) - estimateTokens(withoutGuidance(withoutBudget(first, 'chat'), 'chat'))));
+    assert.equal(firstFoldedTokens, String(estimateTokens(body) - estimateTokens(withoutGuidance(withoutRecoveryMetadata(first, 'chat'), 'chat'))));
     assert.ok(BigInt(firstFoldedTokens) > 0n);
     assert.equal(metrics.successfulFoldedRequests, 0, 'a planned fold is not a verified successful request');
     await onResponse({}, { ...firstContext, success: false, request: first });
@@ -106,10 +107,10 @@ test('annotation batches count once; successful, failed and uncertain responses 
     await execute({ scope, action: 'read', id: 'missing-entry' });
     assert.equal((await call({ scope, action: 'stats' })).summary.detailViewCount, 2);
     assert.equal((await stat(join(directory, 'state.sqlite'))).size, bytesBefore);
-    assert.equal((await call({ scope, action: 'forget' })).forgotten, true);
+    assert.equal((await call({ scope, action: 'forget', force: true })).forgotten, true);
     const lifetime = await call({ action: 'stats' });
     assert.equal(lifetime.metrics.foldBatchesApproved, 1);
-    assert.equal(lifetime.metrics.itemsRestored, 2);
+    assert.equal(lifetime.metrics.itemsRestored, 0);
     assert.deepEqual(lifetime.summary, session.summary);
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);
@@ -188,7 +189,7 @@ test('new folds do not recount the gross savings of older regions in the same re
     const nextInput = { ...body, messages: [...body.messages,
       { role: 'assistant', content: annotated('second', 'New completed work. '.repeat(100)) }] };
     const next = await onRequest(nextInput, context) as Record<string, unknown>;
-    const clean = withoutGuidance(withoutBudget(next, 'chat'), 'chat');
+    const clean = withoutGuidance(withoutRecoveryMetadata(next, 'chat'), 'chat');
     const newOnly = { ...nextInput, messages: [...nextInput.messages.slice(0, -1),
       ...(clean.messages as unknown[]).slice(-1)] };
     const newGross = BigInt(estimateTokens(nextInput) - estimateTokens(newOnly));

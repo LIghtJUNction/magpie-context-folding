@@ -5,7 +5,7 @@ import { execute } from '../src/tool.js';
 import { Store, digest } from '../src/store.js';
 import { bodyFor, fixture, payload, progress } from './helpers.js';
 
-test('a projection prepared before concurrent recovery returns original input instead of stale folds', async () => {
+test('a concurrent query metric commit cannot publish a stale projection or change folding permission', async () => {
   await fixture(async ({ context, scope }) => {
     const input = bodyFor('chat');
     await onRequest(input, context);
@@ -28,7 +28,7 @@ test('a projection prepared before concurrent recovery returns original input in
       const pending = onRequest(next, context);
       await prepared;
       const read = JSON.parse(await execute({ action: 'read', scope, id: digest(payload).slice(0, 12) }));
-      assert.equal(read.kept, true);
+      assert.equal(read.text, payload.slice(0, 1200));
       release();
       assert.equal(await pending, next, 'failed compare-and-swap cannot publish its stale projection');
     } finally { release(); Store.prototype.transaction = original; }

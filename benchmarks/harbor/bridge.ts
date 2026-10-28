@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { onRequest, onResponse } from '../../src/context.hooks.js';
+import { statistics } from '../../src/statistics.js';
 
 type RecordValue = Record<string, unknown>;
 type Mode = 'baseline' | 'folding';
@@ -64,7 +65,7 @@ export class FoldingBridge {
         protocol: 'chat', model: input.body.model, session: this.session,
         agent: 'harbor', origin: 'harbor-benchmark', cwd: this.cwd, state,
         options: { enabled: this.mode === 'folding', delayRequests: 1,
-          maxSessionBytes: 64 * 1024 * 1024, reserveOutputTokens: 0 },
+          maxSessionBytes: 64 * 1024 * 1024 },
       });
       const projectionMs = performance.now() - start;
       // Read only the hook's trusted completion state, never a scope-shaped
@@ -97,8 +98,8 @@ export class FoldingBridge {
         && input.argv.every(value => typeof value === 'string' && value.length <= 4096 && !value.includes('\0')),
       'invalid_request', 'CLI requires a bounded array of arguments');
       const argv = input.argv as string[];
-      requireCondition(['read', 'list', 'status'].includes(argv[0]!),
-        'unsupported_action', 'Only read, list and status are available in benchmarks');
+      requireCondition(['read', 'list', 'grep', 'meta', 'status'].includes(argv[0]!),
+        'unsupported_action', 'Only read, list, grep, meta and status are available in benchmarks');
       requireCondition(this.scope !== null && this.mode === 'folding',
         'archive_unavailable', 'This trial has no recovery archive');
       const confined: string[] = [];
@@ -122,7 +123,17 @@ export class FoldingBridge {
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
       ]);
-      return { exit_code: exitCode, stdout, stderr };
+      let output = stdout;
+      if (argv[0] === 'status' && exitCode === 0) {
+        // Agent status is compact; benchmark validation still needs the actual
+        // completion counters. Enrich only this private CLI bridge response.
+        let status: unknown;
+        try { status = JSON.parse(stdout); } catch { /* --help remains ordinary text. */ }
+        if (record(status) && typeof status.entries === 'number' && !('error' in status)) {
+          output = JSON.stringify({ ...status, metrics: (await statistics(this.scope)).metrics }) + '\n';
+        }
+      }
+      return { exit_code: exitCode, stdout: output, stderr };
     }
     if (input.op === 'close') {
       await this.close();

@@ -1,6 +1,6 @@
 # C# bridge SDK
 
-This is an asynchronous .NET **bridge SDK**, not a native C# folding core. Install the standalone Python package first with uv (from `context-folding`: `uv venv` then `uv pip install --python .venv/bin/python .`). Set `PythonExecutable` to that environment's Python. Python is required at runtime; there is no Magpie dependency. The project targets the installed .NET 10 SDK and uses only framework libraries, with no third-party NuGet packages.
+An asynchronous .NET bridge to the shared Python engine used by `ctxf` and local RPC. It targets .NET 10 and uses framework libraries only. Each client owns one persistent `python3 -m context_folding rpc --state PATH` child.
 
 Add a project reference to `ContextFolding/ContextFolding.csproj`. Each `Client` owns one persistent `python3 -m context_folding rpc --state PATH` subprocess, serializes requests over JSON Lines, drains stderr, and returns a detached `JsonElement` from the response `result`. Engine errors throw `ContextFoldingException` carrying `Code`; invalid responses and transport failures close the bridge.
 
@@ -9,29 +9,46 @@ This is the same engine used by `ctxf fold` and `ctxf rpc`. Point `ClientOptions
 ```csharp
 using ContextFolding;
 
-await using var client = new Client(new ClientOptions("/absolute/path/archive.sqlite")
+await using var client = new Client(new ClientOptions("/absolute/private/archive.sqlite3")
 {
-    PythonExecutable = "/path/to/venv/bin/python", // optional; default python3
+    PythonExecutable = "/path/to/venv/bin/python",
 });
-var text = "<!-- @context-fold begin investigation -->\n"
-    + string.Concat(Enumerable.Repeat("Completed investigation detail.\n", 40))
-    + "<!-- @context-fold end investigation -->\n";
-var folded = await client.FoldAsync("session", text);
-Console.Write(folded.GetProperty("text").GetString());
-Console.WriteLine(await client.ResolveAsync("session", new { content = folded.GetProperty("text").GetString() }));
+var text = await File.ReadAllTextAsync("notes.txt");
+var folded = await client.FoldAsync("task", text);
 var references = folded.GetProperty("references");
 if (references.GetArrayLength() > 0)
-    Console.WriteLine(await client.ReadAsync("session", references[0].GetProperty("id").GetString()!));
+{
+    var id = references[0].GetProperty("id").GetString()!;
+    Console.WriteLine(await client.MetaAsync("task", id));
+    Console.WriteLine(await client.ListAsync("task", new Dictionary<string, object?> { ["id"] = id, ["depth"] = 2, ["limit"] = 5 }));
+    Console.WriteLine(await client.GrepAsync("task", "timeout", new Dictionary<string, object?> { ["id"] = id, ["limit"] = 3 }));
+    Console.WriteLine(await client.ReadAsync("task", id, new Dictionary<string, object?> { ["startLine"] = 1, ["endLine"] = 4, ["limit"] = 240 }));
+}
 ```
 
-`FoldAsync(scope, text, fields?, cancellationToken)` forwards the explicit immediate operation. Empty text is valid; optional fields include `language` and `commentStyles`. The result contains `scope`, complete `text`, and `references`, each with the full SHA-256 `id`, `sha256`, `label`, short `reference` and `archiveId`. Only newly folded bodies are listed. The caller consumes the returned view; the bridge does not rewrite model history.
+## Operations
 
-`CallAsync(IReadOnlyDictionary<string,object?> request, CancellationToken)` exposes all operations. `PutAsync`, `ListAsync`, `ReadAsync`, `RenderAsync`, and `ResolveAsync` wrap other common operations; each accepts optional extra fields and a cancellation token. Use `CallAsync` for `read-source`, including `occurrence` and `requestCycle`; its default delay remains unchanged by `fold`. A fresh source read needs a fresh occurrence; retries keep the same cycle. The bridge does not observe model requests or advance cycles itself. `mark` and `group` are removed.
+`FoldAsync`, `ListAsync`, `GrepAsync`, `MetaAsync` and `ReadAsync` return a detached `JsonElement`. Each accepts optional fields and a cancellation token. Fold/read/meta take text or ID respectively; grep takes a literal query. Explicit arguments override extra fields.
 
-Extra fields follow the Python engine protocol; wrappers preserve their explicit action/scope/text/ID arguments. `read` offsets, limits and character counts use Python Unicode code points, not .NET UTF-16 code units; do not derive offsets from `string.Length` when text contains supplementary characters.
+Read/grep/list/meta do not set keep or unfold history. Read defaults to 1200 Unicode code points, maximum 24000, and preserves direct child references. Use inclusive `startLine`/`endLine` or `offset`, not both. Python offsets are not .NET UTF-16 string indices. List/grep/meta default to 10 items, maximum 100; grep additionally accepts `id`, `recursive`, `context`, `offset` and `limit`.
 
-Cancellation while waiting in the queue leaves the process usable and throws `OperationCanceledException`. Cancellation after dispatch closes the process and throws `ContextFoldingException` with code `cancelled`; create a new client afterward. The ordered protocol has no request IDs or remote cancellation message. `DisposeAsync` terminates the process and rejects outstanding requests; it is repeatable and does not delete the archive. There is no implicit timeout: use `CancellationTokenSource` for deadlines.
+Fold accepts empty text and optional `language` / `commentStyles`. Its result contains `scope`, complete `text`, and top-level references with full-SHA `id`, `sha256`, `label`, short `reference` and `archiveId`. Query children with list/meta or recursive grep. Original `sha256` and node `viewSha256` describe different bytes.
 
-`ClientOptions` also exposes `WorkingDirectory`, environment overrides, `PythonArguments` (defaults to `-m context_folding rpc`; `--state PATH` is always appended), and `MaxResponseChars` (64 Mi characters default). stderr diagnostics retain at most 16 Ki characters. Requests and responses use UTF-8.
+`CallAsync` forwards complete requests, including host-only `read-source` cycles and status. Legacy archive/export wrappers remain compatible, but normal examples query small views. The bridge cannot rewrite history or infer model-request progress.
 
-Run `dotnet run --project Tests/Tests.csproj` for package-free subprocess integration tests using a temporary Python RPC process. They cover persistence/concurrent requests, wrapper forwarding, Unicode, stderr pressure, application/protocol errors, response limits, process exit, cancellation, disposal, and failed startup. Set `CONTEXT_FOLDING_REAL_CORE_PATH=/absolute/path/context-folding/python` when running the tests to additionally check immediate `fold`, empty input, complete views, exact UTF-8 hashes and scoped recovery, plus source annotation delay, retries and fresh occurrences against the actual Python core; otherwise that portion prints an explicit skip. After installing the Python core, run `dotnet run --project Example/Example.csproj` for an actual-engine example; source checkout execution can instead set `PYTHONPATH=/absolute/path/context-folding/python`.
+## Transport and lifecycle
+
+JSON Lines calls are serialized; stderr is drained. Application errors throw `ContextFoldingException` with a code and preserve the process. Malformed responses or process failures close it.
+
+Queued cancellation preserves the stream. Active cancellation terminates it because RPC has no cancellation IDs. `DisposeAsync` is repeatable and does not delete the archive. There is no implicit timeout; use a cancellation token for deadlines.
+
+`ClientOptions` also provides working directory, environment overrides, `PythonArguments` (default `-m context_folding rpc`) and `MaxResponseChars` (64 Mi characters). `--state PATH` is appended; diagnostics retain at most 16 Ki characters. Payload encoding is UTF-8.
+
+## Verify
+
+```sh
+dotnet run --project Tests/Tests.csproj
+dotnet run --project Example/Example.csproj
+```
+
+Process tests require Python. Set `CONTEXT_FOLDING_REAL_CORE_PATH=/absolute/path/context-folding/python` for actual-core fold/nested-query/delay checks; otherwise that part reports a skip. Source examples can set `PYTHONPATH` instead of installing the package. Installing the Python CLI does not install .NET.

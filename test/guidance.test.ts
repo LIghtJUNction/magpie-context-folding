@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { appendGuidance, guidanceText, shellQuote, withoutGuidance } from '../src/guidance.js';
 import { onRequest, onResponse } from '../src/context.hooks.js';
-import { estimateTokens, withoutBudget } from '../src/budget.js';
+import { estimateTokens } from '../src/metrics.js';
+import { appendRecoveryMetadata } from '../src/recovery.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
 import { bodyFor, fixture, marked } from './helpers.js';
 
@@ -12,6 +13,18 @@ const folded = (body: Record<string, unknown>, protocol: Protocol) => extractSpa
   .some(span => span.text.includes('[[cf:v2:'));
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
+  test(`${protocol}: legacy scope-only metadata upgrades to one CLI guide without budgets`, async () => {
+    await fixture(async ({ context }) => {
+      const original = bodyFor(protocol, 'A short completed answer.');
+      const legacy = appendRecoveryMetadata(original, protocol, 'a'.repeat(64));
+      const output = await onRequest(legacy, context) as Record<string, unknown>;
+      assert.equal(countGuides(output), 1);
+      assert.doesNotMatch(JSON.stringify(output), /<context-budget|<context-folding scope=/);
+      assert.deepEqual(withoutGuidance(output, protocol), original);
+      assert.deepEqual(await onRequest(output, context), output);
+    }, protocol);
+  });
+
   test(`${protocol}: automatic system guidance is stable and preserves host instructions/tools`, () => {
     const input = bodyFor(protocol);
     const original = structuredClone(input);
@@ -114,7 +127,7 @@ test('a zero savings floor still rejects a batch that cannot cover its actual CL
   });
 });
 
-test('budget hints are opt-in and guide-only overhead remains visible in successful statistics', async () => {
+test('removed budget metadata stays absent and guide-only overhead remains visible in successful statistics', async () => {
   await fixture(async ({ context, store, scope }) => {
     const input = bodyFor('chat', 'Just a normal short answer.');
     const output = await onRequest(input, context) as Record<string, unknown>;
@@ -124,9 +137,5 @@ test('budget hints are opt-in and guide-only overhead remains visible in success
     assert.equal(stats.metrics.guideOnlyRequests, 1);
     assert.equal(stats.metrics.estimatedTokenDelta, String(estimateTokens(input) - estimateTokens(output)));
     assert.ok(BigInt(stats.metrics.estimatedTokenDelta) < 0n, 'fixed guidance overhead is not hidden');
-    const budget = await onRequest(input, { ...context, options: { budgetHints: true, contextWindowTokens: 128000 } }) as Record<string, unknown>;
-    assert.equal(JSON.stringify(budget).match(/<context-budget/g)?.length, 1);
-    assert.equal(countGuides(budget), 1);
-    assert.deepEqual(withoutGuidance(withoutBudget(budget, 'chat'), 'chat'), input);
   });
 });

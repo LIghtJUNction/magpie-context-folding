@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { ConfigError, loadOptions } from './config.js';
-import { appendBudget, estimateTokens, withoutBudget } from './budget.js';
+import { withoutRecoveryMetadata } from './recovery.js';
 import { appendGuidance, defaultRecoveryCommand, withoutGuidance } from './guidance.js';
-import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
-import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
+import { containsRegion, outermost, parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
+import { addMetrics, emptyMetrics, estimateTokens, metricsSchema } from './metrics.js';
 import { extractSpans, recoveryShellName, replaceExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
@@ -14,6 +15,7 @@ const stateSchema = z.custom<Body>(record);
 const pendingKey = 'contextFoldingStatistics';
 const pendingSchema = z.object({
   scope: z.string().regex(/^[a-f0-9]{64}$/), bodyHash: z.string(), folded: z.boolean(), successDelta: metricsSchema,
+  requestId: z.string().uuid(),
 });
 const contextSchema = z.object({
   protocol: z.enum(['chat', 'responses', 'anthropic', 'gemini']), model: z.string(), session: z.string().min(1),
@@ -60,7 +62,7 @@ function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] 
       // Marker order survives earlier replacements in the same message; byte
       // offsets and content-derived span IDs do not.
       result.push({ region, role, occurrence: fingerprint([region.sha256, region.label,
-        occurrenceIdentity(body, origin), region.origin.ordinal, origin.source ?? null]) });
+        region.origin.path.map(item => [occurrenceIdentity(body, byId.get(item.id)!), item.ordinal]), origin.source ?? null]) });
     }
   };
   const history = protocol === 'responses' ? body.input : protocol === 'gemini' ? body.contents : body.messages;
@@ -103,22 +105,17 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
     ctx.signal?.throwIfAborted();
     const options = await loadOptions(ctx.options, ctx.cwd);
     if (!options.enabled) return input;
-    const body = withoutGuidance(withoutBudget(input, ctx.protocol), ctx.protocol);
+    const body = withoutGuidance(withoutRecoveryMetadata(input, ctx.protocol), ctx.protocol);
     const spans = extractSpans(body, ctx.protocol);
     if (!spans.length || spans.some(span => span.protectedReason)) return input;
-    const budgetOptions = {
-      reserveOutputTokens: options.reserveOutputTokens,
-      ...(options.contextWindowTokens === undefined ? {} : { contextWindowTokens: options.contextWindowTokens }),
-    };
     // Recovery uses the host's existing shell, never a registered plugin tool.
     // A shell-less request must retain its input, including all original text.
     if (!recoveryShellName(body, ctx.protocol, options.shellToolName)) return input;
     const store = new Store();
     const command = options.recoveryCommand ?? defaultRecoveryCommand();
     const decorate = (value: Body, scope?: string): Body => {
-      const guided = appendGuidance(value, ctx.protocol, { command,
+      return appendGuidance(value, ctx.protocol, { command,
         ...(scope ? { scope, stateDirectory: store.directory } : {}) });
-      return options.budgetHints ? appendBudget(guided, ctx.protocol, budgetOptions) : guided;
     };
     // Check the real system field before doing any archive work.
     decorate(body);
@@ -133,87 +130,154 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       snapshot.cycle = cycle;
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
-      const proposed: { region: Region; reference: string; entry: Entry; occurrence: string }[] = [];
-      const created = new Set<string>();
-      const waitingHashes = new Set<string>();
       const found = candidates(body, spans, ctx.protocol);
-      // Allocate references against the entire batch so collision handling is
-      // independent of parse order. Full hashes and original text stay in storage.
+      const resolved = new Map<Region, Entry>();
+      const valid = new Map<Region, boolean>();
+      // Nested references are child edges only when this exact scope already
+      // holds one unambiguous original. Never archive an unknown reference.
+      const validate = (region: Region): boolean => {
+        if (valid.has(region)) return valid.get(region)!;
+        if (region.referenceHash) {
+          const matches = snapshot.entries.filter(entry => entry.annotation?.sha256.startsWith(region.referenceHash!));
+          const first = matches[0];
+          const ok = !!first && matches.every(entry => entry.annotation!.sha256 === first.annotation!.sha256 && entry.text === first.text);
+          if (ok) resolved.set(region, first!);
+          valid.set(region, ok);
+          return ok;
+        }
+        let visible = region.text;
+        let ok = true;
+        for (const child of [...region.children].reverse()) {
+          if (!validate(child.region)) ok = false;
+          visible = visible.slice(0, child.start) + visible.slice(child.end);
+        }
+        ok &&= !/\[\[cf:/.test(visible);
+        valid.set(region, ok);
+        return ok;
+      };
+      for (const { region } of found) validate(region);
       const hashes = new Set([...byHash.keys(), ...snapshot.entries.map(entry => entry.id),
-        ...(snapshot.groups ?? []).map(group => group.id), ...found.map(candidate => candidate.region.sha256)]);
+        ...(snapshot.groups ?? []).map(group => group.id),
+        ...found.filter(item => valid.get(item.region) && !item.region.referenceHash).map(item => item.region.sha256)]);
+      const refFor = (region: Region) => reference(shortHash(resolved.get(region)?.annotation?.sha256 ?? region.sha256, hashes));
+      const kept = (region: Region): boolean => (resolved.get(region) ?? byHash.get(region.sha256))?.mark.disposition === 'keep'
+        || region.children.some(child => kept(child.region));
+      const observations = new Map(found.map(candidate => {
+        const previous = byHash.get(candidate.region.sha256)?.occurrences?.[candidate.occurrence];
+        const observed = previous && previous.lastSeen >= previousCycle
+          ? { ...previous, lastSeen: cycle } : { firstSeen: cycle, lastSeen: cycle, folded: false };
+        return [candidate.region, { ...candidate, observed, reference: refFor(candidate.region) }] as const;
+      }));
+      const proposed: { region: Region; reference: string }[] = [];
+      const waitingRegions: Region[] = [];
       let waiting = 0;
       let skipped = 0;
-      for (const { region, occurrence, role } of found) {
-        const ref = reference(shortHash(region.sha256, hashes));
+      for (const candidate of observations.values()) {
+        const { region, observed, reference: ref } = candidate;
+        if (!valid.get(region) || region.referenceHash || kept(region)) continue;
         const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
           spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
         const after = region.slices.length * Buffer.byteLength(JSON.stringify(ref));
         if (after >= before || Math.floor((before - after) / 4) < options.minSavingsTokens) { skipped++; continue; }
+        if (cycle - observed.firstSeen < options.delayRequests) { waiting++; waitingRegions.push(region); continue; }
+        proposed.push({ region, reference: ref });
+      }
+      // Parent/child ranges overlap. Price the actual outermost projection,
+      // including all system guidance and recovery paths, before storing it.
+      let selected = outermost(proposed);
+      const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
+        [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
+          [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
+      let hasFolded = selected.length > 0 || existingReferences.length > 0;
+      let projected = replaceExtractedSpans(body, replaceRegions(spans, selected), ctx.protocol, spans);
+      let result = decorate(projected, hasFolded ? scope : undefined);
+      const netSaving = estimateTokens(body) - estimateTokens(result);
+      if (selected.length > 0 && (netSaving <= 0 || netSaving < options.minSavingsTokens)) {
+        skipped += selected.length;
+        selected = [];
+        hasFolded = existingReferences.length > 0;
+        projected = body;
+        result = decorate(body, hasFolded ? scope : undefined);
+      }
+      // Commit originals and required descendants only for published folds or
+      // legitimate waiting cursors. A rejected batch creates no orphan archive.
+      const needed = new Set<Region>();
+      const retain = (region: Region) => {
+        if (needed.has(region)) return;
+        needed.add(region);
+        for (const child of region.children) retain(child.region);
+      };
+      for (const region of waitingRegions) retain(region);
+      for (const { region } of selected) retain(region);
+      const roles = new Map(found.map(item => [item.region, item.role]));
+      const archive = (region: Region): Entry => {
+        const old = resolved.get(region);
+        if (old) return old;
+        const children = region.children.map(child => ({ id: archive(child.region).id, label: child.region.label,
+          start: child.start, end: child.end }));
         let entry = byHash.get(region.sha256);
         if (!entry) {
-          entry = { id: region.sha256, role, text: region.text, annotation: { sha256: region.sha256, label: region.label },
+          entry = { id: region.sha256, role: roles.get(region)!, text: region.text,
+            annotation: { sha256: region.sha256, label: region.label, ...(children.length ? { children } : {}) },
             mark: { disposition: 'unmarked' }, layers: [], occurrences: {} } satisfies Entry;
           snapshot.entries.push(entry);
           byHash.set(region.sha256, entry);
-          created.add(entry.id);
-        } else if (entry.text !== region.text) throw new Error('Annotation content hash mismatch');
-        const occurrences = entry.occurrences ??= {};
-        let observed = occurrences[occurrence];
-        // Reappearing history gets a new grace period. The content hash alone
-        // can never make a freshly read occurrence immediately disappear.
-        if (!observed || observed.lastSeen < previousCycle) observed = occurrences[occurrence] = { firstSeen: cycle, lastSeen: cycle };
-        observed.lastSeen = cycle;
-        if (entry.mark.disposition === 'keep') continue;
-        if (cycle - observed.firstSeen < options.delayRequests) { waiting++; waitingHashes.add(entry.id); continue; }
-        proposed.push({ region, reference: ref, entry, occurrence });
+        } else {
+          if (entry.text !== region.text) throw new Error('Annotation content hash mismatch');
+          if (children.length && !entry.annotation!.children) entry.annotation!.children = children;
+          else if (children.length && JSON.stringify(entry.annotation!.children) !== JSON.stringify(children)) {
+            throw new Error('Annotation child structure changed');
+          }
+        }
+        resolved.set(region, entry);
+        return entry;
+      };
+      for (const region of needed) archive(region);
+      const published = [...observations.values()].filter(item => !item.region.referenceHash
+        && selected.some(outer => outer.region === item.region || containsRegion(outer.region, item.region)));
+      const newRegions = published.filter(item => !item.observed.folded);
+      const newlyFolded = newRegions.length;
+      // Count only new outermost replacements. Older children inside a new
+      // parent already contributed savings; unrelated replayed siblings must
+      // remain identical on both sides of this incremental estimate.
+      const newOutermost = outermost(newRegions);
+      const replayedChildren = published.filter(item => item.observed.folded
+        && newOutermost.some(outer => containsRegion(outer.region, item.region)));
+      const previousProjection = replaceExtractedSpans(body, replaceRegions(spans, replayedChildren), ctx.protocol, spans);
+      const newProjection = replaceExtractedSpans(body, replaceRegions(spans, newOutermost), ctx.protocol, spans);
+      for (const candidate of observations.values()) {
+        if (!valid.get(candidate.region) || candidate.region.referenceHash) continue;
+        const entry = resolved.get(candidate.region) ?? byHash.get(candidate.region.sha256);
+        // A rejected mature candidate can already have a durable waiting
+        // cursor. Refresh it without creating a new archive for this batch.
+        if (!entry) continue;
+        (entry.occurrences ??= {})[candidate.occurrence] = candidate.observed;
       }
-      // Occurrence metadata is a short-lived cursor; originals and old references
-      // are durable until explicitly forgotten, never evicted to meet a budget.
+      for (const candidate of published) {
+        const entry = resolved.get(candidate.region)!;
+        entry.folded = candidate.reference;
+        candidate.observed.folded = true;
+      }
+      // Occurrence metadata is a cursor; archived originals remain durable.
       for (const entry of snapshot.entries) if (entry.occurrences) {
         for (const [key, occurrence] of Object.entries(entry.occurrences)) {
           if (occurrence.lastSeen < previousCycle) delete entry.occurrences[key];
         }
       }
-      const replacements = replaceRegions(spans, proposed);
-      const existingReferences = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
-        [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].filter(match =>
-          [...byHash.keys()].filter(hash => hash.startsWith(match[1]!)).length === 1));
-      let hasFolded = proposed.length > 0 || existingReferences.length > 0;
-      let projected = replaceExtractedSpans(body, replacements, ctx.protocol, spans);
-      let result = decorate(projected, hasFolded ? scope : undefined);
-      // Compare the complete outgoing request, including system guidance,
-      // archive scope/path, references and optional budget metadata. Even a
-      // configured zero floor never authorizes a net-negative transformation.
-      const netSaving = estimateTokens(body) - estimateTokens(result);
-      const insufficient = proposed.length > 0 && (netSaving <= 0 || netSaving < options.minSavingsTokens);
-      if (insufficient) {
-        skipped += proposed.length;
-        proposed.length = 0;
-        snapshot.entries = snapshot.entries.filter(entry => !created.has(entry.id) || waitingHashes.has(entry.id));
-        hasFolded = existingReferences.length > 0;
-        projected = body;
-        result = decorate(body, hasFolded ? scope : undefined);
-      }
-      const newRegions = proposed.filter(({ entry, occurrence }) => !entry.occurrences![occurrence]!.folded);
-      const newlyFolded = newRegions.length;
-      for (const { entry, occurrence, reference: ref } of proposed) {
-        entry.folded = ref;
-        entry.occurrences![occurrence]!.folded = true;
-      }
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
+      const requestId = randomUUID();
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period'
         : skipped ? 'insufficient-net-savings' : 'no-eligible-annotations',
-        cycle, waiting, skipped, foldedRegions: proposed.length, replayedReferences: existingReferences.length,
-        estimatedNetSavings: estimateTokens(body) - estimateTokens(result) };
+        cycle, waiting, skipped, foldedRegions: selected.length, replayedReferences: existingReferences.length,
+        estimatedNetSavings: estimateTokens(body) - estimateTokens(result),
+        beforeBytes: Buffer.byteLength(JSON.stringify(input)), afterBytes: Buffer.byteLength(JSON.stringify(result)),
+        observation: { requestId, observedAt: Date.now(), status: 'pending', sessionKey: digest(ctx.session) } };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
-        // A request can replay older folds alongside a newly completed region.
-        // Only first-time replacements contribute to cumulative gross savings.
-        foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(
-          replaceExtractedSpans(body, replaceRegions(spans, newRegions), ctx.protocol, spans)))),
+        foldedTokensEstimated: String(Math.max(0, estimateTokens(previousProjection) - estimateTokens(newProjection))),
       });
-      pending = { scope, bodyHash: fingerprint(result), folded: hasFolded,
+      pending = { scope, requestId, bodyHash: fingerprint(result), folded: hasFolded,
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
           guideOnlyRequests: hasFolded ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
@@ -245,7 +309,10 @@ export async function onResponse(_reply: unknown, context: unknown): Promise<voi
     const delta = ctx.success === false ? { failedHookRequests: 1, failedFoldedRequests: pending.data.folded ? 1 : 0 }
       : ctx.success === true && matches ? pending.data.successDelta
       : { unverifiedHookRequests: 1, unverifiedFoldedRequests: pending.data.folded ? 1 : 0 };
-    await new Store().recordMetrics(pending.data.scope, delta, ctx.signal);
+    await new Store().recordMetrics(pending.data.scope, delta, ctx.signal, {
+      requestId: pending.data.requestId,
+      status: ctx.success === false ? 'failed' : ctx.success === true && matches ? 'confirmed' : 'unverified',
+    });
   } catch { /* A missing completion is never counted as verified usage. */ }
   // @context-fold end onResponse-a62b6b6c8b
 }

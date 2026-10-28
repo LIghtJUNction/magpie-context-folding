@@ -32,8 +32,6 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 PROJECT = Path(__file__).resolve().parents[1]
 HTTP = build_opener(ProxyHandler({}))
-CAPACITY = 1_000_000
-OUTPUT_RESERVED = 1000
 GUIDANCE = re.compile(r"^<context-folding>.*</context-folding>$", re.DOTALL)
 BUDGET = re.compile(
     r"^<context-budget used_estimate=(\d+) capacity=(\d+|unknown) "
@@ -129,7 +127,7 @@ def verify_request(outgoing: dict, sent: dict) -> tuple[dict, str | None, dict]:
              and isinstance(item.get("content"), str) and GUIDANCE.fullmatch(item["content"])]
     assert len(hints) == 1, f"expected exactly one system guidance, found {len(hints)}"
     assert not any(item.get("role") == "system" and isinstance(item.get("content"), str)
-                   and BUDGET.fullmatch(item["content"]) for item in clean["messages"]), "budget must be opt-in"
+                   and BUDGET.fullmatch(item["content"]) for item in clean["messages"]), "removed context budget was injected"
     scope_match = re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"])
     scope = scope_match[1] if scope_match else None
     assert outgoing["model"] == "m1", f"unexpected routed model: {outgoing['model']}"
@@ -173,11 +171,10 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
         "spec": str(project), "options": {
             "enabled": True, "delayRequests": 1, "maxSessionBytes": 64 * 1024 * 1024,
-            "contextWindowTokens": CAPACITY, "reserveOutputTokens": OUTPUT_RESERVED,
         },
     }]})
     write_json(cache / "magpie" / "models.json", {"fake": {"id": "fake", "name": "Synthetic", "models": {
-        "m1": {"id": "m1", "name": "Synthetic", "limit": {"context": CAPACITY, "output": OUTPUT_RESERVED}, "tool_call": True},
+        "m1": {"id": "m1", "name": "Synthetic", "limit": {"context": 1_000_000, "output": 1000}, "tool_call": True},
     }}})
     environment = dict(os.environ)
     environment.update({
@@ -262,7 +259,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 parts: list[str] = []
                 offset = 0
                 while True:
-                    page = call({"scope": scope, "action": "read", "peek": True,
+                    page = call({"scope": scope, "action": "read", "peek": True, "layer": "original",
                                  "id": expected_hash[:12], "offset": offset, "limit": 5000})
                     assert page["id"] == expected_hash and page["sha256"] == expected_hash, "content hash changed"
                     assert page["offset"] == offset and page["totalChars"] == utf16_length(original), "read pagination metadata changed"
@@ -311,19 +308,19 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 {"role": "assistant", "content": last_part + suffix},
                 {"role": "user", "content": "The annotation is now closed."},
             ])
-            first, first_scope, first_budget = send(closed)
+            first, first_scope, first_request = send(closed)
             assert first_scope is None and opening_scope is None and first == closed, "first closed observation did not keep its grace period"
             retry, retry_scope, _ = send(closed)
             assert retry_scope is None and retry == closed, "an identical retry consumed the grace period"
             advanced = advance(closed, "A distinct request after the completed work.")
-            folded, scope, folded_budget = send(advanced)
+            folded, scope, folded_request = send(advanced)
             assert scope is not None, "folded text has no CLI recovery scope"
             reference = f"[[cf:v2:{sha256(original)[:12]}]]"
             expected = copy.deepcopy(advanced)
             expected["messages"][3]["content"] = prefix + reference
             expected["messages"][5]["content"] = reference + suffix
             assert folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
-            assert folded_budget["usedEstimate"] < first_budget["usedEstimate"], "fold did not reduce the outgoing estimate"
+            assert folded_request["usedEstimate"] < first_request["usedEstimate"], "fold did not reduce the outgoing estimate"
             repeated, _, _ = send(advanced)
             assert repeated == expected, "a repeated request changed the projection"
             projected = copy.deepcopy(fixture.upstream[-1])
@@ -331,7 +328,8 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             replayed, _, _ = send(projected)
             assert replayed == expected, "replaying a projected request duplicated guidance or re-folded a reference"
             status = call({"scope": scope, "action": "status"})
-            assert status["entries"] == 1 and status["metrics"]["itemsFolded"] == 1, "retry created duplicate archives or folds"
+            scope_metrics = call({"scope": scope, "action": "stats"})["metrics"]
+            assert status["entries"] == 1 and scope_metrics["itemsFolded"] == 1, "retry created duplicate archives or folds"
             read_all(scope, original)
             call({"scope": "0" * 64, "action": "read", "peek": True, "id": sha256(original)[:12]}, expect_error=True)
             exported = directory / "original.txt"
@@ -340,8 +338,9 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert pasted["sha256"] == sha256(original) and "text" not in pasted, "paste metadata changed"
             call({"scope": scope, "action": "paste", "peek": True, "id": sha256(original)[:12], "path": str(exported)}, expect_error=True)
             assert exported.read_bytes() == original.encode("utf-8"), "paste overwrote an existing file"
-            kept = call({"scope": scope, "action": "read", "id": sha256(original)[:12], "limit": 1, "restore": True})
+            kept = call({"scope": scope, "action": "read", "id": sha256(original)[:12], "restore": True})
             assert kept["kept"] is True, "explicit --restore did not persist expansion"
+            assert kept["text"].encode("utf-8") == original.encode("utf-8"), "explicit --restore did not return the complete original"
             assert send(advanced)[0] == advanced, "read did not expand all slices of the original"
             later = advance(advanced, "Another request must keep recovered text visible.")
             assert send(later)[0] == later, "recovered text folded again on a later request"
@@ -402,14 +401,14 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 "checks": [
                     "local CLI recovery without MCP", "open annotations stay visible", "first closed observation and identical retries stay visible",
                     "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
-                    "one concise system guidance; budgets disabled by default", "projection replay does not duplicate guidance or archives",
+                    "one concise system guidance; no context budgets", "projection replay does not duplicate guidance or archives",
                     "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
                     "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
                     "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
                     "source files remain unchanged by folding", "unmarked source stays visible",
                 ],
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
-                "firstRequestEstimate": first_budget, "foldedRequestEstimate": folded_budget,
+                "firstRequestEstimate": first_request, "foldedRequestEstimate": folded_request,
                 "responseHooks": {key: final_metrics[key] for key in (
                     "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests")},
             }))

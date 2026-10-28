@@ -17,6 +17,11 @@ export function isPluginGuide(text: string): boolean {
   let rest = text.trim();
   if (!rest) return false;
   while (rest) {
+    const metadata = /^<context-folding scope=[a-f0-9]{64}\s*\/>/.exec(rest);
+    if (metadata) {
+      rest = rest.slice(metadata[0].length).trim();
+      continue;
+    }
     const opening = /^<(context-folding(?: scope=[a-f0-9]{64})?|context-budget|context-folding-receipts)>/.exec(rest);
     if (!opening) return false;
     const tag = opening[1]!.split(' ', 1)[0]!;

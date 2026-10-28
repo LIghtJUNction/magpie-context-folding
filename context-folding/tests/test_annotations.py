@@ -43,8 +43,6 @@ class AnnotationTests(unittest.TestCase):
         function = "def work():\n    return 3\n"
         damaged = (
             "# @context-fold begin open\n",
-            "# @context-fold begin outer\n# @context-fold begin inner\n"
-            "# @context-fold end inner\n# @context-fold end outer\n",
             "# @context-fold begin broken\n# @context-fold end wrong\n# @context-fold end broken\n",
             "# @context-fold begin\n",
             "# @context-fold end orphan\n",
@@ -59,6 +57,17 @@ class AnnotationTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         _annotate_functions(str(path), "python", True)
                     self.assertEqual(path.read_bytes(), original)
+
+    def test_function_marker_preserves_valid_nested_annotations(self):
+        from context_folding.annotations import annotate_python_functions
+        source = ("# @context-fold begin outer\n# @context-fold begin inner\n"
+                  "value = 1\n# @context-fold end inner\n# @context-fold end outer\n"
+                  "def work():\n    return 3\n")
+        marked = annotate_python_functions(source)
+        self.assertEqual([r["name"] for r in discover_source(marked["text"], "python")["regions"]],
+                         ["outer", "inner", "work"])
+        self.assertEqual(ast.dump(ast.parse(source)), ast.dump(ast.parse(marked["text"])))
+        self.assertEqual(annotate_python_functions(marked["text"])["text"], marked["text"])
 
     def test_function_marker_real_cli(self):
         environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "python"))
@@ -383,7 +392,7 @@ class SourceIntegrationTests(unittest.TestCase):
         with Client(state) as client:
             self.assertEqual(client.call({"action": "gc", "scope": "s", "mode": "status"})["config"]["strength"], "off")
 
-    def test_annotation_dependencies_survive_collection_and_original_pagination(self):
+    def test_annotation_dependencies_survive_collection_and_view_pagination(self):
         stored = self.client.annotate("s", text=self.SOURCE, language="python")
         view = self.client.read("s", stored["id"])
         self.client.call({"action": "roots", "scope": "s", "ids": [stored["id"]]})
@@ -392,12 +401,13 @@ class SourceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.client.resolve("s", view["text"])["value"], self.SOURCE)
         parts, offset = [], 0
         while True:
-            page = self.client.read("s", stored["id"], mode="original", offset=offset, limit=33)
+            page = self.client.read("s", stored["id"], offset=offset, limit=33)
             parts.append(page["text"])
             if page["nextOffset"] is None:
                 break
             offset = page["nextOffset"]
-        self.assertEqual("".join(parts), self.SOURCE)
+        self.assertEqual("".join(parts), view["text"])
+        self.assertEqual(self.client.resolve("s", "".join(parts))["value"], self.SOURCE)
 
 
 if __name__ == "__main__":
