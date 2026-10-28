@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import { ConfigError, loadOptions } from './config.js';
 import { appendBudget, estimateTokens, withoutBudget } from './budget.js';
 import { parseRegions, reference, replaceRegions, shortHash, type Region } from './annotations.js';
@@ -13,6 +14,7 @@ const stateSchema = z.custom<Body>(record);
 const pendingKey = 'contextFoldingStatistics';
 const pendingSchema = z.object({
   scope: z.string().regex(/^[a-f0-9]{64}$/), bodyHash: z.string(), folded: z.boolean(), successDelta: metricsSchema,
+  requestId: z.string().uuid(),
 });
 const contextSchema = z.object({
   protocol: z.enum(['chat', 'responses', 'anthropic', 'gemini']), model: z.string(), session: z.string().min(1),
@@ -172,13 +174,18 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const projectedHistory = ctx.protocol === 'responses' ? projected.input : ctx.protocol === 'gemini' ? projected.contents : projected.messages;
       snapshot.projectedHash = fingerprint([ctx.protocol, projectedHistory]);
       const result = appendBudget(projected, ctx.protocol, { ...budgetOptions, scope });
+      const requestId = randomUUID();
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period' : 'no-eligible-annotations',
-        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length };
+        cycle, waiting, foldedRegions: proposed.length, replayedReferences: existingReferences.length,
+        // Compare the full hook input with its returned projection, including
+        // metadata overhead. Archived bytes are not this request's savings.
+        beforeBytes: Buffer.byteLength(JSON.stringify(input)), afterBytes: Buffer.byteLength(JSON.stringify(result)),
+        observation: { requestId, observedAt: Date.now(), status: 'pending', sessionKey: digest(ctx.session) } };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
         foldBatchesApproved: 1, itemsFolded: newlyFolded,
         foldedTokensEstimated: String(Math.max(0, estimateTokens(body) - estimateTokens(projected))),
       });
-      pending = { scope, bodyHash: fingerprint(result), folded: hasFolded,
+      pending = { scope, requestId, bodyHash: fingerprint(result), folded: hasFolded,
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
           guideOnlyRequests: hasFolded ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
@@ -210,7 +217,10 @@ export async function onResponse(_reply: unknown, context: unknown): Promise<voi
     const delta = ctx.success === false ? { failedHookRequests: 1, failedFoldedRequests: pending.data.folded ? 1 : 0 }
       : ctx.success === true && matches ? pending.data.successDelta
       : { unverifiedHookRequests: 1, unverifiedFoldedRequests: pending.data.folded ? 1 : 0 };
-    await new Store().recordMetrics(pending.data.scope, delta, ctx.signal);
+    await new Store().recordMetrics(pending.data.scope, delta, ctx.signal, {
+      requestId: pending.data.requestId,
+      status: ctx.success === false ? 'failed' : ctx.success === true && matches ? 'confirmed' : 'unverified',
+    });
   } catch { /* A missing completion is never counted as verified usage. */ }
   // @context-fold end onResponse-a62b6b6c8b
 }

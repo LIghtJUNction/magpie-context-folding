@@ -6,6 +6,8 @@ import { diagnostic, execute } from './tool.js';
 import { statistics } from './statistics.js';
 import { formatTokenCount } from './metrics.js';
 import { writeReport } from './report.js';
+import { formatVisibility, hookNotification, readClientInput, visibleSessions, visibility } from './visibility.js';
+import type { VisibilitySelection } from './visibility.js';
 
 const usage = `Usage: magpie-context-folding <command> [options]
 
@@ -15,6 +17,9 @@ list   --scope S [--id ID] [--depth N] [--query TEXT] [--sort chronological|size
        [--order asc|desc] [--offset N] [--limit N]
 status --scope S
 stats  [--scope S] [--json]
+statusline [--scope S] [--client] [--json]
+sessions [--json]
+hook   [--scope S] (Stop hook JSON on stdin; one UI notification per confirmed request)
 report --output /absolute/new.html [--scope S]
 forget --scope S (requires restored entries and group manifests)
 config [--project-dir PATH]
@@ -24,6 +29,9 @@ Other archive commands and config write JSON.
 read/paste persist keep and restore all ancestor groups; --peek leaves folding unchanged.
 Read/paste accept exact IDs or unambiguous content hash prefixes (at least 12 hex digits).
 Folding is requested with @context-fold begin/end annotations, not a CLI command.
+statusline is read-only; without a scope/client binding it shows explicitly global totals.
+--client matches stdin session_id only when exactly one gateway scope has the same identity.
+MAGPIE_CONTEXT_FOLDING_SCOPE supplies an explicit scope for statusline/hook.
 --json returns read metadata too. Diagnostics go to stderr; errors exit 1.`;
 
 const string = { type: 'string' } as const;
@@ -36,6 +44,9 @@ const options: Record<string, ParseArgsConfig['options']> = {
   list: { ...common, scope: string, id: string, depth: string, query: string, sort: string, order: string, offset: string, limit: string },
   status: { ...common, scope: string },
   stats: { ...common, scope: string },
+  statusline: { ...common, scope: string, client: boolean },
+  sessions: { ...common },
+  hook: { help: boolean, scope: string },
   report: { help: boolean, output: string, scope: string },
   forget: { ...common, scope: string },
   config: { ...common, 'project-dir': string },
@@ -55,6 +66,31 @@ async function main(): Promise<void> {
   try { values = parseArgs({ args: argv, options: options[command], strict: true, allowPositionals: false }).values; }
   catch { throw new UsageError('Invalid command options; use --help'); }
   if (values.help) { console.log(usage); return; }
+  if (command === 'sessions') {
+    const data = await visibleSessions();
+    if (values.json) console.log(JSON.stringify({ sessions: data }));
+    else console.log(data.length ? data.map(session => `${session.scope} · 归档 ${session.archivedEntries} 项 · ${formatVisibility({ selection: 'session', request: session.request })}`).join('\n')
+      : '还没有归档会话。');
+    return;
+  }
+  if (command === 'statusline' || command === 'hook') {
+    const scope = values.scope ?? process.env.MAGPIE_CONTEXT_FOLDING_SCOPE;
+    if (scope !== undefined && (typeof scope !== 'string' || !/^[a-f0-9]{64}$/.test(scope))) throw new UsageError('Invalid scope');
+    const client = command === 'hook' || values.client === true;
+    let input: { sessionId?: string; event?: string } = {};
+    if (client) {
+      try { input = await readClientInput(process.stdin); }
+      catch { throw new UsageError('Invalid or oversized client JSON'); }
+    }
+    const selection: VisibilitySelection = { client, ...(scope === undefined ? {} : { scope }),
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }) };
+    if (command === 'hook') console.log(JSON.stringify(await hookNotification(selection, input.event)));
+    else {
+      const data = await visibility(selection);
+      console.log(values.json ? JSON.stringify(data) : formatVisibility(data));
+    }
+    return;
+  }
   if (command === 'report') {
     if (typeof values.output !== 'string') throw new UsageError('Provide --output /absolute/new.html');
     if (values.scope !== undefined && !/^[a-f0-9]{64}$/.test(String(values.scope))) throw new UsageError('Invalid scope');
