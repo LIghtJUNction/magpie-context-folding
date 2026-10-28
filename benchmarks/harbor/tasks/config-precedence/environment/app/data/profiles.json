@@ -1,0 +1,1 @@
+{"staging":{"service":{"host":"stage.internal","retries":null},"logging":{"level":"warn"},"limits":null,"feature":false},"production":{"service":{"host":"prod.internal","tls":true}}}

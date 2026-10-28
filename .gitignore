@@ -3,3 +3,6 @@ dist/
 .local-tests/
 *.tgz
 __pycache__/
+benchmarks/harbor/.venv/
+benchmarks/harbor/jobs/
+benchmarks/harbor/results/
