@@ -170,6 +170,12 @@ class Client:
                 query = request["action"] in ("read", "list", "grep", "meta", "status")
                 self._db.execute("BEGIN" if query else "BEGIN IMMEDIATE")
                 row = self._db.execute("SELECT data FROM scopes WHERE scope=?", (scope,)).fetchone()
+                legacy_payloads = set()
+                if row:
+                    stored_snapshot = json.loads(row[0])
+                    legacy_payloads = {hashlib.sha256(entry["text"].encode("utf-8")).hexdigest()
+                                       for entry in stored_snapshot.get("entries", []) if "text" in entry}
+                legacy_inline = bool(legacy_payloads)
                 snapshot = json.loads(row[0]) if row else {"entries": [], "groups": [], "roots": [], "config": {}}
                 now = time.time()
                 # TOML supplies a per-client default; only gc configure persists policy.
@@ -198,7 +204,7 @@ class Client:
                 # unreadable. Recovery cannot add archived payloads.
                 recovery = request["action"] in ("read", "paste", "resolve", "restore")
                 ceiling = MAX_STATE if recovery else min(MAX_STATE, self.config["folding"]["max_session_bytes"])
-                if len(encoded.encode()) > ceiling:
+                if len(encoded.encode()) > ceiling and not (recovery and legacy_inline):
                     raise FoldingError("quota", "Scope quota exceeded")
                 total = self._db.execute("SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM scopes WHERE scope<>?", (scope,)).fetchone()[0]
                 if total + len(encoded.encode()) > MAX_STATE * 4:

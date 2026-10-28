@@ -76,6 +76,7 @@ function resolveEntry(snapshot: Snapshot, id: string) {
 
 /** Explicit restoration protects the selected subtree and every enclosing fold. */
 function keepExpanded(snapshot: Snapshot, id: string): void {
+  // @context-fold begin keepExpanded-validated-subtree
   const entries = new Map(snapshot.entries.map(entry => [entry.id, entry]));
   const groups = new Map((snapshot.groups ?? []).map(group => [group.id, group]));
   const selected = new Set<string>();
@@ -85,7 +86,9 @@ function keepExpanded(snapshot: Snapshot, id: string): void {
     if (selected.has(current)) continue;
     selected.add(current);
     pending.push(...entries.get(current)?.annotation?.children?.map(child => child.id) ?? []);
+    pending.push(...groups.get(current)?.children ?? []);
   }
+  const descendants = new Set(selected);
   const parents = new Map<string, string[]>();
   for (const node of [...snapshot.entries, ...(snapshot.groups ?? [])]) {
     const children = 'children' in node ? node.children : node.annotation?.children?.map(child => child.id) ?? [];
@@ -98,7 +101,7 @@ function keepExpanded(snapshot: Snapshot, id: string): void {
   let restored = 0;
   for (const selectedId of selected) {
     const entry = entries.get(selectedId);
-    if (entry) {
+    if (entry && (descendants.has(selectedId) || !groups.has(id))) {
       if (entry.folded !== undefined) restored++;
       entry.mark = { disposition: 'keep' };
       entry.manual = true;
@@ -116,6 +119,7 @@ function keepExpanded(snapshot: Snapshot, id: string): void {
     }
   }
   snapshot.metrics = addMetrics(snapshot.metrics, { itemsRestored: restored });
+  // @context-fold end keepExpanded-validated-subtree
 }
 
 /** Report numeric bounds without exposing supplied text or arbitrary Zod messages. */

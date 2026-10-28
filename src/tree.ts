@@ -117,7 +117,8 @@ export function browse(snapshot: Snapshot, options: BrowseOptions = {}) {
     active.add(id);
     const childMeta = childrenOf(nodes.get(id)!).map(size);
     active.delete(id);
-    const result = { position: Math.min(...childMeta.map(child => child.position)), size: childMeta.reduce((sum, child) => sum + child.size, 0) };
+    const result = { position: childMeta.length ? Math.min(...childMeta.map(child => child.position)) : Number.MAX_SAFE_INTEGER,
+      size: childMeta.reduce((sum, child) => sum + child.size, 0) };
     metadata.set(id, result); return result;
   };
   for (const group of snapshot.groups ?? []) size(group.id);

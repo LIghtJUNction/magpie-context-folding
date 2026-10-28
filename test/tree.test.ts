@@ -163,7 +163,8 @@ test('grep searches nested global roots and pagination advances over all matches
 test('tree queries tolerate cyclic groups and shared-child pagination', () => {
   const state = snapshot();
   state.groups = [group('cycle-a', ['cycle-b']), group('cycle-b', ['cycle-a']), group('shared-a', ['a']), group('shared-b', ['a'])];
-  assert.doesNotThrow(() => browse(state, { depth: 8 }));
+  const cycleEntries = browse(state, { depth: 8, sort: 'size' }).entries;
+  assert.ok(cycleEntries.every(node => Number.isFinite(node.chars)));
   const shared = { ...snapshot(), groups: [group('shared-a', ['a']), group('shared-b', ['a'])] };
   const first = browse(shared, { depth: 8, limit: 2 });
   const second = browse(shared, { depth: 8, limit: 2, offset: first.nextOffset! });

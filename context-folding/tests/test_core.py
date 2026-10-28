@@ -20,6 +20,18 @@ class ClientIntegrationTests(unittest.TestCase):
         self.time = self.clock.start()
         self.addCleanup(self.clock.stop)
 
+    def test_restore_can_migrate_legacy_inline_snapshot_over_metadata_quota(self):
+        identifier = "legacy-entry"
+        text = "legacy original " * 100
+        entry = {"id": identifier, "role": "tool", "text": text, "createdAt": 1, "lastUsedAt": 1,
+                 "reads": 0, "folds": 0, "mark": {"disposition": "unmarked"}}
+        snapshot = {"entries": [entry], "groups": [], "roots": [identifier], "config": {}}
+        encoded = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+        self.client._db.execute("INSERT INTO scopes VALUES (?,?)", ("test", encoded))
+        self.client._db.commit()
+        with patch("context_folding.core.MAX_STATE", len(encoded.encode()) + 100):
+            self.assertEqual(self.call("restore", id=identifier), {"restored": True})
+
     def call(self, action, **fields):
         return self.client.call(dict(scope="test", action=action, **fields))
 
