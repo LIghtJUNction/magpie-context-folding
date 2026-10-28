@@ -150,9 +150,15 @@ export async function execute(input: unknown): Promise<string> {
         if (args.layer !== 'original' && !layer) throw new ToolError('Unknown layer');
         const text = group ? JSON.stringify({ id: group.id, summary: group.summary, children: group.children }) : layer?.text ?? entry!.text;
         if (args.offset > text.length) throw new ToolError('Offset exceeds archived text length');
-        const end = args.limit === undefined ? text.length : Math.min(text.length, args.offset + args.limit);
+        let end = args.limit === undefined ? text.length : Math.min(text.length, args.offset + args.limit);
         if (args.action === 'paste' && (splitsPair(text, args.offset) || splitsPair(text, end))) {
           throw new ToolError('Paste range splits a Unicode character');
+        }
+        if (args.action === 'read') {
+          if (splitsPair(text, args.offset)) throw new ToolError('Read offset splits a Unicode character');
+          // UTF-16 offsets remain explicit, but each raw page must encode without
+          // turning half an emoji into U+FFFD. A one-unit page still makes progress.
+          if (splitsPair(text, end)) end += end === args.offset + 1 ? 1 : -1;
         }
         // Protect the source itself and every enclosing group, including historical-layer reads.
         if (!args.peek) {

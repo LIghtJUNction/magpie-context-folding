@@ -29,13 +29,6 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def initialize():
-    return {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "protocolVersion": "2025-11-25", "capabilities": {},
-        "clientInfo": {"name": "ctxf-test", "version": "1"},
-    }}
-
-
 class FoldTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -305,29 +298,34 @@ class CtxfProcessTests(unittest.TestCase):
         result = json.loads(self.succeeded(self.run_ctxf("call", data=supplied)))
         self.assertEqual(result["result"]["scope"], "json-scope")
 
-    def test_rpc_and_mcp_use_the_shared_fold_action_and_default_state(self):
+    def test_rpc_uses_shared_fold_action_and_default_state(self):
         request = {"action": "fold", "scope": "wire", "text": block()}
         wire = json.dumps(request, ensure_ascii=False).encode() + b"\n"
         result = json.loads(self.succeeded(self.run_ctxf("rpc", data=wire)))
         self.assertTrue(result["result"]["references"])
-        messages = [initialize(), {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-                    {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-                        "name": "context_folding", "arguments": request}}]
-        output = self.succeeded(self.run_ctxf("mcp", data=b"".join(json.dumps(m).encode() + b"\n" for m in messages)))
-        replies = [json.loads(line) for line in output.splitlines()]
-        tool = replies[1]["result"]["tools"][0]
-        self.assertEqual(tool["name"], "context_folding")
-        self.assertIn("fold", tool["inputSchema"]["properties"]["action"]["enum"])
-        self.assertIn("immediate", replies[0]["result"]["instructions"])
-        self.assertFalse(replies[2]["result"]["isError"])
-        self.assertEqual(json.loads(replies[2]["result"]["content"][0]["text"]), result["result"])
+        identifier = result["result"]["references"][0]["id"]
+        restored = self.succeeded(self.run_ctxf("read", "--scope", "wire", "--raw", "--id", identifier))
+        self.assertEqual(restored, BODY.encode())
+
+    def test_removed_mcp_is_not_treated_as_default_fold(self):
+        for args in (("mcp",), ("--scope", "s", "mcp"), ("--scope=s", "mcp")):
+            with self.subTest(args=args):
+                rejected = self.run_ctxf(*args, data=block().encode())
+                self.assertEqual(rejected.returncode, 2)
+                self.assertEqual(rejected.stdout, b"")
+                self.assertEqual(rejected.stderr, b"MCP support was removed; use ctxf CLI commands or SDK RPC.\n")
+        # A literal scope or text value is still ordinary CLI data.
+        folded = json.loads(self.succeeded(self.run_ctxf("--scope", "mcp", "fold", "--json", data=block().encode())))
+        self.assertEqual(folded["scope"], "mcp")
+        self.assertTrue(folded["references"])
+        self.assertEqual(self.succeeded(self.run_ctxf("fold", "--text", "mcp")), b"mcp")
 
     def test_server_scope_is_per_request_and_raw_read_accepts_peek(self):
-        for command in ("rpc", "mcp"):
+        for command in ("rpc",):
             rejected = self.run_ctxf("--scope", "ignored", command)
             self.assertEqual(rejected.returncode, 2)
             self.assertEqual(rejected.stdout, b"")
-            self.assertIn(b"each RPC/MCP request", rejected.stderr)
+            self.assertIn(b"each RPC request", rejected.stderr)
         folded = json.loads(self.succeeded(self.run_ctxf("--json", data=block().encode())))
         identifier = folded["references"][0]["id"]
         self.assertEqual(self.succeeded(self.run_ctxf("read", "--raw", "--peek", "--id", identifier)), BODY.encode())

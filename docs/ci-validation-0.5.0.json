@@ -1,0 +1,69 @@
+{
+  "formatVersion": 1,
+  "implementationCommit": "e8ff474c9eb6c7b7c513a3f53cada07ce2e90ebf",
+  "hostWorkflowCommit": "9b3f84a02042e99a2b9ffaf5658c488521512b7a",
+  "host": {
+    "runUrl": "https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/40620173616",
+    "jobId": 122592025514,
+    "jobConclusion": "success",
+    "magpieVersion": "0.1.1774",
+    "binarySha256": "6290e485744109d9cec8385d947bbb66423adfc4885bc0ca3e6c2a4d020670e9",
+    "receipt": {
+      "result": "passed",
+      "host": "real Magpie and Bun via bubblewrap",
+      "provider": "local synthetic HTTP fixture; no external model was called",
+      "checks": [
+        "local CLI recovery without MCP",
+        "open annotations stay visible",
+        "first closed observation and identical retries stay visible",
+        "distinct requests fold explicit annotations",
+        "short SHA-256 references retain marker lines",
+        "system/user/unmarked text and tool calls/results remain intact",
+        "one concise system guidance; budgets disabled by default",
+        "projection replay does not duplicate guidance or archives",
+        "paginated byte-for-byte Unicode/CRLF recovery",
+        "exclusive paste without text echo",
+        "unknown scope refused",
+        "explicit --restore persistently expands all slices",
+        "session isolation",
+        "source comments share the protocol",
+        "fresh Read occurrence gets its own grace period",
+        "changed source gets a new hash while old snapshots recover",
+        "source files remain unchanged by folding",
+        "unmarked source stays visible"
+      ],
+      "upstreamRequests": 18,
+      "originalUtf8Bytes": 46278,
+      "firstRequestEstimate": {
+        "usedEstimate": 14373,
+        "basis": "json-utf8-bytes/4"
+      },
+      "foldedRequestEstimate": {
+        "usedEstimate": 2626,
+        "basis": "json-utf8-bytes/4"
+      },
+      "responseHooks": {
+        "successfulHookRequests": 18,
+        "unverifiedHookRequests": 0,
+        "failedHookRequests": 0
+      }
+    }
+  },
+  "harbor": {
+    "runUrl": "https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/40619609457",
+    "jobId": 122590167524,
+    "jobConclusion": "success",
+    "componentTests": 31,
+    "receipt": {
+      "status": "passed",
+      "trials": 8,
+      "measurement": "scripted-smoke",
+      "claim": "Harbor orchestration, verifier controls, production folding and recovery; no model quality or cost result"
+    }
+  },
+  "limitations": [
+    "Synthetic local HTTP provider and scripted Harbor agents; no external model calls.",
+    "The user's installed desktop session was not updated by these tests.",
+    "Request size estimates are not exact model tokenizer counts or billing measurements."
+  ]
+}
