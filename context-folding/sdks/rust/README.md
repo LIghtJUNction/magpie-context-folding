@@ -21,15 +21,19 @@ context-folding = { path = "../context-folding/sdks/rust" }
 use context_folding::{serde_json::json, Client, Config};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::new("context-folding-state.json")
+    let config = Config::new("context-folding-state.sqlite")
         .python("python3"); // Or an absolute virtualenv interpreter path.
     let client = Client::with_config(config)?;
-    let stored = client.put("my-session", "Original tool output", json!({
-        "role": "tool", "source": {"path": "example.py"}
-    }))?;
-    let _entries = client.list("my-session", json!(null))?;
-    // Arbitrary engine actions are available without waiting for SDK changes.
-    let _status = client.call(json!({"action": "status", "scope": "my-session"}))?;
+    let text = format!("# @context-fold begin investigation\n{}# @context-fold end investigation\n",
+        "# Completed investigation detail.\n".repeat(40));
+    let request = |cycle| json!({
+        "action": "read-source", "scope": "my-session", "text": text,
+        "language": "python", "occurrence": "read-1", "requestCycle": cycle
+    });
+    let first = client.call(request(0))?; // Complete first observation.
+    let later = client.call(request(1))?;
+    let _resolved = client.resolve("my-session", json!({"content": later["text"]}))?;
+    let _original = client.read("my-session", first["id"].as_str().ok_or("missing id")?, json!({}))?;
     client.close()?;
     Ok(())
 }
@@ -40,10 +44,11 @@ Convenience methods return `serde_json::Value`, preserving the engine's result s
 - `put(scope, text, options)` stores text with optional fields such as role/source.
 - `read(scope, id, options)` reads an entry, forwarding `offset`/`limit` and other optional fields. Offsets count Unicode codepoints, as in Python strings.
 - `list(scope, options)` lists entries, forwarding optional fields.
-- `mark(scope, id, disposition, summary)` sets the entry's disposition and summary.
 - `render(scope, ids, protected)` renders selected entries with protected IDs.
 - `resolve(scope, value)` resolves references in arbitrary JSON values.
-- `call(request)` sends any JSON object, including group, restore, paste, and status actions.
+- `call(request)` sends any JSON object, including read-source, restore, paste, and status actions. `mark` and `group` have been removed.
+
+Use `read-source` with both `occurrence` and `requestCycle` for delayed source projection. A fresh read needs a fresh occurrence; retries keep the same cycle. The bridge does not observe model requests or advance cycles itself.
 
 Pass `json!(null)` or `json!({})` for empty options. Explicit method arguments override options with the same name. The shared Python engine validates action fields and scope boundaries.
 
@@ -64,3 +69,5 @@ Local process integration tests use a deterministic fake Python engine and requi
 ```sh
 cargo test --offline
 ```
+
+Set `CONTEXT_FOLDING_REAL_CORE_PATH` to the absolute `context-folding/python` directory to additionally exercise explicit annotation delay, retry/fresh-occurrence handling and exact recovery against the actual core. Without it, that case reports an explicit skip.

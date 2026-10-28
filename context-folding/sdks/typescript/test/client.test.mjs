@@ -42,13 +42,13 @@ test('persistent process serializes concurrent calls and forwards wrappers and U
       client.put('scope', '原文🙂', { role: 'tool', action: 'wrong', scope: 'wrong' }),
       client.list('scope', { depth: 2 }),
       client.read('scope', 'entry', { offset: 3 }),
-      client.mark('scope', 'entry', 'foldable', { summary: 'evidence' }),
+      client.call({ action: 'read-source', scope: 'scope', text: '# source', occurrence: 'read-1', requestCycle: 0 }),
       client.render('scope', ['entry'], { protected: [] }),
       client.resolve('scope', { content: '[[cf:v1:entry]]' }),
     ];
     const values = await Promise.all(requests);
     assert.equal(new Set(values.map(value => value.pid)).size, 1);
-    assert.deepEqual(values.map(value => value.request.action), ['put', 'list', 'read', 'mark', 'render', 'resolve']);
+    assert.deepEqual(values.map(value => value.request.action), ['put', 'list', 'read', 'read-source', 'render', 'resolve']);
     assert.equal(values[0].request.text, '原文🙂');
     assert.equal(values[0].request.scope, 'scope');
     assert.equal(values[0].argv[0], '--state');
@@ -95,21 +95,31 @@ test('invalid JSON, oversize output, process exit and missing executables reject
   finally { await client.dispose(); }
 });
 
-test('installed Python core round trips originals, summaries and transparent references', { skip: !process.env.CONTEXT_FOLDING_REAL_CORE_PATH }, async () => {
+test('installed Python core delays explicit annotations and recovers exact originals', { skip: !process.env.CONTEXT_FOLDING_REAL_CORE_PATH }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cf-ts-real-'));
   const client = new ContextFoldingClient({ statePath: join(directory, 'archive.sqlite'),
     env: { PYTHONPATH: process.env.CONTEXT_FOLDING_REAL_CORE_PATH } });
   try {
-    const item = await client.put('real', 'A🙂B ' + 'historical evidence '.repeat(100), { role: 'tool' });
+    const text = '# @context-fold begin evidence\n' + '# 原文🙂 evidence\n'.repeat(80) + '# @context-fold end evidence\n';
+    const request = { action: 'read-source', scope: 'real', text, language: 'python', occurrence: 'read-1' };
+    const first = await client.call({ ...request, requestCycle: 0 });
+    assert.equal(first.text, text);
+    assert.equal((await client.call({ ...request, requestCycle: 0 })).text, text, 'retry must not consume delay');
+    const folded = await client.call({ ...request, requestCycle: 1 });
+    assert.match(folded.text, /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
+    assert.equal((await client.call({ ...request, occurrence: 'read-2', requestCycle: 2 })).text, text, 'new read gets its own delay');
+    const resolved = await client.resolve('real', { content: folded.text });
+    assert.equal(resolved.value.content, text);
+    assert.equal((await client.read('real', first.id)).text, text);
+    assert.equal((await client.call({ ...request, requestCycle: 3 })).text, text, 'recovered source stays visible');
+    const item = await client.put('real', 'A🙂B', { role: 'tool' });
     const read = await client.read('real', item.id, { offset: 1, limit: 1 });
     assert.equal(read.text, '🙂');
     assert.equal(read.nextOffset, 2);
-    await client.mark('real', item.id, 'foldable', { summary: 'Historical tool evidence' });
-    const rendered = await client.render('real', [item.id]);
-    assert.ok(Array.isArray(rendered.entries));
-    const resolved = await client.resolve('real', { content: `[[cf:v1:${item.id}]]` });
-    assert.equal(resolved.resolved, 1);
-    assert.ok(resolved.value.content.startsWith('A🙂B '));
+    const legacy = await client.resolve('real', { content: item.reference });
+    assert.equal(legacy.value.content, 'A🙂B');
+    await assert.rejects(client.call({ action: 'mark', scope: 'real', id: first.id,
+      disposition: 'foldable', summary: 'obsolete' }), error => error instanceof ContextFoldingError);
     assert.ok(await client.list('real'));
   } finally { await client.dispose(); await rm(directory, { recursive: true, force: true }); }
 });

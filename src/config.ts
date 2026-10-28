@@ -2,127 +2,27 @@ import { open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
-import { policySchema, scriptSchema } from './policy.js';
-import { modeOptions, modeSchema, modes } from './modes.js';
-import type { Strategy } from './modes.js';
 
-const policyCost = policySchema.shape.cost.unwrap();
-const scriptTomlSchema = z.object({
-  command: scriptSchema.shape.command,
-  timeout_ms: scriptSchema.shape.timeoutMs,
-  max_output_bytes: scriptSchema.shape.maxOutputBytes,
-  max_input_bytes: scriptSchema.shape.maxInputBytes,
-  max_summary_chars: scriptSchema.shape.maxSummaryChars,
-}).strict();
-const costTomlSchema = z.object({
-  bytes_per_token_lower: policyCost.shape.bytesPerTokenLower,
-  bytes_per_token_upper: policyCost.shape.bytesPerTokenUpper,
-  input: policyCost.shape.input,
-  cache_read: policyCost.shape.cacheRead,
-  cache_write: policyCost.shape.cacheWrite,
-  output_price_per_million: policyCost.shape.outputPricePerMillion,
-  overhead_usd: policyCost.shape.overheadUsd,
-  output_tokens: policyCost.shape.outputTokens,
-  restore_tokens: policyCost.shape.restoreTokens,
-  incremental: z.object({
-    tool_calls: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    model_round_trips: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    input_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    output_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    input_price_per_million: z.number().finite().nonnegative(),
-    output_price_per_million: z.number().finite().nonnegative(),
-    tool_fees_usd: z.number().finite().nonnegative(),
-  }).strict().optional(),
-}).strict();
-const policyTomlSchema = z.object({
-  mode: policySchema.shape.mode,
-  auto_roles: policySchema.shape.autoRoles,
-  min_chars: policySchema.shape.minChars,
-  summary_chars: policySchema.shape.summaryChars,
-  minimum_saving_usd: policySchema.shape.minimumSavingUsd,
-  cost: costTomlSchema.optional(),
-  script: scriptTomlSchema.optional(),
-  certificate_script: scriptTomlSchema.optional(),
-}).strict();
-const policyLayerSchema = policyTomlSchema.partial().extend({
-  cost: costTomlSchema.partial().extend({
-    input: z.object(policyCost.shape.input.shape).strict().partial().optional(),
-    cache_read: z.object(policyCost.shape.cacheRead.shape).strict().partial().optional(),
-    cache_write: z.object(policyCost.shape.cacheWrite.shape).strict().partial().optional(),
-    incremental: costTomlSchema.shape.incremental.unwrap().partial().optional(),
-  }).optional(),
-  script: scriptTomlSchema.partial().optional(),
-  certificate_script: scriptTomlSchema.partial().optional(),
-});
-const policyOptionsLayerSchema = policySchema.partial().extend({
-  cost: z.object(policyCost.shape).strict().partial().extend({
-    input: z.object(policyCost.shape.input.shape).strict().partial().optional(),
-    cacheRead: z.object(policyCost.shape.cacheRead.shape).strict().partial().optional(),
-    cacheWrite: z.object(policyCost.shape.cacheWrite.shape).strict().partial().optional(),
-    incremental: policyCost.shape.incremental.unwrap().partial().optional(),
-  }).optional(),
-  script: scriptSchema.partial().optional(),
-  certificateScript: scriptSchema.partial().optional(),
-});
-
-function renameKeys(value: unknown, camel: boolean): unknown {
-  if (Array.isArray(value)) return value.map(item => renameKeys(item, camel));
-  if (!table(value)) return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
-    camel ? key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
-      : key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`),
-    renameKeys(item, camel),
-  ]));
-}
-
-const httpUrl = z.string().refine(value => {
-  if (/[\s\x00-\x1f]/.test(value)) return false;
-  try {
-    const url = new URL(value);
-    return ['http:', 'https:'].includes(url.protocol) && Boolean(url.hostname);
-  } catch { return false; }
-});
-const accountingSchema = z.object({
-  url: httpUrl,
-  timeoutMs: z.number().int().min(50).max(10_000).default(500),
-}).strict();
-
+const nonnegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const optionsSchema = z.object({
-  mode: modeSchema.default('intelligence'),
   enabled: z.boolean().default(true),
-  thresholdTokens: z.number().int().positive().default(modes.intelligence.thresholdTokens),
-  keepRecentMessages: z.number().int().min(0).default(modes.intelligence.keepRecentMessages),
-  headChars: z.number().int().min(0).max(1000).default(modes.intelligence.headChars),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
-  minimumSavingUsd: z.number().finite().nonnegative().default(0.000001),
+  delayRequests: nonnegativeInteger.default(1),
+  contextWindowTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  reserveOutputTokens: nonnegativeInteger.default(0),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
-  accounting: accountingSchema.optional(),
   recoveryToolName: z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/).optional(),
-  policy: policySchema.default(() => policySchema.parse(modeOptions('intelligence').policy)),
 }).strict();
-
 export type Options = z.infer<typeof optionsSchema>;
-export function parseOptions(value: unknown): Options {
-  const input = value ?? {};
-  const layer = explicitFields(optionsSchema.partial().extend({
-    accounting: accountingSchema.partial().optional(), policy: policyOptionsLayerSchema.optional(),
-  }).parse(input), input);
-  const preset = modeOptions(layer.mode ?? 'intelligence');
-  const result = { ...preset, ...layer, policy: { ...preset.policy, ...layer.policy,
-    mode: layer.policy?.mode ?? (layer.accounting || layer.policy?.cost || layer.policy?.certificateScript ? 'cost' : 'bytes'),
-  } };
-  return optionsSchema.parse(result);
-}
 
 const foldingSchema = z.object({
-  mode: optionsSchema.shape.mode,
   enabled: optionsSchema.shape.enabled,
-  threshold_tokens: optionsSchema.shape.thresholdTokens,
-  keep_recent_messages: optionsSchema.shape.keepRecentMessages,
-  head_chars: optionsSchema.shape.headChars,
   max_session_bytes: optionsSchema.shape.maxSessionBytes,
-  minimum_saving_usd: optionsSchema.shape.minimumSavingUsd,
+  delay_requests: optionsSchema.shape.delayRequests,
+  context_window_tokens: optionsSchema.shape.contextWindowTokens,
+  reserve_output_tokens: optionsSchema.shape.reserveOutputTokens,
 }).strict();
+// These sections are shared with the source-file/Python integration.
 const annotationsSchema = z.object({
   enabled: z.boolean().default(true),
   default_fold: z.boolean().default(true),
@@ -136,33 +36,22 @@ const gcSchema = z.object({
   retention_seconds: z.number().finite().min(0).max(315_576_000).default(2_592_000),
   auto_purge: z.boolean().default(false),
 }).strict();
-const tomlAccountingSchema = z.object({
-  url: httpUrl,
-  timeout_ms: accountingSchema.shape.timeoutMs,
-}).strict();
 const magpieSchema = z.object({
   recovery_tool_name: optionsSchema.shape.recoveryToolName,
   gateway_timeout_ms: optionsSchema.shape.gatewayTimeoutMs,
-  accounting: tomlAccountingSchema.optional(),
 }).strict();
 const configSchema = z.object({
   folding: foldingSchema.default(() => foldingSchema.parse({})),
   annotations: annotationsSchema.default(() => annotationsSchema.parse({})),
   gc: gcSchema.default(() => gcSchema.parse({})),
   magpie: magpieSchema.default({}),
-  policy: policyTomlSchema.default(() => policyTomlSchema.parse({})),
 }).strict();
 const layerSchema = z.object({
   version: z.literal(1).optional(),
   folding: foldingSchema.partial().optional(),
   annotations: annotationsSchema.partial().optional(),
   gc: gcSchema.partial().optional(),
-  policy: policyLayerSchema.optional(),
-  magpie: z.object({
-    recovery_tool_name: optionsSchema.shape.recoveryToolName,
-    gateway_timeout_ms: optionsSchema.shape.gatewayTimeoutMs,
-    accounting: tomlAccountingSchema.partial().optional(),
-  }).strict().optional(),
+  magpie: magpieSchema.partial().optional(),
 }).strict();
 
 export type Config = z.infer<typeof configSchema>;
@@ -177,17 +66,43 @@ const MAX_CONFIG_BYTES = 1024 * 1024;
 type Table = Record<string, unknown>;
 const table = (value: unknown): value is Table => value !== null && typeof value === 'object' && !Array.isArray(value);
 const missing = (error: unknown) => table(error) && error.code === 'ENOENT';
+const migrationReason = 'removed: folding now requires agent-authored @context-fold begin/end annotations; remove mode, threshold, policy and accounting settings';
+
+/** Recognize removed public settings without echoing arbitrary input or secret values. */
+function rejectLegacy(value: unknown, source: string, runtime = false): void {
+  if (!table(value)) return;
+  if (runtime) {
+    for (const key of ['mode', 'thresholdTokens', 'keepRecentMessages', 'headChars', 'minimumSavingUsd', 'policy', 'accounting']) {
+      if (Object.hasOwn(value, key)) throw new ConfigError(source, key, migrationReason);
+    }
+    return;
+  }
+  if (Object.hasOwn(value, 'policy')) throw new ConfigError(source, 'policy', migrationReason);
+  if (table(value.folding)) {
+    for (const key of ['mode', 'threshold_tokens', 'keep_recent_messages', 'head_chars', 'minimum_saving_usd']) {
+      if (Object.hasOwn(value.folding, key)) throw new ConfigError(source, `folding.${key}`, migrationReason);
+    }
+  }
+  if (table(value.magpie) && Object.hasOwn(value.magpie, 'accounting')) {
+    throw new ConfigError(source, 'magpie.accounting', migrationReason);
+  }
+}
 
 function validated<T extends z.ZodType>(schema: T, value: unknown, source: string): z.infer<T> {
   const result = schema.safeParse(value);
   if (!result.success) {
     const issue = result.error.issues[0]!;
-    // Parser/Zod messages may contain secret values. Report paths and fixed text only.
     const path = [...issue.path];
     if (issue.code === 'unrecognized_keys') path.push('<unknown>');
     throw new ConfigError(source, path.join('.') || 'settings', 'invalid or unknown setting');
   }
   return result.data;
+}
+
+export function parseOptions(value: unknown): Options {
+  const input = value ?? {};
+  rejectLegacy(input, '<options>', true);
+  return validated(optionsSchema, input, '<options>');
 }
 
 export function globalConfigPath(): string {
@@ -248,8 +163,7 @@ function merge(base: Table, update: Table): void {
   }
 }
 
-// Zod's partial() still applies inner defaults. A layer may contribute only
-// fields actually present in that source; final defaults belong to configSchema.
+// Partial schemas still apply inner defaults; each layer may contribute only explicit fields.
 function explicitFields<T>(parsed: T, input: unknown): T {
   if (table(parsed) && table(input)) {
     for (const key of Object.keys(parsed)) {
@@ -261,97 +175,44 @@ function explicitFields<T>(parsed: T, input: unknown): T {
 }
 
 function apply(base: Table, input: unknown, source: string): void {
-  const layer = explicitFields(validated(layerSchema, input, source), input);
-  merge(base, layer);
+  rejectLegacy(input, source);
+  merge(base, explicitFields(validated(layerSchema, input, source), input));
 }
 
 function fromOptions(input: unknown): Table {
-  const parsed = explicitFields(validated(optionsSchema.partial().extend({
-    accounting: accountingSchema.partial().optional(), policy: policyOptionsLayerSchema.optional(),
-  }), input ?? {}, '<overrides>'), input ?? {});
-  const { mode, enabled, thresholdTokens, keepRecentMessages, headChars, maxSessionBytes, minimumSavingUsd,
-    gatewayTimeoutMs, accounting, recoveryToolName, policy } = parsed;
+  const value = input ?? {};
+  rejectLegacy(value, '<overrides>', true);
+  const { enabled, maxSessionBytes, delayRequests, contextWindowTokens, reserveOutputTokens, gatewayTimeoutMs, recoveryToolName } =
+    explicitFields(validated(optionsSchema.partial(), value, '<overrides>'), value);
   return {
-    ...(policy ? { policy: renameKeys(policy, false) } : {}),
-    folding: { mode, enabled, threshold_tokens: thresholdTokens, keep_recent_messages: keepRecentMessages,
-      head_chars: headChars, max_session_bytes: maxSessionBytes, minimum_saving_usd: minimumSavingUsd },
-    magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs,
-      ...(accounting ? { accounting: { url: accounting.url, timeout_ms: accounting.timeoutMs } } : {}) },
+    folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests,
+      context_window_tokens: contextWindowTokens, reserve_output_tokens: reserveOutputTokens },
+    magpie: { recovery_tool_name: recoveryToolName, gateway_timeout_ms: gatewayTimeoutMs },
   };
 }
 
-async function effectiveConfig(cwd: string | undefined, overrides: unknown, agenticMode?: Strategy) {
-  let config: Table = {};
-  let explicitPolicyMinimum = false;
-  const recordPolicyMinimum = (data: unknown) => {
-    if (table(data) && table(data.policy) && data.policy.minimum_saving_usd !== undefined) explicitPolicyMinimum = true;
-  };
+export async function loadConfig(cwd?: string, overrides?: unknown) {
+  const config: Table = {};
   const global = globalConfigPath();
-  const sources: { global: string; project: string | null } = { global, project: null };
-  let accountingSource = '<overrides>';
-  let policySource = '<overrides>';
+  const sources = { global, project: await projectConfigPath(cwd) };
   const globalData = await readConfig(global);
-  if (globalData !== undefined) {
-    apply(config, globalData, global);
-    recordPolicyMinimum(globalData);
-    if (table(globalData) && globalData.policy !== undefined) policySource = global;
-    if (table(globalData) && table(globalData.magpie) && globalData.magpie.accounting !== undefined) accountingSource = global;
-  }
-  sources.project = await projectConfigPath(cwd);
+  if (globalData !== undefined) apply(config, globalData, global);
   if (sources.project) {
     const projectData = await readConfig(sources.project);
-    if (projectData !== undefined) {
-      apply(config, projectData, sources.project);
-      recordPolicyMinimum(projectData);
-      if (table(projectData) && projectData.policy !== undefined) policySource = sources.project;
-      if (table(projectData) && table(projectData.magpie) && projectData.magpie.accounting !== undefined) accountingSource = sources.project;
-    }
+    if (projectData !== undefined) apply(config, projectData, sources.project);
   }
-  if (overrides !== undefined) {
-    apply(config, overrides, '<overrides>');
-    recordPolicyMinimum(overrides);
-    if (table(overrides) && overrides.policy !== undefined) policySource = '<overrides>';
-    if (table(overrides) && table(overrides.magpie) && overrides.magpie.accounting !== undefined) accountingSource = '<overrides>';
-  }
-  const explicit = config;
-  const selectedMode = modeSchema.parse(table(explicit.folding) ? explicit.folding.mode ?? 'intelligence' : 'intelligence');
-  const { policy: presetPolicy, ...presetFolding } = modeOptions(selectedMode, agenticMode);
-  config = configSchema.parse({ folding: renameKeys(presetFolding, false), policy: renameKeys(presetPolicy, false) });
-  merge(config, explicit);
-  const explicitPolicy = table(explicit.policy) ? explicit.policy : {};
-  if (explicitPolicy.mode === undefined && table(config.policy)
-    && ((table(explicit.magpie) && explicit.magpie.accounting) || explicitPolicy.cost || explicitPolicy.certificate_script)) {
-    config.policy.mode = 'cost';
-  }
-  if (!explicitPolicyMinimum && table(config.policy) && table(config.folding)) {
-    config.policy.minimum_saving_usd = config.folding.minimum_saving_usd;
-  }
-  config.policy = validated(policyTomlSchema, config.policy, policySource);
-  const result = validated(configSchema, config, accountingSource);
-  validated(policySchema, renameKeys(result.policy, true), policySource);
-  return { config: result, sources };
+  if (overrides !== undefined) apply(config, overrides, '<overrides>');
+  return { config: validated(configSchema, config, '<effective settings>'), sources };
 }
 
-/** Effective TOML settings for CLI diagnostics; accounting URLs never leave this API. */
-export async function loadConfig(cwd?: string, overrides?: unknown) {
-  const result = await effectiveConfig(cwd, overrides);
-  if (result.config.magpie.accounting) result.config.magpie.accounting.url = '[redacted]';
-  for (const script of [result.config.policy.script, result.config.policy.certificate_script]) {
-    if (script) script.command = ['/redacted'];
-  }
-  return result;
-}
-
-/** Load file defaults and then merge the existing camelCase plugin options. */
-export async function loadOptions(explicit?: unknown, cwd?: string, agenticMode?: Strategy): Promise<Options> {
-  const { config } = await effectiveConfig(cwd, fromOptions(explicit), agenticMode);
+/** Merge global settings, nearest project settings, then explicit camelCase plugin options. */
+export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Options> {
+  const { config } = await loadConfig(cwd, fromOptions(explicit));
   const f = config.folding;
   const m = config.magpie;
   return validated(optionsSchema, {
-    mode: f.mode, enabled: f.enabled, thresholdTokens: f.threshold_tokens,
-    keepRecentMessages: f.keep_recent_messages,
-    headChars: f.head_chars, maxSessionBytes: f.max_session_bytes, minimumSavingUsd: f.minimum_saving_usd,
-    recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms, policy: renameKeys(config.policy, true),
-    ...(m.accounting ? { accounting: { url: m.accounting.url, timeoutMs: m.accounting.timeout_ms } } : {}),
+    enabled: f.enabled, maxSessionBytes: f.max_session_bytes, delayRequests: f.delay_requests,
+    contextWindowTokens: f.context_window_tokens, reserveOutputTokens: f.reserve_output_tokens,
+    recoveryToolName: m.recovery_tool_name, gatewayTimeoutMs: m.gateway_timeout_ms,
   }, '<effective settings>');
 }

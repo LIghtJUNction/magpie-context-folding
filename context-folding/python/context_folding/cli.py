@@ -18,7 +18,7 @@ from .core import Client, FoldingError
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
-ACTIONS = ("put", "list", "mark", "read", "render", "group", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
+ACTIONS = ("put", "list", "read", "render", "restore", "resolve", "paste", "status", "gc", "roots", "pin", "skills", "annotate", "read-source")
 TOOL_SCHEMA = {
     "type": "object",
     "required": ["action", "scope"],
@@ -27,6 +27,8 @@ TOOL_SCHEMA = {
         "scope": {"type": "string", "minLength": 1, "maxLength": 200},
         "text": {"type": "string"},
         "language": {"type": "string"},
+        "occurrence": {"type": "string", "minLength": 1, "maxLength": 200},
+        "requestCycle": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "commentStyles": {"type": "array", "maxItems": 32, "items": {"type": "object", "required": ["start"], "properties": {"start": {"type": "string", "minLength": 1, "maxLength": 64}, "end": {"type": "string", "maxLength": 64}}, "additionalProperties": False}},
         "keep": {"type": "array", "items": {"type": "string"}},
         "expand": {"type": "array", "items": {"type": "string"}},
@@ -36,13 +38,10 @@ TOOL_SCHEMA = {
         "ids": {"type": "array", "items": {"type": "string"}},
         "role": {"type": "string"},
         "source": {"type": "object"},
-        "summary": {"type": "string"},
-        "disposition": {"type": "string", "enum": ["foldable", "keep", "unmarked"]},
         "protected": {"type": "array", "items": {"type": "string"}},
         "value": {},
         "query": {"type": "string"},
         "path": {"type": "string"},
-        "marks": {"type": "array", "items": {"type": "object"}},
         "mode": {"type": "string"},
         "config": {"type": "object"},
         "body": {"type": "string"},
@@ -54,12 +53,13 @@ TOOL_SCHEMA = {
         "order": {"type": "string", "enum": ["asc", "desc"]},
         "name": {"type": "string"},
         "pinned": {"type": "boolean"},
+        "peek": {"type": "boolean"},
     },
     "additionalProperties": True,
 }
 TOOL = {
     "name": "context_folding",
-    "description": "Archive, fold and restore scoped context. Resolve references immediately before executing other tools; the host must perform that step.",
+    "description": "Read and recover explicit @context-fold begin/end regions. The host provides occurrence and requestCycle for delayed projection; without a cycle the original stays visible. No automatic summaries or fold strategies.",
     "inputSchema": TOOL_SCHEMA,
 }
 
@@ -180,7 +180,7 @@ class MCPServer:
                 "protocolVersion": version if version in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "context-folding", "version": "0.1.0"},
-                "instructions": "Call resolve immediately before dispatching other tools. This MCP server cannot intercept calls to other tools.",
+                "instructions": "Use explicit @context-fold begin/end comments. Delayed source projection requires host occurrence/requestCycle; read recovers originals on demand. A host may call resolve only when final tool arguments actually contain fold references. This MCP server cannot intercept calls to other tools.",
             }
             self.initialized = True
         elif method == "ping":
@@ -269,13 +269,14 @@ def _parser() -> argparse.ArgumentParser:
         if command == "call":
             continue
         sub.add_argument("--scope", required=True)
-        for name in ("id", "text", "summary", "role", "disposition", "query", "name", "description", "path", "mode", "body", "sort", "order", "language"):
+        for name in ("id", "text", "role", "occurrence", "query", "name", "description", "path", "mode", "body", "sort", "order", "language"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS)
+        sub.add_argument("--request-cycle", type=int, default=argparse.SUPPRESS)
         sub.add_argument("--expand-mode", choices=("single", "recursive"), default=argparse.SUPPRESS,
                          help="Expansion depth for read and read-source (default: recursive)")
         for name in ("ids", "protected", "keep", "expand"):
             sub.add_argument("--" + name, nargs="*", default=argparse.SUPPRESS)
-        for name in ("source", "value", "config", "marks", "files", "comment-styles"):
+        for name in ("source", "value", "config", "files", "comment-styles"):
             sub.add_argument("--" + name, default=argparse.SUPPRESS, help="JSON value; '-' reads JSON stdin")
         for name in ("limit", "offset", "depth"):
             sub.add_argument("--" + name, type=int, default=argparse.SUPPRESS)
@@ -286,8 +287,8 @@ def _parser() -> argparse.ArgumentParser:
 def _request(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "call":
         return _object(_loads(_read_stdin()) if args.json in (None, "-") else _argument_json(args.json))
-    json_fields = ("source", "value", "config", "marks", "files", "comment_styles")
-    text_fields = ("text", "summary", "body")
+    json_fields = ("source", "value", "config", "files", "comment_styles")
+    text_fields = ("text", "body")
     stdin_used = False
 
     def input_value(raw: str, is_json: bool) -> Any:
@@ -305,6 +306,8 @@ def _request(args: argparse.Namespace) -> dict[str, Any]:
         if hasattr(args, key):
             request["commentStyles" if key == "comment_styles" else key] = input_value(getattr(args, key), key in json_fields)
     request["action"] = args.command
+    if "request_cycle" in request:
+        request["requestCycle"] = request.pop("request_cycle")
     if "expand_mode" in request:
         request["expandMode"] = request.pop("expand_mode")
     if args.command == "put" and "text" not in request:

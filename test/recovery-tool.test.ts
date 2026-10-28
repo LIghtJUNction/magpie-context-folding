@@ -7,7 +7,7 @@ import { onRequest } from '../src/context.hooks.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
 
 type Body = Record<string, unknown>;
-const original = 'Verified earlier evidence: keep the exact identifier available for recovery.\n'.repeat(200);
+const original = '@context-fold begin evidence\n' + 'Verified earlier evidence: keep the exact identifier available for recovery.\n'.repeat(200) + '@context-fold end evidence';
 const canonical = 'context_folding';
 const mcpName = 'mcp__magpie__magpie_context_folding_context_folding';
 const protocols: Protocol[] = ['chat', 'responses', 'anthropic', 'gemini'];
@@ -62,9 +62,8 @@ async function fixture(run: (directory: string, invoke: (protocol: Protocol, bod
   try {
     await run(directory, async (protocol, body, configured) => await onRequest(body, {
       protocol, model: 'synthetic', session: protocol, cwd: directory,
-      options: { thresholdTokens: 1, keepRecentMessages: 1, headChars: 0,
+      options: { delayRequests: 0,
         ...(configured ? { recoveryToolName: configured } : {}),
-        policy: { mode: 'bytes', autoRoles: ['assistant'], minChars: 1, summaryChars: 256 },
       },
     }) as Body);
   } finally {
@@ -78,13 +77,12 @@ async function fixture(run: (directory: string, invoke: (protocol: Protocol, bod
 
 function assertOriginal(body: Body, protocol: Protocol): void {
   assert.equal(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text, original);
-  assert.ok(!JSON.stringify(body).includes('<context-folding scope='));
+  assert.ok(!JSON.stringify(body).includes(' scope='));
 }
 
-function assertFolded(body: Body, protocol: Protocol, name: string): void {
-  assert.match(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text ?? '', /^\[context-folding id=/);
-  const guide = extractSpans(body, protocol).at(-1)!.text;
-  assert.ok(guide.includes(`tools[${JSON.stringify(name)}]`), 'the guide must name the actual recovery tool');
+function assertFolded(body: Body, protocol: Protocol, _name: string): void {
+  assert.match(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text ?? '', /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
+  assert.match(JSON.stringify(body), /scope=[a-f0-9]{64}/);
 }
 
 for (const protocol of protocols) {
