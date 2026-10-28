@@ -7,6 +7,9 @@ import { statistics } from './statistics.js';
 import { renderReport } from './report-html.js';
 
 const reasons: Record<string, string> = {
+  'annotated-regions-folded': '本次请求含折叠内容',
+  'annotation-grace-period': '闭合标记仍在等待周期',
+  'no-eligible-annotations': '本次没有可折叠区域',
   proven: '费用下界证明通过',
   'saving-not-proven': '未证明费用节省',
   'bytes-smaller-no-cost-proof': '字节更少；没有费用证明',
@@ -30,6 +33,9 @@ const reasons: Record<string, string> = {
   'explicitly-forgotten': '归档已明确清除',
 };
 const nextChecks: Record<string, string> = {
+  'annotated-regions-folded': '查看本次请求前后大小和响应核实状态。插件替换发给模型的请求视图，客户端保留的聊天历史不会因此收起。',
+  'annotation-grace-period': '正文已经归档，当前请求仍保留原文。等待配置要求的后续不同请求；相同请求的重试不推进等待周期。',
+  'no-eligible-annotations': '本次没有符合条件的闭合标记。检查完整配对的标记、明确保留的内容和引用开销；归档条目数不代表本次折叠数。',
   proven: '核对匹配成功响应的累计计数与证书假设；批准记录本身不能证明请求成功或账单节省。',
   'saving-not-proven': '检查同一任务的输入价格、缓存损失及全部新增工作成本；多一次工具调用或模型往返可能抵消收益。',
   'bytes-smaller-no-cost-proof': '当前只证明候选字节更少。需要费用判断时，补齐相同任务全部新增成本边界并使用 cost 模式。',
@@ -53,6 +59,11 @@ const nextChecks: Record<string, string> = {
   'explicitly-forgotten': '归档已清除；旧请求的前后比较无法从当前归档重建。后续正常使用后重新生成报告。',
 };
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const observation = z.object({
+  observedAt: count.max(8_640_000_000_000_000),
+  completedAt: count.max(8_640_000_000_000_000).optional(),
+  status: z.enum(['pending', 'confirmed', 'failed', 'unverified']),
+});
 // Parse metadata only. IDs stay internal to count group coverage; never output them.
 const metadata = z.object({
   entries: z.array(z.object({
@@ -61,7 +72,9 @@ const metadata = z.object({
   })),
   groups: z.array(z.object({ id: z.string(), children: z.array(z.string()), folded: z.string().optional() })).default([]),
   decision: z.object({ reason: z.unknown().optional(), approved: z.boolean().optional(),
-    beforeBytes: count.optional(), afterBytes: count.optional() }).default({}),
+    beforeBytes: count.optional(), afterBytes: count.optional(),
+    foldedRegions: count.optional(), replayedReferences: count.optional(), waiting: count.optional(),
+    observation: observation.optional() }).default({}),
 });
 
 export interface ReportSession {
@@ -76,6 +89,11 @@ export interface ReportSession {
   nextCheck: string;
   approved: boolean | null;
   comparison: { beforeBytes: number; afterBytes: number } | null;
+  observation?: z.infer<typeof observation> & {
+    foldedRegions?: number;
+    replayedReferences?: number;
+    waiting?: number;
+  };
 }
 export interface EffectsReport {
   generatedAt: string;
@@ -132,6 +150,12 @@ export async function collectReport(scope?: string): Promise<EffectsReport> {
           approved: d.approved ?? null,
           comparison: d.beforeBytes !== undefined && d.afterBytes !== undefined
             ? { beforeBytes: d.beforeBytes, afterBytes: d.afterBytes } : null,
+          ...(d.observation === undefined ? {} : { observation: {
+            ...d.observation,
+            ...(d.foldedRegions === undefined ? {} : { foldedRegions: d.foldedRegions }),
+            ...(d.replayedReferences === undefined ? {} : { replayedReferences: d.replayedReferences }),
+            ...(d.waiting === undefined ? {} : { waiting: d.waiting }),
+          } }),
         });
       }
       database.exec('COMMIT');

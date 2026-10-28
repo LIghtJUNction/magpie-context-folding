@@ -91,7 +91,10 @@ test('request configuration can raise a quota without changing archived content'
     await f.configure(32768);
     const after = JSON.parse(f.stored().snapshot);
     assert.equal(after.sessionLimitBytes, 32768);
-    assert.deepEqual({ ...after, sessionLimitBytes: 4096 }, before);
+    // Re-running the hook refreshes its observation, not the folding cycle or archives.
+    assert.notEqual(after.decision.observation.requestId, before.decision.observation.requestId);
+    assert.deepEqual({ ...after, sessionLimitBytes: 4096,
+      decision: { ...after.decision, observation: before.decision.observation } }, before);
     const large = largerBody('new-content', 'larger evidence '.repeat(1000));
     assert.notDeepEqual(await f.configure(32768, large), large);
     const archived = JSON.parse(f.stored().snapshot);
@@ -112,7 +115,8 @@ test('request configuration installs a missing quota on an unchanged legacy arch
     await f.configure(4096);
     const { sessionLimitBytes, ...payload } = JSON.parse(f.stored().snapshot);
     assert.equal(sessionLimitBytes, 4096);
-    assert.deepEqual(payload, legacy, 'installing a quota must not invent a new folding request');
+    assert.deepEqual({ ...payload, decision: { ...payload.decision, observation: legacy.decision.observation } },
+      legacy, 'installing a quota must not invent a new folding cycle or count a repeated fold');
   });
 });
 

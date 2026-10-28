@@ -10,6 +10,20 @@
 
 这是正在开发的 **0.4.0 源码版本，未发布到 npm**。本页只描述当前源码；旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
 
+## 在 Codex / Claude Code 中看到折叠效果
+
+折叠发生在 Magpie 发往模型的请求副本里。客户端已显示的聊天记录不会因此变成可点击的折叠块，原生 compaction 提示也不会被触发。要查看实际变化，使用本次源码修复新增的本地显示命令：
+
+```sh
+magpie-context-folding sessions                 # 找到已有会话的 scope 和最近记录
+magpie-context-folding statusline --scope S     # 最近请求：前后估算、段数、响应确认状态
+magpie-context-folding statusline               # 明确标记的全局累计
+```
+
+Claude Code 的 `statusLine.command` 可运行 `magpie-context-folding statusline --client`；Codex 的 `Stop` hook 可运行 `magpie-context-folding hook`，只输出界面消息。两者只在客户端 `session_id` 与 Magpie 观察到的会话标识唯一匹配时自动绑定，也支持明确指定 `--scope`。无法绑定时不会拿其他会话冒充当前会话。
+
+显示读取本地元数据，不增加模型输入。每次对比包含预算提示等开销；“待确认”“匹配成功”“失败”“未核实”分开显示。真实供应商 token 用量保持原样，插件的字节 / 4 估算单独标注。配置示例、同机状态目录要求与界面边界见 [客户端显示接入](docs/client-visibility.md)。
+
 ## 文本管道与独立 MCP：ctxf
 
 独立 Python 核心提供 `ctxf`，CLI 和 MCP 共用同一个折叠操作及持久归档：
