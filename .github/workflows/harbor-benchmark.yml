@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'test/**'
       - 'benchmarks/harbor/**'
+      - 'scripts/host-smoke.py'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/harbor-benchmark.yml'
@@ -15,6 +16,62 @@ permissions:
   contents: read
 
 jobs:
+  host-smoke:
+    name: Magpie HTTP host and CLI recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      MAGPIE_HOST_VERSION: '0.1.1774'
+      MAGPIE_HOST_SHA256: '6290e485744109d9cec8385d947bbb66423adfc4885bc0ca3e6c2a4d020670e9'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install the pinned Magpie CLI and isolation tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+          host_tools_dir="${RUNNER_TEMP}/magpie-host-tools"
+          mkdir -p "$host_tools_dir"
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 180 \
+            "https://github.com/yetone/magpie/releases/download/v${MAGPIE_HOST_VERSION}/magpie-cli-linux-amd64" \
+            --output "$host_tools_dir/magpie"
+          printf '%s  %s\n' "$MAGPIE_HOST_SHA256" "$host_tools_dir/magpie" | sha256sum --check --strict
+          chmod 0755 "$host_tools_dir/magpie"
+      - name: Verify real hooks and CLI recovery with an isolated local provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          host_bun_path="$(readlink -f "$(command -v bun)")"
+          host_magpie_path="${RUNNER_TEMP}/magpie-host-tools/magpie"
+          # Preserve the runner's existing HOME so the smoke script hides that
+          # home, then remounts only this checkout and the selected executables.
+          # The script supplies private XDG state, disables account discovery,
+          # and routes model requests only to its synthetic loopback provider.
+          sudo --preserve-env=HOME /usr/bin/python3 "$GITHUB_WORKSPACE/scripts/host-smoke.py" \
+            --magpie "$host_magpie_path" \
+            --bun "$host_bun_path" \
+            --bwrap /usr/bin/bwrap \
+            --project "$GITHUB_WORKSPACE" \
+            2>&1 | tee "$RUNNER_TEMP/magpie-host-smoke.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: magpie-host-smoke-results
+          path: ${{ runner.temp }}/magpie-host-smoke.log
+          if-no-files-found: warn
+          retention-days: 7
+
   smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
