@@ -1,0 +1,48 @@
+{
+  "result": "passed",
+  "host": "real Magpie and Bun via bubblewrap",
+  "provider": "local synthetic HTTP fixture; no external model was called",
+  "checks": [
+    "local CLI recovery without MCP",
+    "open annotations stay visible",
+    "first closed observation and identical retries stay visible",
+    "distinct requests fold explicit annotations",
+    "short SHA-256 references retain marker lines",
+    "system/user/unmarked text and tool calls/results remain intact",
+    "one concise system guidance; no context budgets",
+    "projection replay does not duplicate guidance or archives",
+    "paginated byte-for-byte Unicode/CRLF recovery",
+    "exclusive paste without text echo",
+    "unknown scope refused",
+    "explicit --restore persistently expands all slices",
+    "session isolation",
+    "source comments share the protocol",
+    "fresh Read occurrence gets its own grace period",
+    "changed source gets a new hash while old snapshots recover",
+    "source files remain unchanged by folding",
+    "unmarked source stays visible"
+  ],
+  "upstreamRequests": 18,
+  "originalUtf8Bytes": 46278,
+  "firstRequestEstimate": {
+    "usedEstimate": 14479,
+    "basis": "json-utf8-bytes/4"
+  },
+  "foldedRequestEstimate": {
+    "usedEstimate": 2726,
+    "basis": "json-utf8-bytes/4"
+  },
+  "responseHooks": {
+    "successfulHookRequests": 18,
+    "unverifiedHookRequests": 0,
+    "failedHookRequests": 0
+  },
+  "package": "magpie-context-folding@0.5.1",
+  "packageIntegrity": "sha512-Oepwqh7yYw0pa4xX6uTY/Zl7Httu1Hws5nCOjWUvsQAaf4wzvCmu8HzK00UH0clXHoO3QaDUm3ce5ZkKe33Y7Q==",
+  "releaseCommit": "a4b0e476c90717bc21fa622c78d66fbad8eed9e8",
+  "magpieVersion": "0.1.1948",
+  "bunVersion": "1.4.0",
+  "checkedAt": "2026-10-28T20:58:01.075484+00:00",
+  "isolation": "bubblewrap, temporary HOME/XDG, isolated loopback synthetic provider",
+  "note": "Copied the npm-installed package files, verified installed src files match v0.5.1, and ran the real isolated host smoke. No external model or provider cache was called."
+}

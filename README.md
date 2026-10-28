@@ -182,6 +182,8 @@ npm run test:host:installed -- --package /absolute/path/to/magpie-context-foldin
 
 同一条已发生请求轨迹中，未折叠请求估算为 14,377，折叠请求估算为 2,624（按 JSON UTF-8 字节数除以 4，约减少 81.8%）。这是请求序列化大小估算，不是供应商 tokenizer 用量、反事实完整历史比较或账单节省。机器回执见 [`docs/benchmarks/host-smoke-npm-0.5.0-2026-10-28.json`](docs/benchmarks/host-smoke-npm-0.5.0-2026-10-28.json)。
 
+2026-10-29 发布并安装 npm `0.5.1` 后，在 Magpie `0.1.1948`、Bun `1.4.0` 上复跑：18 项检查及 18 次请求全部通过，hook 失败和未验证均为 0，46,278 字节原文精确恢复。已安装源码逐文件匹配 `v0.5.1`；这份验收使用已安装制品和本地合成上游，原始记录见 [`0.5.1 安装验收`](docs/benchmarks/host-smoke-npm-0.5.1-2026-10-29.json)。
+
 ### 归档树查询微基准
 
 从仓库根目录运行：
