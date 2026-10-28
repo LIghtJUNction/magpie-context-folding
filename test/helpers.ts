@@ -34,25 +34,25 @@ export async function fixture(run: (f: {
 
 export function bodyFor(protocol: Protocol, text = marked()): Record<string, unknown> {
   if (protocol === 'chat') return {
-    model: 'fixture', tools: [{ type: 'function', function: { name: 'context_folding' } }],
+    model: 'fixture', tools: [{ type: 'function', function: { name: 'exec_command' } }],
     messages: [{ role: 'system', content: 'Original requirements.' }, { role: 'user', content: 'Start.' },
       { role: 'assistant', content: text }, { role: 'user', content: 'Continue.' }],
   };
   if (protocol === 'responses') return {
-    model: 'fixture', instructions: 'Original requirements.', tools: [{ type: 'function', name: 'context_folding' }],
+    model: 'fixture', instructions: 'Original requirements.', tools: [{ type: 'function', name: 'exec_command' }],
     input: [{ role: 'user', content: 'Start.' }, { role: 'assistant', content: [{ type: 'output_text', text }] },
       { role: 'user', content: [{ type: 'input_text', text: 'Continue.' }] }],
   };
   if (protocol === 'anthropic') return {
     model: 'fixture', system: [{ type: 'text', text: 'Original requirements.', cache_control: { type: 'ephemeral' } }],
-    tools: [{ name: 'context_folding', input_schema: { type: 'object' } }],
+    tools: [{ name: 'exec_command', input_schema: { type: 'object' } }],
     messages: [{ role: 'user', content: 'Start.' }, { role: 'assistant', content: [{ type: 'text', text }] },
       { role: 'user', content: 'Continue.' }],
   };
   return {
     contents: [{ role: 'user', parts: [{ text: 'Start.' }] }, { role: 'model', parts: [{ text }] },
       { role: 'user', parts: [{ text: 'Continue.' }] }],
-    tools: [{ functionDeclarations: [{ name: 'context_folding' }] }],
+    tools: [{ functionDeclarations: [{ name: 'exec_command' }] }],
     systemInstruction: { parts: [{ text: 'Original requirements.' }] },
   };
 }

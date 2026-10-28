@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise annotation folding through the real Magpie/Bun host and MCP gateway.
+"""Exercise annotation folding through the real Magpie/Bun host and local CLI.
 
 Requires this package's source entries, Magpie, Bun, and Linux bubblewrap. A local
 synthetic OpenAI-compatible provider records the real outgoing HTTP requests; no
@@ -34,6 +34,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 HTTP = build_opener(ProxyHandler({}))
 CAPACITY = 1_000_000
 OUTPUT_RESERVED = 1000
+GUIDANCE = re.compile(r"^<context-folding>.*</context-folding>$", re.DOTALL)
 BUDGET = re.compile(
     r"^<context-budget used_estimate=(\d+) capacity=(\d+|unknown) "
     r"output_reserved=(\d+) available_estimate=(\d+|unknown) "
@@ -107,13 +108,6 @@ def request_json(url: str, payload: object | None = None, session: str = "host-s
             data = response.read().decode("utf-8")
     except HTTPError as error:
         raise AssertionError(f"HTTP {error.code} from isolated host: {error.read().decode(errors='replace')[:2000]}") from error
-    if data.startswith("event:") or data.startswith("data:"):
-        for line in data.splitlines():
-            if line.startswith("data:") and line[5:].strip() != "[DONE]":
-                result = json.loads(line[5:])
-                if "result" in result or "error" in result:
-                    return result
-        raise AssertionError("MCP response contained no JSON-RPC result")
     return json.loads(data)
 
 
@@ -128,28 +122,25 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(serialized(value), encoding="utf-8")
 
 
-def verify_budget(outgoing: dict, sent: dict) -> tuple[dict, str, dict]:
-    """Check the actual wire request after allowing for Magpie's provider routing."""
+def verify_request(outgoing: dict, sent: dict) -> tuple[dict, str | None, dict]:
+    """Check the real wire request, including the default low-noise guidance."""
     clean = copy.deepcopy(outgoing)
     hints = [item for item in clean["messages"] if item.get("role") == "system"
-             and isinstance(item.get("content"), str) and BUDGET.fullmatch(item["content"])]
-    assert len(hints) == 1, f"expected exactly one system budget, found {len(hints)}"
-    match = BUDGET.fullmatch(hints[0]["content"])
-    assert match is not None
-    used, capacity, reserved, available, scope = match.groups()
-    assert scope is not None, "callable recovery tool did not produce a session locator"
-    assert int(capacity) == CAPACITY and int(reserved) == OUTPUT_RESERVED, "configured budget was not propagated"
-    assert int(available) == max(0, CAPACITY - int(used) - OUTPUT_RESERVED), "remaining budget arithmetic changed"
-    # The hook estimates the whole request, including its hint, before the host
-    # changes fake/m1 to m1. All other request fields are checked by each scenario.
+             and isinstance(item.get("content"), str) and GUIDANCE.fullmatch(item["content"])]
+    assert len(hints) == 1, f"expected exactly one system guidance, found {len(hints)}"
+    assert not any(item.get("role") == "system" and isinstance(item.get("content"), str)
+                   and BUDGET.fullmatch(item["content"]) for item in clean["messages"]), "budget must be opt-in"
+    scope_match = re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"])
+    scope = scope_match[1] if scope_match else None
     assert outgoing["model"] == "m1", f"unexpected routed model: {outgoing['model']}"
+    # Magpie changes fake/m1 to m1 after the hook. Count the same model name to
+    # compare full hook payloads, including guidance and all client declarations.
     estimated = {**outgoing, "model": sent["model"]}
-    expected = (len(serialized(estimated).encode("utf-8")) + 3) // 4
-    assert int(used) == expected, f"budget is not self-inclusive: {used} != {expected}"
+    used = (len(serialized(estimated).encode("utf-8")) + 3) // 4
     clean["messages"].remove(hints[0])
     clean["model"] = sent["model"]
     assert clean["tools"] == sent["tools"], "client tool declarations changed"
-    return clean, scope, {"usedEstimate": int(used), "availableEstimate": int(available)}
+    return clean, scope, {"usedEstimate": used, "basis": "json-utf8-bytes/4"}
 
 
 def advance(body: dict, message: str) -> dict:
@@ -227,39 +218,32 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                         raise AssertionError("isolated Magpie did not start within 30 seconds")
                     time.sleep(0.1)
 
-            rpc_id = 0
-
-            def rpc(method: str, params: object) -> dict:
-                nonlocal rpc_id
-                rpc_id += 1
-                reply = request_json(gateway + "/mcp/magpie/tools", {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params})
-                assert "error" not in reply, f"MCP {method} failed: {reply.get('error')}"
-                return reply["result"]
-
-            tools = rpc("tools/list", {})["tools"]
-            tool = next((item for item in tools if item["name"].endswith("_context_folding") or item["name"] == "context_folding"), None)
-            assert tool is not None, f"context_folding missing from real MCP tools/list: {[item['name'] for item in tools]}"
-
             def call(arguments: dict, expect_error: bool = False) -> dict:
-                reply = rpc("tools/call", {"name": tool["name"], "arguments": arguments})
-                if reply.get("isError"):
-                    assert expect_error, f"real MCP tool failed: {reply}"
-                    return reply
-                result = json.loads("".join(item.get("text", "") for item in reply.get("content", [])))
-                assert bool(result.get("error")) == expect_error, f"unexpected real MCP tool result: {result}"
-                return result
+                # Use the package CLI against the same isolated archive as the
+                # live host. No MCP transport, server or tool discovery is used.
+                argv = [str(bun), str(project / "src" / "cli.ts"), arguments["action"], "--json"]
+                for key, value in arguments.items():
+                    if key == "action" or value is False:
+                        continue
+                    argv.append("--" + key)
+                    if value is not True:
+                        argv.append(str(value))
+                completed = subprocess.run(argv, env=environment, cwd=directory,
+                                           capture_output=True, text=True, timeout=20)
+                assert (completed.returncode != 0) == expect_error, f"unexpected CLI result: {completed.stderr}"
+                return {"error": completed.stderr} if expect_error else json.loads(completed.stdout)
 
             def completions(metrics: dict) -> int:
                 return sum(metrics.get(key, 0) for key in (
                     "successfulHookRequests", "failedHookRequests", "unverifiedHookRequests"))
 
-            def send(body: dict, session: str = "host-smoke") -> tuple[dict, str, dict]:
+            def send(body: dict, session: str = "host-smoke") -> tuple[dict, str | None, dict]:
                 before = call({"action": "stats"})["metrics"]
                 count = len(fixture.upstream)
                 reply = request_json(gateway + "/v1/chat/completions", body, session)
                 assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
                 assert len(fixture.upstream) == count + 1, "request did not reach synthetic upstream exactly once"
-                output = verify_budget(fixture.upstream[-1], body)
+                output = verify_request(fixture.upstream[-1], body)
                 # Response hooks can finish after HTTP completion. Wait for their
                 # write before the next archive mutation; do not mistake an
                 # unverified host response for verified usage.
@@ -296,7 +280,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 assert restored.encode("utf-8") == original.encode("utf-8"), "read did not restore exact archived bytes"
 
             declarations = [
-                {"type": "function", "function": {"name": tool["name"], "description": tool.get("description", ""), "parameters": tool["inputSchema"]}},
+                {"type": "function", "function": {"name": "exec_command", "description": "Execute a shell command", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}},
                 {"type": "function", "function": {"name": "exec", "description": "Synthetic history only", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}}}},
                 {"type": "function", "function": {"name": "read", "description": "Synthetic Read history only", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
             ]
@@ -320,7 +304,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 }]},
                 {"role": "tool", "tool_call_id": "exec-1", "content": generic_result},
             ]}
-            open_output, scope, _ = send(opening)
+            open_output, opening_scope, _ = send(opening)
             assert open_output == opening, "an unfinished annotation changed the request"
             closed = copy.deepcopy(opening)
             closed["messages"].extend([
@@ -328,23 +312,24 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 {"role": "user", "content": "The annotation is now closed."},
             ])
             first, first_scope, first_budget = send(closed)
-            assert first_scope == scope and first == closed, "first closed observation did not keep its grace period"
+            assert first_scope is None and opening_scope is None and first == closed, "first closed observation did not keep its grace period"
             retry, retry_scope, _ = send(closed)
-            assert retry_scope == scope and retry == closed, "an identical retry consumed the grace period"
+            assert retry_scope is None and retry == closed, "an identical retry consumed the grace period"
             advanced = advance(closed, "A distinct request after the completed work.")
-            folded, folded_scope, folded_budget = send(advanced)
+            folded, scope, folded_budget = send(advanced)
+            assert scope is not None, "folded text has no CLI recovery scope"
             reference = f"[[cf:v2:{sha256(original)[:12]}]]"
             expected = copy.deepcopy(advanced)
             expected["messages"][3]["content"] = prefix + reference
             expected["messages"][5]["content"] = reference + suffix
-            assert folded_scope == scope and folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
+            assert folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
             assert folded_budget["usedEstimate"] < first_budget["usedEstimate"], "fold did not reduce the outgoing estimate"
             repeated, _, _ = send(advanced)
             assert repeated == expected, "a repeated request changed the projection"
             projected = copy.deepcopy(fixture.upstream[-1])
             projected["model"] = "fake/m1"
             replayed, _, _ = send(projected)
-            assert replayed == expected, "replaying a projected request duplicated the budget or re-folded a reference"
+            assert replayed == expected, "replaying a projected request duplicated guidance or re-folded a reference"
             status = call({"scope": scope, "action": "status"})
             assert status["entries"] == 1 and status["metrics"]["itemsFolded"] == 1, "retry created duplicate archives or folds"
             read_all(scope, original)
@@ -355,14 +340,15 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert pasted["sha256"] == sha256(original) and "text" not in pasted, "paste metadata changed"
             call({"scope": scope, "action": "paste", "peek": True, "id": sha256(original)[:12], "path": str(exported)}, expect_error=True)
             assert exported.read_bytes() == original.encode("utf-8"), "paste overwrote an existing file"
-            kept = call({"scope": scope, "action": "read", "id": sha256(original)[:12], "limit": 1})
-            assert kept["kept"] is True, "read did not persist expansion"
+            kept = call({"scope": scope, "action": "read", "id": sha256(original)[:12], "limit": 1, "restore": True})
+            assert kept["kept"] is True, "explicit --restore did not persist expansion"
             assert send(advanced)[0] == advanced, "read did not expand all slices of the original"
             later = advance(advanced, "Another request must keep recovered text visible.")
             assert send(later)[0] == later, "recovered text folded again on a later request"
             other, other_scope, _ = send(closed, "host-smoke-other")
-            assert other_scope != scope and other == closed, "session isolation or new-session grace failed"
-            other_folded, _, _ = send(advanced, "host-smoke-other")
+            assert other_scope is None and other == closed, "new-session grace failed"
+            other_folded, other_scope, _ = send(advanced, "host-smoke-other")
+            assert other_scope is not None and other_scope != scope, "session isolation failed"
             assert other_folded == expected, "persistent expansion leaked across sessions"
 
             source_path = directory / "worker.ts"
@@ -381,13 +367,15 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 ]}
 
             source_input = source_body(source_text, "read-1")
-            source_first, source_scope, _ = send(source_input, "host-smoke-source")
+            source_first, _, _ = send(source_input, "host-smoke-source")
             assert source_first == source_input
             assert send(source_input, "host-smoke-source")[0] == source_input, "Read retry consumed the grace period"
             source_next = advance(source_input, "Review the annotated source next.")
             source_expected = copy.deepcopy(source_next)
             source_expected["messages"][2]["content"] = source_text.replace(source_payload, f"[[cf:v2:{sha256(source_payload)[:12]}]]")
-            assert send(source_next, "host-smoke-source")[0] == source_expected, "source comments did not use the same hash and delay contract"
+            source_folded, source_scope, _ = send(source_next, "host-smoke-source")
+            assert source_scope is not None
+            assert source_folded == source_expected, "source comments did not use the same hash and delay contract"
             assert source_path.read_bytes() == source_text.encode("utf-8"), "folding changed the source file"
             fresh = source_body(source_text, "read-2")
             assert send(fresh, "host-smoke-source")[0] == fresh, "old hash hid a fresh Read occurrence immediately"
@@ -412,16 +400,16 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 "result": "passed", "host": "real Magpie and Bun via bubblewrap",
                 "provider": "local synthetic HTTP fixture; no external model was called",
                 "checks": [
-                    "MCP discovery and recovery", "open annotations stay visible", "first closed observation and identical retries stay visible",
+                    "local CLI recovery without MCP", "open annotations stay visible", "first closed observation and identical retries stay visible",
                     "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
-                    "one self-inclusive budget with configured reserve", "projection replay does not duplicate budgets or archives",
+                    "one concise system guidance; budgets disabled by default", "projection replay does not duplicate guidance or archives",
                     "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
-                    "default read persistently expands all slices", "session isolation", "source comments share the protocol",
+                    "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
                     "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
                     "source files remain unchanged by folding", "unmarked source stays visible",
                 ],
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
-                "firstBudget": first_budget, "foldedBudget": folded_budget,
+                "firstRequestEstimate": first_budget, "foldedRequestEstimate": folded_budget,
                 "responseHooks": {key: final_metrics[key] for key in (
                     "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests")},
             }))
@@ -465,7 +453,7 @@ def main() -> None:
     project = arguments.project.resolve()
     try:
         package = json.loads((project / "package.json").read_text(encoding="utf-8"))
-        entries = [project / package["main"], project / package["magpie"]["hooks"]]
+        entries = [project / package["main"], project / package["magpie"]["hooks"], project / package["bin"]["magpie-context-folding"]]
         if any(not entry.is_file() for entry in entries):
             raise ValueError("missing entry")
     except (OSError, ValueError, KeyError, TypeError):

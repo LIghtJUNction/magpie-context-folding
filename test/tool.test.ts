@@ -179,15 +179,8 @@ test('invalid reads do not mutate archives; bounds and filesystem failures keep 
   });
 });
 
-test('tool exposes recovery/inspection only and rejects removed mode/mark actions', async () => {
-  const { args } = (await ContextFoldingPlugin()).tool.context_folding;
-  assert.deepEqual(args.oneOf.map(schema => schema.properties.action.const).sort(), ['forget', 'list', 'paste', 'read', 'stats', 'status']);
-  for (const action of ['read', 'paste']) {
-    const schema = args.oneOf.find(schema => schema.properties.action.const === action)!;
-    const peek = (schema.properties as Record<string, { default?: unknown }>).peek!;
-    assert.equal(peek.default, false);
-    assert.equal(schema.additionalProperties, false);
-  }
+test('plugin exposes no model tools; internal CLI operations reject removed mode/mark actions', async () => {
+  assert.deepEqual(await ContextFoldingPlugin(), {});
   await fixture(async (store, scope) => {
     const before = await load(store, scope);
     for (const action of ['mode', 'mark']) assert.ok((await call({ action, scope })).error);
