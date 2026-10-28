@@ -35,6 +35,8 @@ const entrySchema = z.object({
   annotation: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), label: z.string(),
     children: z.array(z.object({ id: z.string().min(1), label: z.string(),
       start: z.number().int().nonnegative(), end: z.number().int().positive() })).optional(),
+    observedRanges: z.array(z.object({ sourceId: z.string(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+      start: z.number().int().nonnegative(), end: z.number().int().positive(), offsetUnit: z.literal('utf16') })).optional(),
   }).optional(),
   occurrences: z.record(z.string(), z.object({
     firstSeen: z.number().int().nonnegative(), lastSeen: z.number().int().nonnegative(), folded: z.boolean().optional(),

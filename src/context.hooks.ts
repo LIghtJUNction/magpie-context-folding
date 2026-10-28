@@ -45,7 +45,7 @@ function occurrenceIdentity(body: Body, span: Span): unknown {
   // @context-fold end occurrenceIdentity-8c0d952a7b
 }
 
-interface Candidate { region: Region; occurrence: string; role: 'assistant' | 'tool' }
+interface Candidate { region: Region; occurrence: string; role: 'assistant' | 'tool'; sourceRanges: NonNullable<NonNullable<Entry['annotation']>['observedRanges']> }
 
 function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] {
   // @context-fold begin candidates-9c5f930e91
@@ -59,10 +59,10 @@ function candidates(body: Body, spans: Span[], protocol: Protocol): Candidate[] 
     });
     for (const region of parseRegions(texts)) {
       const origin = byId.get(region.origin.id)!;
-      // Marker order survives earlier replacements in the same message; byte
-      // offsets and content-derived span IDs do not.
-      result.push({ region, role, occurrence: fingerprint([region.sha256, region.label,
-        region.origin.path.map(item => [occurrenceIdentity(body, byId.get(item.id)!), item.ordinal]), origin.source ?? null]) });
+      result.push({ region, role, sourceRanges: region.slices.map(slice => ({ sourceId: slice.id,
+        sourceHash: digest(byId.get(slice.id)!.text), start: slice.start, end: slice.end, offsetUnit: 'utf16' })),
+        occurrence: fingerprint([region.sha256, region.label,
+          region.origin.path.map(item => [occurrenceIdentity(body, byId.get(item.id)!), item.ordinal]), origin.source ?? null]) });
     }
   };
   const history = protocol === 'responses' ? body.input : protocol === 'gemini' ? body.contents : body.messages;
@@ -131,6 +131,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
       const found = candidates(body, spans, ctx.protocol);
+      const candidateByRegion = new Map(found.map(item => [item.region, item]));
       const resolved = new Map<Region, Entry>();
       const valid = new Map<Region, boolean>();
       // Nested references are child edges only when this exact scope already
@@ -228,6 +229,13 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           else if (children.length && JSON.stringify(entry.annotation!.children) !== JSON.stringify(children)) {
             throw new Error('Annotation child structure changed');
           }
+          const observedRanges = entry.annotation!.observedRanges ??= [];
+          for (const candidate of candidateByRegion.get(region) ? [candidateByRegion.get(region)!] : []) {
+            for (const range of candidate.sourceRanges) {
+              if (!observedRanges.some(observed => JSON.stringify(observed) === JSON.stringify(range))) observedRanges.push({ ...range });
+            }
+          }
+          if (observedRanges.length > 64) observedRanges.splice(0, observedRanges.length - 64);
         }
         resolved.set(region, entry);
         return entry;
