@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+/** Diagnostic size estimate for folding statistics, never a model context limit. */
+export function estimateTokens(body: unknown): number {
+  return Math.ceil(Buffer.byteLength(JSON.stringify(body)) / 4);
+}
+
 const counterSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const integerTextSchema = z.string().regex(/^-?(?:0|[1-9]\d*)$/)
   .transform(value => BigInt(value).toString());

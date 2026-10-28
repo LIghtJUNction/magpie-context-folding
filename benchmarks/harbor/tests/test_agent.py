@@ -196,6 +196,51 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                 await first.close()
                 await second.close()
 
+    async def test_nested_cli_queries_keep_history_folded_and_confined_to_the_trial(self):
+        bridge = Bridge(self.directory / "nested")
+        leaf = "needle-child " + "precise evidence " * 200
+        nested = ("<!-- @context-fold begin parent -->\nParent heading\n"
+                  "<!-- @context-fold begin child -->\n" + leaf
+                  + "\n<!-- @context-fold end child -->\nParent conclusion\n"
+                  "<!-- @context-fold end parent -->")
+        body = {"model": "fixture/model", "tools": module.TOOLS, "messages": [
+            {"role": "assistant", "content": nested}, {"role": "user", "content": "Continue."}]}
+        try:
+            await bridge.start()
+            await bridge.call("project", mode="folding", body=body)
+            await bridge.call("response", success=True)
+            body["messages"].append({"role": "user", "content": "A distinct request."})
+            projected = await bridge.call("project", mode="folding", body=body)
+            await bridge.call("response", success=True)
+            history = next(m["content"] for m in projected["body"]["messages"] if m["role"] == "assistant")
+            self.assertEqual(history.count("[[cf:v2:"), 1)
+            self.assertNotIn(leaf, history)
+            parent = history.split("[[cf:v2:", 1)[1].split("]]", 1)[0]
+
+            async def query(*argv):
+                result = await bridge.call("cli", argv=list(argv))
+                self.assertEqual(result["exit_code"], 0, result["stderr"])
+                return json.loads(result["stdout"])
+
+            meta = await query("meta", "--id", parent, "--json")
+            self.assertEqual(meta["childCount"], 1)
+            child = meta["children"][0]
+            parent_view = await query("read", "--id", parent, "--limit", "24000", "--json")
+            self.assertIn("[[cf:v2:", parent_view["text"])
+            self.assertNotIn(leaf, parent_view["text"])
+            found = await query("grep", "--id", parent, "--query", "needle-child", "--json")
+            self.assertEqual(found["matches"][0]["id"], child)
+            recovered = await query("read", "--id", child, "--limit", "24000", "--json")
+            self.assertEqual(recovered["text"], leaf)
+            repeated = await bridge.call("project", mode="folding", body=body)
+            self.assertEqual(repeated["body"], projected["body"])
+            await bridge.call("response", success=True)
+            status = await query("status")
+            self.assertEqual(status["metrics"]["successfulHookRequests"], 3)
+            self.assertEqual(status["metrics"]["itemsRestored"], 0)
+        finally:
+            await bridge.close()
+
     async def test_scripted_smoke_delays_folds_recovers_and_solves_both_tasks(self):
         class RecordingSmoke(ScriptedSmokeAgent):
             async def _complete(self, payload):
@@ -222,8 +267,13 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                     if mode == "folding":
                         self.assertIn("[[cf:v2:", all_text(agent.received[2]))
                         self.assertNotIn(original, all_text(agent.received[2]))
+                        # CLI returns the requested text; prior assistant history stays folded.
+                        output = json.loads(agent.received[3]["messages"][-1]["content"])
+                        self.assertEqual(output["exit_code"], 0)
+                        self.assertEqual(json.loads(output["stdout"])["text"], original)
                         self.assertNotIn(original, all_text(agent.received[3]))
                         self.assertIn("[[cf:v2:", all_text(agent.received[3]))
+                        self.assertIn("[[cf:v2:", all_text(agent.received[4]))
                     else:
                         self.assertIn(original, all_text(agent.received[2]))
                     metrics = context.metadata["magpie_harbor"]
@@ -285,7 +335,7 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                 self.test.assertEqual(json.loads(output["stdout"])["text"], payload.rstrip("\n"))
                 restored = next(m["content"] for m in request["messages"] if m.get("tool_call_id") == "source-read")
                 self.test.assertIn("[[cf:v2:", restored)
-                self.test.assertNotIn(payload, restored)
+                self.test.assertNotIn(payload.rstrip("\n"), restored)
                 return assistant()
 
         agent = SourceAgent(logs_dir=self.directory / "logs", model_name="fixture/model",

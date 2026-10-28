@@ -47,16 +47,20 @@ test('persistent process serializes concurrent calls and forwards wrappers and U
       client.render('scope', ['entry'], { protected: [] }),
       client.resolve('scope', { content: '[[cf:v1:entry]]' }),
       client.fold('scope', '', { action: 'wrong', scope: 'wrong', text: 'wrong', language: 'explicit', commentStyles: [{ start: ';;' }] }),
+      client.grep('scope', 'needle', { query: 'wrong', id: 'entry', limit: 2 }),
+      client.meta('scope', 'entry', { id: 'wrong', limit: 2 }),
     ];
     const values = await Promise.all(requests);
     assert.equal(new Set(values.map(value => value.pid)).size, 1);
-    assert.deepEqual(values.map(value => value.request.action), ['put', 'list', 'read', 'read-source', 'render', 'resolve', 'fold']);
+    assert.deepEqual(values.map(value => value.request.action), ['put', 'list', 'read', 'read-source', 'render', 'resolve', 'fold', 'grep', 'meta']);
     assert.equal(values[0].request.text, '原文🙂');
     assert.equal(values[0].request.scope, 'scope');
     assert.equal(values[0].argv[0], '--state');
     assert.ok(values[0].argv[1].endsWith('state with spaces.sqlite'));
     assert.deepEqual(values[5].request.value, { content: '[[cf:v1:entry]]' });
     assert.deepEqual(values[6].request, { action: 'fold', scope: 'scope', text: '', language: 'explicit', commentStyles: [{ start: ';;' }] });
+    assert.deepEqual(values[7].request, { action: 'grep', scope: 'scope', query: 'needle', id: 'entry', limit: 2 });
+    assert.deepEqual(values[8].request, { action: 'meta', scope: 'scope', id: 'entry', limit: 2 });
   });
 });
 
@@ -98,7 +102,7 @@ test('invalid JSON, oversize output, process exit and missing executables reject
   finally { await client.dispose(); }
 });
 
-test('installed Python core delays explicit annotations and recovers exact originals', { skip: !process.env.CONTEXT_FOLDING_REAL_CORE_PATH }, async () => {
+test('installed Python core delays source annotations and queries leave folding unchanged', { skip: !process.env.CONTEXT_FOLDING_REAL_CORE_PATH }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cf-ts-real-'));
   const client = new ContextFoldingClient({ statePath: join(directory, 'archive.sqlite'),
     env: { PYTHONPATH: process.env.CONTEXT_FOLDING_REAL_CORE_PATH } });
@@ -113,8 +117,10 @@ test('installed Python core delays explicit annotations and recovers exact origi
     assert.equal((await client.call({ ...request, occurrence: 'read-2', requestCycle: 2 })).text, text, 'new read gets its own delay');
     const resolved = await client.resolve('real', { content: folded.text });
     assert.equal(resolved.value.content, text);
-    assert.equal((await client.read('real', first.id)).text, text);
-    assert.equal((await client.call({ ...request, requestCycle: 3 })).text, text, 'recovered source stays visible');
+    assert.ok(Array.from((await client.read('real', first.id, { limit: 120 })).text).length <= 120);
+    await client.grep('real', 'evidence', { id: first.id, limit: 2 });
+    await client.meta('real', first.id);
+    assert.equal((await client.call({ ...request, requestCycle: 3 })).text, folded.text, 'queries must not set keep or unfold history');
     const item = await client.put('real', 'A🙂B', { role: 'tool' });
     const read = await client.read('real', item.id, { offset: 1, limit: 1 });
     assert.equal(read.text, '🙂');
@@ -157,6 +163,45 @@ test('installed Python core folds submitted text immediately and returns recover
     const customFold = await client.fold('custom', custom, { commentStyles: [{ start: ';;' }] });
     assert.equal(customFold.references.length, 1);
     assert.equal((await client.resolve('custom', customFold.text)).value, custom);
+  } finally { await client.dispose(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('installed Python core exposes nested metadata and bounded recursive queries', { skip: !process.env.CONTEXT_FOLDING_REAL_CORE_PATH }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cf-ts-query-'));
+  const client = new ContextFoldingClient({ statePath: join(directory, 'archive.sqlite'),
+    env: { PYTHONPATH: process.env.CONTEXT_FOLDING_REAL_CORE_PATH } });
+  try {
+    const detail = ('x'.repeat(350) + ' needle=42 中文🙂\n').repeat(20);
+    const text = '<!-- @context-fold begin parent -->\nparent summary\n'
+      + '<!-- @context-fold begin child -->\n' + detail
+      + '<!-- @context-fold end child -->\n<!-- @context-fold end parent -->';
+    const folded = await client.fold('nested', text);
+    assert.equal(folded.references.length, 1, 'only top-level references are returned');
+    const id = folded.references[0].id;
+    const metadata = await client.meta('nested', id);
+    assert.equal(metadata.sha256, id);
+    assert.equal(metadata.childCount, 1);
+    assert.equal(metadata.children.length, 1);
+    assert.ok(!Object.hasOwn(metadata, 'text'), 'metadata must not open the body');
+    const children = await client.list('nested', { id, depth: 1, limit: 10 });
+    assert.ok(children.entries.some(entry => entry.id === metadata.children[0]));
+    const parent = await client.read('nested', id, { limit: 1000 });
+    assert.match(parent.text, /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
+    assert.ok(!parent.text.includes('needle=42'), 'parent view keeps child body folded');
+    assert.equal(parent.sha256, id);
+    assert.notEqual(parent.viewSha256, parent.sha256);
+    const line = await client.read('nested', id, { startLine: 1, endLine: 1, limit: 60 });
+    assert.match(line.text, /^parent summary/);
+    assert.ok(Array.from(line.text).length <= 60);
+    const matches = await client.grep('nested', 'needle=42', { id, limit: 2, context: 1 });
+    assert.equal(matches.matches.length, 2);
+    assert.equal(matches.matches[0].id, metadata.children[0]);
+    assert.ok(matches.matches.every(match => match.line >= 1 && match.text.includes('needle=42') && Array.from(match.text).length <= 160));
+    assert.ok(matches.nextOffset !== null);
+    assert.deepEqual((await client.grep('nested', 'needle=42', { id, recursive: false })).matches, []);
+    const child = await client.read('nested', metadata.children[0]);
+    assert.ok(Array.from(child.text).length <= 1200, 'default read stays bounded');
+    assert.equal((await client.fold('nested', text)).text, folded.text);
   } finally { await client.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 

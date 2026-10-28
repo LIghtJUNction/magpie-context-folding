@@ -9,9 +9,6 @@ export const optionsSchema = z.object({
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
   delayRequests: nonnegativeInteger.default(1),
   minSavingsTokens: nonnegativeInteger.default(256),
-  budgetHints: z.boolean().default(false),
-  contextWindowTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
-  reserveOutputTokens: nonnegativeInteger.default(0),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
   shellToolName: z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/).optional(),
   recoveryCommand: z.string().min(1).max(4096).refine(value => value.trim().length > 0 && !/[\0\r\n]/.test(value)).optional(),
@@ -23,9 +20,6 @@ const foldingSchema = z.object({
   max_session_bytes: optionsSchema.shape.maxSessionBytes,
   delay_requests: optionsSchema.shape.delayRequests,
   min_savings_tokens: optionsSchema.shape.minSavingsTokens,
-  budget_hints: optionsSchema.shape.budgetHints,
-  context_window_tokens: optionsSchema.shape.contextWindowTokens,
-  reserve_output_tokens: optionsSchema.shape.reserveOutputTokens,
 }).strict();
 // These sections are shared with the source-file/Python integration.
 const annotationsSchema = z.object({
@@ -73,12 +67,16 @@ type Table = Record<string, unknown>;
 const table = (value: unknown): value is Table => value !== null && typeof value === 'object' && !Array.isArray(value);
 const missing = (error: unknown) => table(error) && error.code === 'ENOENT';
 const migrationReason = 'removed: folding now requires agent-authored @context-fold begin/end annotations; remove mode, threshold, policy and accounting settings';
+const removedBudgetReason = 'removed: delete context-window, output-reserve and budget-hint settings; context budgets are not managed by this project';
 
 /** Recognize removed public settings without echoing arbitrary input or secret values. */
 function rejectLegacy(value: unknown, source: string, runtime = false): void {
   // @context-fold begin rejectLegacy-76c9704195
   if (!table(value)) return;
   if (runtime) {
+    for (const key of ['contextWindowTokens', 'reserveOutputTokens', 'budgetHints']) {
+      if (Object.hasOwn(value, key)) throw new ConfigError(source, key, removedBudgetReason);
+    }
     if (Object.hasOwn(value, 'recoveryToolName')) {
       throw new ConfigError(source, 'recoveryToolName', 'removed: MCP recovery was removed; use shellToolName for a callable shell tool and recoveryCommand for the local CLI');
     }
@@ -89,6 +87,9 @@ function rejectLegacy(value: unknown, source: string, runtime = false): void {
   }
   if (Object.hasOwn(value, 'policy')) throw new ConfigError(source, 'policy', migrationReason);
   if (table(value.folding)) {
+    for (const key of ['context_window_tokens', 'reserve_output_tokens', 'budget_hints']) {
+      if (Object.hasOwn(value.folding, key)) throw new ConfigError(source, `folding.${key}`, removedBudgetReason);
+    }
     for (const key of ['mode', 'threshold_tokens', 'keep_recent_messages', 'head_chars', 'minimum_saving_usd']) {
       if (Object.hasOwn(value.folding, key)) throw new ConfigError(source, `folding.${key}`, migrationReason);
     }
@@ -203,13 +204,12 @@ function fromOptions(input: unknown): Table {
   // @context-fold begin fromOptions-1a94c69f7b
   const value = input ?? {};
   rejectLegacy(value, '<overrides>', true);
-  const { enabled, maxSessionBytes, delayRequests, minSavingsTokens, budgetHints, contextWindowTokens, reserveOutputTokens,
+  const { enabled, maxSessionBytes, delayRequests, minSavingsTokens,
     gatewayTimeoutMs, shellToolName, recoveryCommand } =
     explicitFields(validated(optionsSchema.partial(), value, '<overrides>'), value);
   return {
     folding: { enabled, max_session_bytes: maxSessionBytes, delay_requests: delayRequests,
-      min_savings_tokens: minSavingsTokens, budget_hints: budgetHints,
-      context_window_tokens: contextWindowTokens, reserve_output_tokens: reserveOutputTokens },
+      min_savings_tokens: minSavingsTokens },
     magpie: { shell_tool_name: shellToolName, recovery_command: recoveryCommand, gateway_timeout_ms: gatewayTimeoutMs },
   };
   // @context-fold end fromOptions-1a94c69f7b
@@ -239,8 +239,7 @@ export async function loadOptions(explicit?: unknown, cwd?: string): Promise<Opt
   const m = config.magpie;
   return validated(optionsSchema, {
     enabled: f.enabled, maxSessionBytes: f.max_session_bytes, delayRequests: f.delay_requests,
-    minSavingsTokens: f.min_savings_tokens, budgetHints: f.budget_hints,
-    contextWindowTokens: f.context_window_tokens, reserveOutputTokens: f.reserve_output_tokens,
+    minSavingsTokens: f.min_savings_tokens,
     shellToolName: m.shell_tool_name, recoveryCommand: m.recovery_command, gatewayTimeoutMs: m.gateway_timeout_ms,
   }, '<effective settings>');
   // @context-fold end loadOptions-69cb98dd63

@@ -241,7 +241,7 @@ test('real annotation projection reports full request sizes, response state and 
     assert.match(pendingHtml, /请求投影待确认/);
     assert.match(pendingHtml, /原始请求/);
     assert.match(pendingHtml, /最终投影/);
-    assert.match(pendingHtml, /包含系统指导等开销/);
+    assert.match(pendingHtml, /包含系统指导和恢复定位信息开销/);
     assert.ok(pendingHtml.includes(`${Math.ceil(beforeBytes / 4).toLocaleString('en-US')} → ${Math.ceil(afterBytes / 4).toLocaleString('en-US')}`));
     assert.doesNotMatch(pendingHtml, /未识别的原因|没有记录前后字节数|批准状态未记录/);
     assert.deepEqual(await readFile(database), before);

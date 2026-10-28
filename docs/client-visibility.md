@@ -26,7 +26,7 @@ magpie-context-folding statusline --scope S --json
 
 把 `S` 替换为 `sessions` 返回的实际 scope。`sessions` 是主动枚举命令，会显示 scope；状态行、hook 消息和 HTML 报告不显示它。`statusline` 不带 scope 时显示**全局累计**，不会选择最近会话并冒充当前会话。
 
-CLI 与 Magpie 必须能读取同一台机器上的同一归档。默认使用 `$XDG_DATA_HOME/magpie-context-folding`，或 `~/.local/share/magpie-context-folding`；自定义位置需要为两边设置相同的 `MAGPIE_CONTEXT_FOLDING_STATE_DIR`。在容器、远程网关或不同系统用户下运行时，需要明确提供同一个可读取的状态目录。独立 Python `ctxf` 的归档不是这份 Magpie 状态库。
+CLI 与 Magpie 必须能读取同一台机器上的同一归档。默认使用 `$XDG_DATA_HOME/magpie-context-folding`，或 `~/.local/share/magpie-context-folding`；自定义位置需要为两边设置相同的 `MAGPIE_CONTEXT_FOLDING_STATE_DIR`，或为 CLI 显式传入 `--state-dir PATH`。在容器、远程网关或不同系统用户下运行时，需要明确提供同一个可读取的状态目录。独立 Python `ctxf` 的归档不是这份 Magpie 状态库。
 
 `sessions`、`statusline` 与报告只读取元数据，不展开正文、不增加恢复次数、不修改折叠状态。没有状态库时，不会为了显示而创建一个空库。
 
@@ -102,7 +102,7 @@ after_estimate  = ceil(after_bytes / 4)
 net_reduction  = before_estimate - after_estimate
 ```
 
-返回投影包括系统指导、恢复路径与引用的开销。净减少可以为负；重放已经折叠的投影可能为零。不会从“归档里保存了多少原文”反推本轮节省。已有引用数量与本轮替换段数分开，归档中保留的旧内容也不会冒充当前输入。
+返回投影包括系统指导、CLI 路径和恢复定位的开销。净减少可以为负；重放已经折叠的投影可能为零。不会从“归档里保存了多少原文”反推本轮节省。已有引用数量与本轮替换段数分开，归档中保留的旧内容也不会冒充当前输入。
 
 | 状态 | 能确认什么 |
 | --- | --- |

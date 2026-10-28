@@ -17,27 +17,25 @@ MAX_CONFIG_BYTES = 1024 * 1024
 SAFE_INTEGER = 9007199254740991
 DEFAULTS = {
     "folding": {"enabled": True, "max_session_bytes": 67108864, "delay_requests": 1,
-                "reserve_output_tokens": 0, "min_savings_tokens": 256, "budget_hints": False},
+                "min_savings_tokens": 256},
     "annotations": {"enabled": True, "default_fold": True, "keep": []},
     "gc": {"enabled": False, "strength": "conservative", "idle_seconds": 2592000,
            "max_uses": 2, "retention_seconds": 2592000, "auto_purge": False},
     "magpie": {},
 }
 _KEYS = {**{section: set(values) for section, values in DEFAULTS.items()},
-         "folding": set(DEFAULTS["folding"]) | {"context_window_tokens"},
          "magpie": {"shell_tool_name", "recovery_command", "gateway_timeout_ms"}}
 _RANGES = {
     "folding.max_session_bytes": (1, 67108864, True),
     "folding.delay_requests": (0, SAFE_INTEGER, True),
     "folding.min_savings_tokens": (0, SAFE_INTEGER, True),
-    "folding.context_window_tokens": (1, SAFE_INTEGER, True),
-    "folding.reserve_output_tokens": (0, SAFE_INTEGER, True),
     "gc.idle_seconds": (0, 315576000, False),
     "gc.max_uses": (0, 1000000000, True),
     "gc.retention_seconds": (0, 315576000, False),
     "magpie.gateway_timeout_ms": (100, 10000, True),
 }
 _REMOVED = {"mode", "threshold_tokens", "keep_recent_messages", "head_chars", "minimum_saving_usd"}
+_REMOVED_BUDGET = {"context_window_tokens", "reserve_output_tokens", "budget_hints"}
 
 class ConfigError(ValueError):
     """A settings source could not be read, parsed, or validated."""
@@ -131,13 +129,16 @@ def _validate(data: Any, source: str | Path) -> None:
             _fail(source, section, "expected a table")
         for key, value in values.items():
             name = f"{section}.{key}"
+            if section == "folding" and key in _REMOVED_BUDGET:
+                _fail(source, name, "removed: delete context-window, output-reserve and budget-hint settings; "
+                      "context budgets are not managed by this project")
             if (section == "folding" and key in _REMOVED) or name == "magpie.accounting":
                 _fail(source, name, "removed: delete strategy/automatic-folding settings; use explicit fold annotations")
             if name == "magpie.recovery_tool_name":
                 _fail(source, name, "removed: MCP recovery was removed; use magpie.shell_tool_name for a callable shell wrapper")
             if key not in _KEYS[section]:
                 _fail(source, name, "unknown key")
-            if key in {"enabled", "default_fold", "auto_purge", "budget_hints"}:
+            if key in {"enabled", "default_fold", "auto_purge"}:
                 valid, expected = type(value) is bool, "expected a boolean"
             elif name == "annotations.keep":
                 valid = isinstance(value, list) and all(isinstance(item, str) and item and "\0" not in item for item in value)

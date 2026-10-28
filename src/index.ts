@@ -2,5 +2,4 @@
 export async function ContextFoldingPlugin() {
   return {};
 }
-
 export default ContextFoldingPlugin;

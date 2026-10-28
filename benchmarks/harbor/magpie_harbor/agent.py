@@ -394,7 +394,7 @@ class ScriptedSmokeAgent(MagpieAgent):
                 if not match:
                     raise RuntimeError("Smoke expected a delayed production-hook reference")
                 guidance = " ".join(m.get("content") or "" for m in payload["messages"] if m["role"] == "system")
-                recall = re.search(r"Need original: (.+?) --id HASH\.", guidance)
+                recall = re.search(r"Need detail: (.+?) --id HASH\.", guidance)
                 if not recall:
                     raise RuntimeError("Smoke expected a CLI recovery command in system guidance")
                 args = {"cmd": f"{recall[1]} --id {match[1]} --limit 24000 --json"}

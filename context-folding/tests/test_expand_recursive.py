@@ -1,4 +1,4 @@
-"""Sibling region expansion replaces the removed nested-fold contract."""
+"""Legacy source selectors remain explicit; ordinary inspection is read-only."""
 from pathlib import Path
 import tempfile
 import unittest
@@ -33,11 +33,18 @@ class ExpansionTests(unittest.TestCase):
                 self.client.read_source("s", text=source_document(), **fields)
             self.assertEqual(before, self.client._db.execute("SELECT data FROM scopes").fetchall())
 
-    def test_nested_markers_preserve_all_text(self):
+    def test_nested_markers_archive_each_layer_without_automatic_expansion(self):
         source = "// @context-fold begin outer\n" + source_document() + "// @context-fold end outer\n"
         view = self.client.read_source("s", text=source, limit=24000)
-        self.assertEqual(view["text"], source)
-        self.assertEqual(view["foldedRegions"], [])
+        self.assertEqual([region["name"] for region in view["foldedRegions"]], ["outer"])
+        rows = self.client.list("s", id=view["id"], recursive=True)["entries"]
+        self.assertEqual([row["label"] for row in rows], ["", "outer", "left", "right"])
+        before = self.client._db.execute("SELECT data FROM scopes").fetchall()
+        outer = self.client.read("s", rows[1]["id"])["text"]
+        self.assertEqual(outer.count("[[cf:v2:"), 2)
+        self.assertNotIn("left = 1;", outer)
+        self.assertEqual(before, self.client._db.execute("SELECT data FROM scopes").fetchall())
+        self.assertEqual(self.client.resolve("s", view["text"])["value"], source)
 
 
 if __name__ == "__main__":

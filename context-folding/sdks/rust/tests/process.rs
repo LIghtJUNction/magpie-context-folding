@@ -117,6 +117,14 @@ fn convenience_methods_preserve_fields_and_reuse_process() {
         json!({"action": "fold", "scope": "s", "text": "",
             "language": "explicit", "commentStyles": [{"start": ";;"}]})
     );
+    assert_eq!(
+        client.grep("s", "needle", json!({"query": "wrong", "id": "entry", "limit": 2})).unwrap()["request"],
+        json!({"action": "grep", "scope": "s", "query": "needle", "id": "entry", "limit": 2})
+    );
+    assert_eq!(
+        client.meta("s", "entry", json!({"id": "wrong", "limit": 2})).unwrap()["request"],
+        json!({"action": "meta", "scope": "s", "id": "entry", "limit": 2})
+    );
     client.close().unwrap();
     client.close().unwrap();
     assert!(matches!(client.list("s", json!(null)), Err(Error::Closed)));
@@ -284,8 +292,10 @@ fn installed_core_delays_annotations_and_recovers_exact_source() {
     let resolved = client.resolve("real", json!({"content": view})).unwrap();
     assert_eq!(resolved["value"]["content"], text);
     let id = first["id"].as_str().unwrap();
-    assert_eq!(client.read("real", id, json!({})).unwrap()["text"], text);
-    assert_eq!(client.call(request(3, "read-1")).unwrap()["text"], text);
+    assert!(client.read("real", id, json!({"limit": 120})).unwrap()["text"].as_str().unwrap().chars().count() <= 120);
+    client.grep("real", "evidence", json!({"id": id, "limit": 2})).unwrap();
+    client.meta("real", id, json!({})).unwrap();
+    assert_eq!(client.call(request(3, "read-1")).unwrap()["text"], folded["text"]);
     assert!(matches!(client.call(json!({
         "action": "mark", "scope": "real", "id": id,
         "disposition": "foldable", "summary": "obsolete"
@@ -328,6 +338,49 @@ fn installed_core_folds_submitted_text_and_returns_recoverable_references() {
     assert_eq!(resolved["value"], text);
     assert_eq!(client.read("fold-test", id, json!({})).unwrap()["text"], body);
     assert!(matches!(client.read("another-scope", id, json!({})), Err(Error::Remote { .. })));
+    client.close().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn installed_core_queries_nested_regions_without_unfolding() {
+    let Some(core_path) = std::env::var_os("CONTEXT_FOLDING_REAL_CORE_PATH") else {
+        eprintln!("SKIP: actual engine test; set CONTEXT_FOLDING_REAL_CORE_PATH");
+        return;
+    };
+    let directory = marker().with_extension("dir");
+    std::fs::create_dir(&directory).unwrap();
+    let mut cfg = Config::new(directory.join("archive.sqlite"));
+    cfg.env.insert(OsString::from("PYTHONPATH"), core_path);
+    let client = Client::with_config(cfg).unwrap();
+    let detail = format!("{} needle=42 中文🙂\n", "x".repeat(350)).repeat(20);
+    let text = format!("<!-- @context-fold begin parent -->\nparent summary\n<!-- @context-fold begin child -->\n{detail}<!-- @context-fold end child -->\n<!-- @context-fold end parent -->");
+    let folded = client.fold("nested", &text, json!({})).unwrap();
+    assert_eq!(folded["references"].as_array().unwrap().len(), 1);
+    let id = folded["references"][0]["id"].as_str().unwrap();
+    let metadata = client.meta("nested", id, json!({})).unwrap();
+    assert_eq!(metadata["sha256"], id);
+    assert_eq!(metadata["childCount"], 1);
+    assert!(metadata.get("text").is_none());
+    let child_id = metadata["children"][0].as_str().unwrap();
+    let listed = client.list("nested", json!({"id": id, "depth": 1, "limit": 10})).unwrap();
+    assert!(listed["entries"].as_array().unwrap().iter().any(|entry| entry["id"] == child_id));
+    let parent = client.read("nested", id, json!({"limit": 1000})).unwrap();
+    assert!(parent["text"].as_str().unwrap().contains("[[cf:v2:"));
+    assert!(!parent["text"].as_str().unwrap().contains("needle=42"));
+    assert_ne!(parent["sha256"], parent["viewSha256"]);
+    let line = client.read("nested", id, json!({"startLine": 1, "endLine": 1, "limit": 60})).unwrap();
+    assert!(line["text"].as_str().unwrap().starts_with("parent summary"));
+    let found = client.grep("nested", "needle=42", json!({"id": id, "limit": 2, "context": 1})).unwrap();
+    assert_eq!(found["matches"].as_array().unwrap().len(), 2);
+    assert_eq!(found["matches"][0]["id"], child_id);
+    assert!(found["matches"].as_array().unwrap().iter().all(|hit| {
+        let snippet = hit["text"].as_str().unwrap();
+        snippet.contains("needle=42") && snippet.chars().count() <= 160
+    }));
+    assert_eq!(client.grep("nested", "needle=42", json!({"id": id, "recursive": false})).unwrap()["matches"], json!([]));
+    assert!(client.read("nested", child_id, json!({})).unwrap()["text"].as_str().unwrap().chars().count() <= 1200);
+    assert_eq!(client.fold("nested", &text, json!({})).unwrap()["text"], folded["text"]);
     client.close().unwrap();
     std::fs::remove_dir_all(directory).unwrap();
 }
