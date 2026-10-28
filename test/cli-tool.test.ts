@@ -33,16 +33,16 @@ async function fixture(run: (store: Store, scope: string, directory: string, tex
   }
 }
 const load = (store: Store, scope: string) => store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
-async function command(directory: string, args: string[], input?: string) {
+async function command(directory: string, args: string[], input?: string, environment: Record<string, string | undefined> = {}) {
   const child = Bun.spawn([process.execPath, cli, ...args], {
-    cwd: directory, env: { ...globalThis.process.env, XDG_CONFIG_HOME: join(directory, 'config') },
+    cwd: directory, env: { ...globalThis.process.env, XDG_CONFIG_HOME: join(directory, 'config'), ...environment },
     stdin: input === undefined ? 'ignore' : new Blob([input]), stdout: 'pipe', stderr: 'pipe',
   });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { stdout, stderr, code };
 }
 
-test('CLI restores paginated exact text with no added newline and supports JSON/range/pipe export/config', async () => {
+test('CLI reads bounded pages without unfolding, supports explicit restore and full export', async () => {
   await fixture(async (store, scope, directory, text) => {
     await writeFile(join(directory, '.context-folding.toml'), '[folding]\nenabled = false\n');
     const config = await command(directory, ['config']);
@@ -51,11 +51,20 @@ test('CLI restores paginated exact text with no added newline and supports JSON/
     assert.ok(!config.stdout.includes('hidden'));
     const read = await command(directory, ['read', '--scope', scope, '--id', 'a']);
     assert.equal(read.code, 0, read.stderr);
-    assert.equal(read.stderr, '');
-    assert.equal(read.stdout, text);
-    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
+    assert.match(read.stderr, /--offset 4000/);
+    assert.equal(read.stdout, text.slice(0, 4000));
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
+    assert.equal((await load(store, scope)).groups?.find(group => group.id === 'outer')?.enabled, true);
+    const all = await command(directory, ['read', '--scope', scope, '--id', 'a', '--all']);
+    assert.equal(all.code, 0, all.stderr);
+    assert.equal(all.stderr, '');
+    assert.equal(all.stdout, text);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
     const json = await command(directory, ['read', '--scope', scope, '--id', 'a', '--json']);
-    assert.equal(JSON.parse(json.stdout).text, text);
+    assert.equal(JSON.parse(json.stdout).text, text.slice(0, 4000));
+    assert.equal(JSON.parse(json.stdout).nextOffset, 4000);
+    assert.equal(json.stderr, '');
+    assert.equal(JSON.parse(json.stdout).kept, false);
     const range = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '11', '--limit', '11', '--json']);
     assert.equal(range.code, 0);
     assert.equal(JSON.parse(range.stdout).text, text.slice(11, 22));
@@ -64,7 +73,12 @@ test('CLI restores paginated exact text with no added newline and supports JSON/
     assert.equal(tail.stdout, text.slice(-11));
     const peek = await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', '-', '--peek']);
     assert.equal(peek.stdout, text);
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
+    const restored = await command(directory, ['read', '--scope', scope, '--id', 'a', '--limit', '11', '--restore']);
+    assert.equal(restored.code, 0, restored.stderr);
+    assert.equal(restored.stdout, text.slice(0, 11));
     assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'keep');
+    assert.equal((await load(store, scope)).groups?.find(group => group.id === 'outer')?.enabled, false);
     const destination = join(directory, 'destination');
     assert.equal((await command(directory, ['paste', '--scope', scope, '--id', 'a', '--path', destination])).code, 0);
     assert.equal(await readFile(destination, 'utf8'), text);
@@ -88,5 +102,62 @@ test('malformed input and filesystem errors never echo supplied secrets', async 
     const failure = await call({ action: 'paste', scope, id: 'a', path: join(directory, secret, 'file') });
     assert.ok(failure.error);
     assert.ok(!JSON.stringify(failure).includes(secret));
+  });
+});
+
+
+test('raw CLI pages preserve Unicode pairs and pagination always advances', async () => {
+  await fixture(async (store, scope, directory) => {
+    const text = 'a'.repeat(3999) + '🙂' + 'tail';
+    await store.transaction(scope, false, 64 * 1024 * 1024, state => {
+      state.entries[0]!.text = text;
+    });
+    const first = await command(directory, ['read', '--scope', scope, '--id', 'a']);
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(first.stdout, 'a'.repeat(3999));
+    assert.match(first.stderr, /--offset 3999/);
+    const second = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '3999', '--limit', '1']);
+    assert.equal(second.code, 0, second.stderr);
+    assert.equal(second.stdout, '🙂');
+    assert.match(second.stderr, /--offset 4001/);
+    const last = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '4001']);
+    assert.equal(last.code, 0, last.stderr);
+    assert.equal(first.stdout + second.stdout + last.stdout, text);
+    const invalid = await command(directory, ['read', '--scope', scope, '--id', 'a', '--offset', '4000']);
+    assert.equal(invalid.code, 1);
+    assert.equal(invalid.stdout, '');
+    assert.match(invalid.stderr, /Unicode/);
+  });
+});
+
+test('explicit state directory recovers the host archive across different shell environments', async () => {
+  await fixture(async (store, scope, directory, text) => {
+    const shellEnvironment = {
+      MAGPIE_CONTEXT_FOLDING_STATE_DIR: join(directory, 'other-state'),
+      XDG_DATA_HOME: join(directory, 'other-xdg'),
+    };
+    const invoke = (args: string[]) => command(directory, args, undefined, shellEnvironment);
+    const missing = await invoke(['read', '--scope', scope, '--id', 'a']);
+    assert.equal(missing.code, 1);
+    assert.equal(missing.stdout, '');
+    const select = ['--state-dir', store.directory, '--scope', scope];
+    const read = await invoke(['read', ...select, '--id', 'a', '--limit', '11']);
+    assert.equal(read.code, 0, read.stderr);
+    assert.equal(read.stdout, text.slice(0, 11));
+    assert.equal((await load(store, scope)).entries[0]?.mark.disposition, 'foldable');
+    const stats = await invoke(['stats', ...select, '--json']);
+    assert.equal(stats.code, 0, stats.stderr);
+    assert.equal(JSON.parse(stats.stdout).scope, 'session');
+    assert.equal(JSON.parse(stats.stdout).metrics.originalReadCalls, 1);
+    const report = join(directory, 'host-archive.html');
+    const exported = await invoke(['report', ...select, '--output', report]);
+    assert.equal(exported.code, 0, exported.stderr);
+    assert.ok((await readFile(report, 'utf8')).startsWith('<!doctype html>'));
+    for (const value of ['', '  ']) {
+      const invalid = await invoke(['read', '--state-dir', value, '--scope', scope, '--id', 'a']);
+      assert.equal(invalid.code, 1);
+      assert.equal(invalid.stdout, '');
+      assert.match(invalid.stderr, /nonempty/);
+    }
   });
 });

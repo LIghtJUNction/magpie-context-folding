@@ -4,7 +4,7 @@ This is an asynchronous .NET **bridge SDK**, not a native C# folding core. Insta
 
 Add a project reference to `ContextFolding/ContextFolding.csproj`. Each `Client` owns one persistent `python3 -m context_folding rpc --state PATH` subprocess, serializes requests over JSON Lines, drains stderr, and returns a detached `JsonElement` from the response `result`. Engine errors throw `ContextFoldingException` carrying `Code`; invalid responses and transport failures close the bridge.
 
-This is the same engine used by `ctxf fold` and `ctxf mcp`. Point `ClientOptions` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
+This is the same engine used by `ctxf fold` and `ctxf rpc`. Point `ClientOptions` at their archive file and use the same scope to share references. The SDK requires an explicit state path and scope; it does not assume the CLI's `default` scope.
 
 ```csharp
 using ContextFolding;

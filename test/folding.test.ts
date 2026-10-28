@@ -4,8 +4,11 @@ import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
 import { withoutBudget } from '../src/budget.js';
+import { withoutGuidance } from '../src/guidance.js';
 import { digest } from '../src/store.js';
 import { bodyFor, fixture, marked, payload, progress } from './helpers.js';
+const withoutMetadata = (body: Record<string, unknown>, protocol: Protocol) => withoutGuidance(withoutBudget(body, protocol), protocol);
+
 
 const folded = (value: unknown) => JSON.stringify(value).includes('[[cf:v2:');
 const tool = async (args: unknown) => JSON.parse(await execute(args));
@@ -16,7 +19,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const input = bodyFor(protocol);
       const first = await onRequest(input, context) as Record<string, unknown>;
       assert.equal(folded(first), false);
-      assert.deepEqual(withoutBudget(first, protocol), input);
+      assert.deepEqual(withoutMetadata(first, protocol), input);
       assert.equal(folded(await onRequest(input, context)), false, 'an identical retry must not consume the grace period');
       const nextInput = progress(input, protocol);
       const next = await onRequest(nextInput, context) as Record<string, unknown>;
@@ -39,9 +42,9 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
 test('large unmarked history stays byte-for-byte intact even with no available budget', async () => {
   await fixture(async ({ context, scope, store }) => {
     const input = bodyFor('chat', payload.repeat(10));
-    const output = await onRequest(input, { ...context, options: { contextWindowTokens: 10, reserveOutputTokens: 10, delayRequests: 0 } }) as Record<string, unknown>;
+    const output = await onRequest(input, { ...context, options: { contextWindowTokens: 10, reserveOutputTokens: 10, delayRequests: 0, budgetHints: true } }) as Record<string, unknown>;
     assert.equal(folded(output), false);
-    assert.deepEqual(withoutBudget(output, 'chat'), input);
+    assert.deepEqual(withoutMetadata(output, 'chat'), input);
     const snapshot = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
     assert.equal(snapshot.entries.length, 0, 'unmarked text does not incur archive work');
     assert.match(JSON.stringify(output), /available_estimate=0/);
@@ -58,7 +61,7 @@ test('an open block can close in a later assistant message without consuming too
     const closed = { ...input, messages: [...input.messages, { role: 'assistant', content: 'continued\n@context-fold end job' }] };
     assert.equal(folded(await onRequest(closed, context)), false);
     const output = await onRequest(progress(closed, 'chat'), context) as Record<string, unknown>;
-    const clean = withoutBudget(output, 'chat').messages as Record<string, unknown>[];
+    const clean = withoutMetadata(output, 'chat').messages as Record<string, unknown>[];
     assert.deepEqual(clean[1]!.tool_calls, call.tool_calls);
     assert.deepEqual(clean[2], result);
     assert.equal(folded(clean[1]!.content), true);
@@ -76,7 +79,7 @@ test('a user message is a boundary and cannot be swallowed by an earlier open bl
       { role: 'assistant', content: 'more\n@context-fold end task' },
     ] };
     const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-    assert.deepEqual(withoutBudget(output, 'chat'), input);
+    assert.deepEqual(withoutMetadata(output, 'chat'), input);
   });
 });
 
@@ -92,14 +95,15 @@ test('disabled, cancelled, oversized or ambiguous requests retain the exact inpu
   });
 });
 
-test('without a callable recovery entry point only budget metadata is emitted', async () => {
+test('without a callable shell the request is unchanged and emits no metadata', async () => {
   await fixture(async ({ context, store }) => {
     const input = { ...bodyFor('chat'), tools: [] };
     const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-    assert.deepEqual(withoutBudget(output, 'chat'), input);
+    assert.deepEqual(withoutMetadata(output, 'chat'), input);
     assert.equal(folded(output), false);
     assert.equal((await store.readStats()).storage.activeSessions, 0);
-    assert.doesNotMatch(JSON.stringify(output), /scope=/);
+    assert.deepEqual(output, input);
+    assert.doesNotMatch(JSON.stringify(output), /<context-budget|<context-folding>/);
   });
 });
 
@@ -109,7 +113,7 @@ test('malformed and tiny annotated blocks remain readable', async () => {
       '@context-fold begin x\n@context-fold begin y\n' + payload + '\n@context-fold end y\n@context-fold end x']) {
       const input = bodyFor('chat', text);
       const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-      assert.deepEqual(withoutBudget(output, 'chat'), input);
+      assert.deepEqual(withoutMetadata(output, 'chat'), input);
     }
   });
 });
@@ -131,7 +135,7 @@ test('non-text user input breaks an open block in all four protocols', async () 
       ];
     }
     const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-    assert.deepEqual(withoutBudget(output, protocol), input);
+    assert.deepEqual(withoutMetadata(output, protocol), input);
   }, protocol);
 });
 
@@ -147,18 +151,18 @@ test('a new open block does not revive previously completed work', async () => {
 
 test('earlier folding in the same message cannot restart a later block grace period', async () => {
   await fixture(async ({ context }) => {
-    const a = marked('A'.repeat(1200));
-    const b = marked('B'.repeat(1200)).replaceAll('research', 'later');
+    const a = marked('A'.repeat(2400));
+    const b = marked('B'.repeat(2400)).replaceAll('research', 'later');
     const first = bodyFor('chat', a);
     await onRequest(first, context);
     const second = bodyFor('chat', a + '\n' + b);
     const projected = await onRequest(second, context) as Record<string, unknown>;
     const text = extractSpans(projected, 'chat').find(span => span.role === 'assistant')!.text;
-    assert.equal(text.includes('A'.repeat(1200)), false);
-    assert.equal(text.includes('B'.repeat(1200)), true);
+    assert.equal(text.includes('A'.repeat(2400)), false);
+    assert.equal(text.includes('B'.repeat(2400)), true);
     const third = await onRequest(progress(projected, 'chat'), context) as Record<string, unknown>;
     const after = extractSpans(third, 'chat').find(span => span.role === 'assistant')!.text;
-    assert.equal(after.includes('B'.repeat(1200)), false);
+    assert.equal(after.includes('B'.repeat(2400)), false);
     assert.equal(after.match(/\[\[cf:v2:/g)?.length, 2);
   });
 });

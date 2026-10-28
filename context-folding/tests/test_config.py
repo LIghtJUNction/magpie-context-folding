@@ -162,7 +162,8 @@ class ConfigTests(unittest.TestCase):
     def test_annotation_only_defaults_and_input_isolation(self):
         settings = self.load()
         self.assertEqual(settings["folding"], {"enabled": True, "delay_requests": 1,
-                         "max_session_bytes": 67108864, "reserve_output_tokens": 0})
+                         "max_session_bytes": 67108864, "reserve_output_tokens": 0,
+                         "min_savings_tokens": 256, "budget_hints": False})
         self.assertEqual(set(settings), {"folding", "annotations", "gc", "magpie"})
         self.assertNotIn("context_window_tokens", settings["folding"])
         settings["annotations"]["keep"].append("changed")
@@ -198,7 +199,10 @@ class ConfigTests(unittest.TestCase):
                    "folding.max_session_bytes": [False, 0, 67108865],
                    "folding.enabled": ["true", 1], "annotations.keep": [[""], ["a\0b"], "a"],
                    "magpie.gateway_timeout_ms": [99, 10001],
-                   "magpie.recovery_tool_name": ["", "bad name", "a" * 201]}
+                   "folding.min_savings_tokens": [True, -1, 0.5, 9007199254740992],
+                   "folding.budget_hints": ["false", 0],
+                   "magpie.shell_tool_name": ["", "bad name", "a" * 201],
+                   "magpie.recovery_command": ["", " ", "a\0b", "a\nb", "a\rb", "a" * 4097, 1]}
         for key, values in invalid.items():
             section, field = key.split(".")
             for value in values:
@@ -209,8 +213,21 @@ class ConfigTests(unittest.TestCase):
                 self.load(config)
         valid = self.load({"folding": {"delay_requests": 0, "context_window_tokens": 1,
                             "reserve_output_tokens": 0, "max_session_bytes": 1},
-                           "magpie": {"recovery_tool_name": "context_folding", "gateway_timeout_ms": 100}})
+                           "magpie": {"shell_tool_name": "exec_command", "recovery_command": "bun /opt/plugin/src/cli.ts", "gateway_timeout_ms": 100}})
         self.assertEqual(valid["folding"]["delay_requests"], 0)
+
+
+    def test_cli_recovery_migration_and_shared_settings(self):
+        with self.assertRaisesRegex(ConfigError, "removed.*shell_tool_name") as raised:
+            self.load({"magpie": {"recovery_tool_name": "private-secret-tool"}})
+        self.assertNotIn("private-secret-tool", str(raised.exception))
+        self.write(self.project_path, '[folding]\nmin_savings_tokens = 512\nbudget_hints = true\n'
+                   '[magpie]\nshell_tool_name = "functions.exec"\nrecovery_command = "magpie-context-folding"\n')
+        settings = self.load()
+        self.assertEqual(settings["folding"]["min_savings_tokens"], 512)
+        self.assertIs(settings["folding"]["budget_hints"], True)
+        self.assertEqual(settings["magpie"]["shell_tool_name"], "functions.exec")
+        self.assertEqual(settings["magpie"]["recovery_command"], "magpie-context-folding")
 
 
 if __name__ == "__main__":

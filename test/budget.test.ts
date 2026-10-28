@@ -29,6 +29,15 @@ test('unknown capacity and user literals are not silently treated as model metad
   assert.match(JSON.stringify(output), /available_estimate=unknown/);
 });
 
+test('opt-in budget respects a developer-only host and its existing instruction prefix', () => {
+  const input = { messages: [{ role: 'developer', content: 'Original instruction.' }, { role: 'user', content: 'Hello.' }] };
+  const output = appendBudget(input, 'chat');
+  assert.deepEqual((output.messages as unknown[])[0], input.messages[0]);
+  assert.equal((output.messages as { role: string }[])[1]!.role, 'developer');
+  assert.deepEqual(appendBudget(output, 'chat'), output);
+  assert.deepEqual(withoutBudget(output, 'chat'), input);
+});
+
 test('budget includes its own UTF-8 size around decimal boundaries', () => {
   for (const length of [0, 32, 350, 3500, 39000]) {
     const output = appendBudget({ messages: [{ role: 'user', content: '😀文'.repeat(length) }] }, 'chat');

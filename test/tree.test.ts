@@ -234,7 +234,7 @@ test('siblings sort deterministically and compact nodes expose version status wi
   assert.equal(b.latestVersion, false);
 });
 
-test('runtime list bounds, read default and public schema stay explicit', async () => {
+test('runtime list bounds and read default stay explicit without model tools', async () => {
   await fixture(async (_store, scope) => {
     for (const extra of [{ depth: -1 }, { depth: 9 }, { limit: 101 }, { offset: -1 }, { query: 'x'.repeat(201) }, { sort: 'invalid' }]) {
       assert.ok((await call({ action: 'list', scope, ...extra })).error);
@@ -243,6 +243,6 @@ test('runtime list bounds, read default and public schema stay explicit', async 
     assert.equal(read.text.length, 4000);
     assert.equal(read.nextOffset, 4000);
     const plugin = await ContextFoldingPlugin();
-    assert.equal(plugin.tool.context_folding.args.oneOf.length, 6);
+    assert.deepEqual(plugin, {});
   });
 });

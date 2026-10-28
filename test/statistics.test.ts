@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { onRequest, onResponse } from '../src/context.hooks.js';
 import { estimateTokens, withoutBudget } from '../src/budget.js';
+import { withoutGuidance } from '../src/guidance.js';
 import { execute } from '../src/tool.js';
 import { Store, digest } from '../src/store.js';
 
@@ -34,7 +35,7 @@ const annotated = (label: string, text: string) => `@context-fold begin ${label}
 test('annotation batches count once; successful, failed and uncertain responses remain distinct', async () => {
   await fixture(async (directory, cwd) => {
     const originals = ['First completed result. '.repeat(2000), 'Second completed result. '.repeat(2000)];
-    const body = { model: 'synthetic', tools: [{ type: 'function', function: { name: 'context_folding' } }],
+    const body = { model: 'synthetic', tools: [{ type: 'function', function: { name: 'exec_command' } }],
       messages: [{ role: 'user', content: 'Historical requirements.' },
         ...originals.map((text, index) => ({ role: 'assistant', content: annotated(`part-${index}`, text) })),
         { role: 'user', content: 'Current request stays visible.' }] };
@@ -49,7 +50,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.equal(metrics.itemsFolded, 2);
     assert.equal(metrics.recursiveItemsFolded, 0);
     const firstFoldedTokens = metrics.foldedTokensEstimated;
-    assert.equal(firstFoldedTokens, String(estimateTokens(body) - estimateTokens(withoutBudget(first, 'chat'))));
+    assert.equal(firstFoldedTokens, String(estimateTokens(body) - estimateTokens(withoutGuidance(withoutBudget(first, 'chat'), 'chat'))));
     assert.ok(BigInt(firstFoldedTokens) > 0n);
     assert.equal(metrics.successfulFoldedRequests, 0, 'a planned fold is not a verified successful request');
     await onResponse({}, { ...firstContext, success: false, request: first });
@@ -156,7 +157,7 @@ test('large estimates and legacy conditional amounts never imply measured saving
 
 test('reusing an already folded projection counts as a folded replay, not guide-only', async () => {
   await fixture(async (directory, cwd) => {
-    const body = { tools: [{ type: 'function', function: { name: 'context_folding' } }],
+    const body = { tools: [{ type: 'function', function: { name: 'exec_command' } }],
       messages: [{ role: 'assistant', content: annotated('done', 'completed work '.repeat(500)) }, { role: 'user', content: 'next' }] };
     const context = { protocol: 'chat', model: 'fixture', session: 'projected-replay', cwd, options: { delayRequests: 0 }, state: {} };
     const first = await onRequest(body, context);
