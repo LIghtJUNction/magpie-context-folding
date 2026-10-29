@@ -1,6 +1,6 @@
 {
   "name": "magpie-context-folding",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Automatic system guidance and CLI-only recovery for reversible Magpie context folding",
   "type": "module",
   "main": "./src/index.ts",
@@ -51,6 +51,7 @@
     "bench:quality": "uv run --project benchmarks/harbor --frozen python scripts/cost-quality-benchmark.py",
     "bench:tree": "bun scripts/tree-benchmark.ts",
     "bench:fold-strategies": "bun run scripts/fold-strategy-benchmark.ts",
+    "bench:hook-projection": "bun scripts/hook-projection-benchmark.ts",
     "test:controller": "python3 -I scripts/test_self_iterate.py",
     "stats": "bun src/cli.ts stats",
     "check": "npm run typecheck && npm test && npm run build",

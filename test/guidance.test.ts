@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appendGuidance, guidanceText, shellQuote, withoutGuidance } from '../src/guidance.js';
+import { parseRegions } from '../src/annotations.js';
+import { appendGuidance, appendGuidanceToCleanBody, containsGuidance, guidanceText, shellQuote, withoutGuidance } from '../src/guidance.js';
 import { onRequest, onResponse } from '../src/context.hooks.js';
 import { estimateTokens } from '../src/metrics.js';
 import { appendRecoveryMetadata } from '../src/recovery.js';
+import { cleanRequestBody } from '../src/request-clean.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
 import { bodyFor, fixture, marked } from './helpers.js';
 
@@ -12,25 +14,50 @@ const countGuides = (value: unknown) => JSON.stringify(value).match(/<context-fo
 const folded = (body: Record<string, unknown>, protocol: Protocol) => extractSpans(body, protocol)
   .some(span => span.text.includes('[[cf:v2:'));
 
-test('guidance keeps an independent summary above details and folds completed stages early', () => {
+test('guidance preserves useful context and avoids folding details still in use', () => {
   const text = guidanceText(options);
-  assert.match(text, /Actively fold completed stages/);
-  assert.match(text, /Write a concise current summary outside each block/);
-  assert.match(text, /close lengthy supporting details below/);
-  assert.match(text, /Keep conclusions, constraints, failures and next steps visible/);
-  assert.match(text, /Task-wide blocks are optional/);
-  assert.match(text, /little extra savings over milestone blocks/);
-  assert.match(text, /open pairs cannot fold/);
-  assert.match(text, /After compaction, restate known status outside/);
+  assert.match(text, /After each completed stage, wrap long details in your reply between these whole-line markers/);
+  assert.match(text, /Keep conclusions, constraints, failures, and next steps visible/);
+  assert.match(text, /Respect exact answer formats; add nothing beyond requested output/);
+  assert.deepEqual(parseRegions([{ id: 'guidance', text }]).map(region => region.text), ['...'], 'the sample marker block must satisfy the real parser');
+  assert.match(text, /Leave active work visible/);
+  assert.match(text, /do not poll or demo/i);
+  assert.match(text, /Report known facts only/);
+  assert.match(guidanceText({ ...options, minSavingsTokens: 512 }), />=512 tokens/);
+  assert.ok(Buffer.byteLength(text) <= 450, 'common guidance stays within a 113-token byte/4 proxy budget');
+});
+
+test('scoped recovery guidance searches archived text before reading pages', () => {
+  const scope = 'a'.repeat(64);
+  const text = guidanceText({ ...options, scope, stateDirectory: '/tmp/archive state' });
+  assert.ok(text.includes(`grep --state-dir '/tmp/archive state' --scope ${scope} --id HASH --query 'TEXT'`));
+  assert.ok(text.includes(`read --state-dir '/tmp/archive state' --scope ${scope} --id HASH only if needed`));
 });
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
-  test(`${protocol}: legacy scope-only metadata upgrades to one CLI guide without budgets`, async () => {
+  test(`${protocol}: request cleanup shares conversation data and keeps the host request unchanged`, () => {
+    const original = bodyFor(protocol);
+    const dirty = appendRecoveryMetadata(appendGuidance(original, protocol, options), protocol, 'a'.repeat(64));
+    const before = structuredClone(dirty);
+    const clean = cleanRequestBody(dirty, protocol);
+    assert.deepEqual(clean, original);
+    assert.deepEqual(dirty, before);
+    if (protocol === 'chat') {
+      const firstUser = (messages: unknown[]) => messages.find(item => typeof item === 'object' && item !== null
+        && (item as Record<string, unknown>).role === 'user');
+      assert.strictEqual(firstUser(clean.messages as unknown[]), firstUser(dirty.messages as unknown[]), 'unchanged history messages are shared');
+    } else {
+      const historyKey = protocol === 'responses' ? 'input' : protocol === 'gemini' ? 'contents' : 'messages';
+      assert.strictEqual(clean[historyKey], dirty[historyKey], 'large conversation fields are structurally shared');
+    }
+  });
+
+  test(`${protocol}: stale scope-only metadata is removed without adding guidance to short history`, async () => {
     await fixture(async ({ context }) => {
       const original = bodyFor(protocol, 'A short completed answer.');
       const legacy = appendRecoveryMetadata(original, protocol, 'a'.repeat(64));
       const output = await onRequest(legacy, context) as Record<string, unknown>;
-      assert.equal(countGuides(output), 1);
+      assert.equal(countGuides(output), 0);
       assert.doesNotMatch(JSON.stringify(output), /<context-budget|<context-folding scope=/);
       assert.deepEqual(withoutGuidance(output, protocol), original);
       assert.deepEqual(await onRequest(output, context), output);
@@ -40,8 +67,12 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
   test(`${protocol}: automatic system guidance is stable and preserves host instructions/tools`, () => {
     const input = bodyFor(protocol);
     const original = structuredClone(input);
+    const userLiteral = bodyFor(protocol, guidanceText(options));
     const once = appendGuidance(input, protocol, options);
     assert.equal(countGuides(once), 1);
+    assert.equal(containsGuidance(input, protocol), false);
+    assert.equal(containsGuidance(once, protocol), true);
+    assert.equal(containsGuidance(userLiteral, protocol), false, 'user text is never mistaken for prior system guidance');
     assert.deepEqual(appendGuidance(once, protocol, options), once);
     assert.deepEqual(withoutGuidance(once, protocol), input);
     assert.deepEqual(input, original);
@@ -49,11 +80,47 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
     if (protocol === 'chat') assert.deepEqual((once.messages as unknown[])[0], (input.messages as unknown[])[0]);
   });
 
+  test(`${protocol}: skips fixed guidance on short context and keeps it once useful or already present`, async () => {
+    await fixture(async ({ context, store, scope }) => {
+      const short = bodyFor(protocol, 'A short answer.');
+      const skipped = await onRequest(short, context) as Record<string, unknown>;
+      assert.deepEqual(skipped, short);
+      assert.equal(countGuides(skipped), 0);
+      await onResponse({}, { ...context, request: skipped, success: true });
+      const shortStats = await store.readStats(scope);
+      assert.equal(shortStats.metrics.successfulHookRequests, 1);
+      assert.equal(shortStats.metrics.guideOnlyRequests, 0);
+      assert.equal(shortStats.metrics.estimatedTokenDelta, '0');
+
+      const large = bodyFor(protocol, 'Completed investigation details.\n'.repeat(250));
+      const guided = await onRequest(large, context) as Record<string, unknown>;
+      assert.equal(countGuides(guided), 1);
+      assert.deepEqual(withoutGuidance(guided, protocol), large);
+
+      const previouslyGuided = appendGuidance(short, protocol, options);
+      const retained = await onRequest(previouslyGuided, context) as Record<string, unknown>;
+      assert.equal(countGuides(retained), 1);
+      assert.deepEqual(withoutGuidance(retained, protocol), short);
+    }, protocol);
+  });
+
+  test(`${protocol}: clean-body insertion matches normal guidance without mutating its input`, () => {
+    const original = bodyFor(protocol);
+    const withGuide = appendGuidance(original, protocol, options);
+    const clean = withoutGuidance(withGuide, protocol);
+    const cleanBefore = structuredClone(clean);
+    const fast = appendGuidanceToCleanBody(clean, protocol, options);
+    assert.deepEqual(fast, withGuide);
+    assert.deepEqual(clean, cleanBefore);
+    assert.deepEqual(appendGuidance(fast, protocol, options), fast);
+  });
+
   test(`${protocol}: short demo notes stay readable, long blocks repay all injected metadata`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const short = bodyFor(protocol, marked('临时体验笔记：保存过程，需要时再读回原文。'));
       const shortOutput = await onRequest(short, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
       assert.equal(folded(shortOutput, protocol), false);
+      assert.equal(countGuides(shortOutput), 0, 'a short rejected annotation does not pay fixed guidance cost');
       assert.deepEqual(withoutGuidance(shortOutput, protocol), short);
       assert.doesNotMatch(JSON.stringify(shortOutput), /<context-budget|--scope/);
       const snapshot = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
@@ -139,9 +206,9 @@ test('a zero savings floor still rejects a batch that cannot cover its actual CL
   });
 });
 
-test('removed budget metadata stays absent and guide-only overhead remains visible in successful statistics', async () => {
+test('removed budget metadata stays absent and long guide-only overhead remains visible in statistics', async () => {
   await fixture(async ({ context, store, scope }) => {
-    const input = bodyFor('chat', 'Just a normal short answer.');
+    const input = bodyFor('chat', 'Completed long stage details.\n'.repeat(200));
     const output = await onRequest(input, context) as Record<string, unknown>;
     assert.doesNotMatch(JSON.stringify(output), /<context-budget/);
     await onResponse({}, { ...context, request: output, success: true });

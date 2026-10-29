@@ -32,6 +32,8 @@ npm run bench:iterate -- \
 
 模型可以在单次 trial 中反复执行“检查 → 修改 → 测试 → 再修改”。默认最多 24 次请求，每次输出上限 4096 token；这些是运行边界，不是成功条件。`--max-turns` 可调整。`--modes folding` 可单独检验一个候选，`--iterations` 只重复独立尝试，不自动累计修改。需要 Harbor 组件时加 `--harbor`，让沙箱只读访问本地已有的 Harbor Python 依赖。
 
+模型端点返回 HTTP 401、403 或 404 时，控制器停止该批剩余试验，并在汇总中记录计划数、完成数和停止原因；若该 trial 没有候选文件改动，也跳过重复的干净验收和 acceptance 检查，保留初始验证记录。
+
 每次试验先在模型工作副本运行初始验证；模型结束后，从冻结源码新建干净验收副本，只导入允许的候选文件修改，再运行后验与可选 `--acceptance` 命令。模型缓存和范围外文件不会进入验收副本。完整初验消息是默认行为。可选 `--verification-output summary` 在通过时只披露摘要，完整内容保存在沙箱 `.benchmark-verification.json`，模型可按需读取；失败日志完整提供。两种模式均保存同一日志文件。摘要模式仍需按任务验证质量后采用。
 
 `--exclude-path` 可从模型与验收源码副本中排除评分答案等精确文件路径，这些路径不能作为候选导出。`--candidate-feedback` 与 `--acceptance` 配合时，模型至多两次调用 `check_candidate`，在干净副本查看当前交付的验收反馈；检查器作者应确保 stdout 不含标准答案，stderr 不返回模型。成本、速度与六题仓库合同质量对照见[本轮说明](cost-speed-quality.md)。
@@ -39,7 +41,7 @@ npm run bench:iterate -- \
 每次试验保存：
 
 - `transcript.jsonl`：真实模型回复、工具结果和 API usage。
-- `result.json`：请求模型和服务端返回模型、每次输入字节与投影字节、折叠及查询次数、退出原因、独立验证和变更文件。
+- `result.json`：请求模型和服务端返回模型、每次输入字节与投影字节、折叠及查询次数、每次请求可见的助手标注与经验证源码读取标注数及其最大值、完整 transcript 中助手最终写出的标注块总数；实际新增折叠按助手回复和经验证源码读取结果拆分。共同控制器提示不要求模型写折叠标记；只有 folding 模式会收到插件自身的标记指导。
 - `candidate/`：仅导出 `--allowed-path` 允许的候选文件。默认不导出；范围外变更会使试验不能标记为 verified。
 - `folding-state/`：该 trial 的私有归档和 bridge 日志。
 

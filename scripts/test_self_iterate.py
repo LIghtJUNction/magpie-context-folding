@@ -16,6 +16,51 @@ spec.loader.exec_module(controller)
 
 
 class ControllerTests(unittest.TestCase):
+    def test_shared_controller_prompt_does_not_prime_folding_markers(self):
+        prompt = controller.agent_system_prompt()
+        self.assertNotIn("@context-fold", prompt)
+        self.assertNotIn("context_folding", prompt)
+
+    def test_fatal_model_http_errors_can_stop_duplicate_trials(self):
+        for status in (401, 403, 404):
+            with self.subTest(status=status):
+                self.assertEqual(controller.fatal_model_status({"error": f"Model HTTP {status}; not retried"}), status)
+        for status in (408, 429, 500, 503):
+            with self.subTest(status=status):
+                self.assertIsNone(controller.fatal_model_status({"error": f"Model HTTP {status}; not retried"}))
+        self.assertIsNone(controller.fatal_model_status({"error": "Model endpoint request failed"}))
+        self.assertIsNone(controller.fatal_model_status({}))
+
+    def test_trial_batch_stops_after_fatal_status_and_preserves_planned_count(self):
+        args = SimpleNamespace(iterations=2, compare_verification_output=True,
+                               verification_output="full", modes=["baseline"])
+        fatal = AsyncMock(return_value={"error": "Model HTTP 404; not retried", "verified": False})
+        with patch.object(controller, "trial", fatal):
+            results, planned, reason = asyncio.run(controller.run_trials(args, None, None))
+        self.assertEqual((len(results), planned), (1, 4))
+        self.assertEqual(fatal.await_count, 1)
+        self.assertIn("HTTP 404", reason)
+
+        transient = AsyncMock(return_value={"error": "Model HTTP 503; not retried", "verified": False})
+        with patch.object(controller, "trial", transient):
+            results, planned, reason = asyncio.run(controller.run_trials(args, None, None))
+        self.assertEqual((len(results), planned, reason), (4, 4, None))
+        self.assertEqual(transient.await_count, 4)
+
+    def test_fatal_endpoint_error_skips_redundant_postchecks_only_without_changes(self):
+        args = SimpleNamespace(acceptance="check-answer")
+        report = {"error": "Model HTTP 404; not retried", "completion": "error"}
+        verify = AsyncMock()
+        with patch.object(controller, "clean_verification", verify):
+            asyncio.run(controller.verify_trial_output(args, None, {}, [], set(), {}, report))
+            self.assertTrue(report["verification_after"]["skipped"])
+            self.assertTrue(report["acceptance"]["skipped"])
+            verify.assert_not_awaited()
+
+            changed_report = {"error": "Model HTTP 404; not retried", "completion": "error"}
+            asyncio.run(controller.verify_trial_output(args, None, {}, ["answer.json"], {"answer.json"}, {}, changed_report))
+            verify.assert_awaited_once()
+
     def test_exports_prune_dependencies_and_reject_links_and_fifos(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -25,6 +25,14 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def fatal_model_status(report):
+    error = report.get("error")
+    if not isinstance(error, str):
+        return None
+    match = re.search(r"\bHTTP\s+(401|403|404)\b", error)
+    return int(match.group(1)) if match else None
+
+
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -219,13 +227,39 @@ async def clean_verification(args, sandbox_module, current, changed, allowed, or
             report["acceptance"] = await command(clean, ["/bin/sh", "-c", args.acceptance], args.command_timeout)
 
 
+async def verify_trial_output(args, sandbox_module, current, changed, allowed, original_modes, report):
+    status = fatal_model_status(report)
+    if status is not None and report.get("completion") != "final" and not changed:
+        reason = f"skipped after model endpoint HTTP {status}; no candidate files changed"
+        result = {"exit_code": None, "timed_out": False, "skipped": True, "reason": reason}
+        report["verification_after"] = result
+        if getattr(args, "acceptance", None):
+            report["acceptance"] = dict(result)
+        return
+    await clean_verification(args, sandbox_module, current, changed, allowed, original_modes, report)
+
+
+def agent_system_prompt():
+    return (
+        "You are testing and improving this repository itself. All execution is in an offline sandbox. "
+        "Inspect, reproduce a real defect, make a small fix, add a meaningful regression, and retest. "
+        "Preserve existing work and public behavior. Do not delete or skip failing tests to pass. "
+        "Do not edit test infrastructure, credentials, .git, package manifests, or this controller. "
+        "Use complete source reads when practical. "
+        "Finish with the defect, changed files, and actual test results.")
+
+
 async def trial(args, sandbox_module, bridge_module, mode, index):
     suffix = f"-{args.verification_output}" if getattr(args, "compare_verification_output", False) else ""
     directory = args.output / f"{index:02d}-{mode}{suffix}"
     directory.mkdir(parents=True, exist_ok=False)
     report = {"model_requested": args.model, "mode": mode, "iteration": index,
               "sandbox": "linux-bubblewrap-offline", "completion": "running", "requests": [],
-              "folded_requests": 0, "recovery_calls": 0, "changed_files": [], "verified": False}
+              "folded_requests": 0, "assistant_regions_seen_max": 0,
+              "verified_tool_regions_seen_max": 0,
+              "folded_regions_by_role": {"assistant": 0, "tool": 0},
+              "assistant_authored_regions": None,
+              "recovery_calls": 0, "changed_files": [], "verified": False}
     started = time.monotonic()
     try:
         return await run_trial(args, sandbox_module, bridge_module, mode, index, directory, report)
@@ -251,15 +285,7 @@ async def run_trial(args, sandbox_module, bridge_module, mode, index, directory,
         original_modes = file_modes(sandbox.path, original)
         bridge = bridge_module.Bridge(directory)
         trial_tools = [*TOOLS, *([CANDIDATE_CHECK_TOOL] if getattr(args, "candidate_feedback", False) else [])]
-        messages = [{"role": "system", "content": (
-            "You are testing and improving this repository itself. All execution is in an offline sandbox. "
-            "Inspect, reproduce a real defect, make a small fix, add a meaningful regression, and retest. "
-            "Preserve existing work and public behavior. Do not delete or skip failing tests to pass. "
-            "Do not edit test infrastructure, credentials, .git, package manifests, or this controller. "
-            "Use complete source reads when practical. Mark long completed working notes using whole-line "
-            "<!-- @context-fold begin LABEL --> and <!-- @context-fold end LABEL -->, leaving conclusions outside. "
-            "The host may fold those notes after a request; context_folding retrieves an actual reference if needed. "
-            "Finish with the defect, changed files, and actual test results.")},
+        messages = [{"role": "system", "content": agent_system_prompt()},
             {"role": "user", "content": args.task}]
         try:
             await bridge.start()
@@ -278,8 +304,16 @@ async def run_trial(args, sandbox_module, bridge_module, mode, index, directory,
                     payload = {"model": args.model, "messages": messages, "tools": trial_tools,
                                "max_completion_tokens": args.max_output_tokens}
                     projected = await bridge.call("project", body=payload, mode=mode)
-                    entry = {k: projected[k] for k in ("input_bytes", "output_bytes", "projection_ms", "folded")}
+                    entry = {k: projected[k] for k in (
+                        "input_bytes", "output_bytes", "projection_ms", "folded",
+                        "assistant_regions_seen", "verified_tool_regions_seen", "folded_by_role")}
                     report["folded_requests"] += int(projected["folded"])
+                    report["assistant_regions_seen_max"] = max(
+                        report["assistant_regions_seen_max"], projected["assistant_regions_seen"])
+                    report["verified_tool_regions_seen_max"] = max(
+                        report["verified_tool_regions_seen_max"], projected["verified_tool_regions_seen"])
+                    for role in ("assistant", "tool"):
+                        report["folded_regions_by_role"][role] += projected["folded_by_role"][role]
                     report["requests"].append(entry)
                     success = False
                     try:
@@ -338,6 +372,11 @@ async def run_trial(args, sandbox_module, bridge_module, mode, index, directory,
             report["completion"] = "error"
             report["error"] = str(error)
         finally:
+            try:
+                inspected = await bridge.call("inspect", messages=messages)
+                report["assistant_authored_regions"] = inspected["assistant_authored_regions"]
+            except Exception as error:
+                report["assistant_marker_measurement_error"] = type(error).__name__
             await bridge.close()
             current = files(sandbox.path)
             current_modes = file_modes(sandbox.path, current)
@@ -345,7 +384,7 @@ async def run_trial(args, sandbox_module, bridge_module, mode, index, directory,
             changed = sorted(name for name in original.keys() | current.keys() if original.get(name) != current.get(name) or name in report["mode_changes"]) 
             report["changed_files"] = changed
             allowed = set(getattr(args, "allowed_path", [])) - set(getattr(args, "exclude_path", []))
-            await clean_verification(args, sandbox_module, current, changed, allowed, original_modes, report)
+            await verify_trial_output(args, sandbox_module, current, changed, allowed, original_modes, report)
             report["unauthorized_changed_files"] = [name for name in changed if name not in allowed]
             report["export_allowed_paths"] = sorted(allowed)
             candidates = directory / "candidate"
@@ -425,6 +464,30 @@ async def tool(sandbox, bridge, report, name, fields, timeout, bridge_error=()):
     raise ValueError("Unknown tool")
 
 
+async def run_trials(args, sandbox_module, frozen_bridge):
+    output_modes = ["full", "summary"] if args.compare_verification_output else [args.verification_output]
+    planned_trials = args.iterations * len(output_modes) * len(args.modes)
+    results = []
+    stop_reason = None
+    for index in range(1, args.iterations + 1):
+        # Alternate order across attempts to expose rather than hide cache warming.
+        variants = output_modes if index % 2 else list(reversed(output_modes))
+        for variant in variants:
+            args.verification_output = variant
+            for mode in args.modes:
+                result = await trial(args, sandbox_module, frozen_bridge, mode, index)
+                results.append(result)
+                status = fatal_model_status(result)
+                if status is not None:
+                    stop_reason = f"model endpoint returned HTTP {status}; remaining trials skipped"
+                    break
+            if stop_reason:
+                break
+        if stop_reason:
+            break
+    return results, planned_trials, stop_reason
+
+
 async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="codex/gpt-6-luna")
@@ -467,7 +530,6 @@ async def main():
     from magpie_harbor import agent as bridge_module
     args.url = bridge_module.endpoint(base.rstrip("/") + ("" if base.rstrip("/").endswith("/v1") else "/v1"))
     sandbox_module = load("self_benchmark", ROOT / "scripts/self-benchmark.py")
-    results = []
     # Freeze one worktree once. Concurrent development must not change the
     # starting version between baseline/folding or independent attempts.
     with sandbox_module.Sandbox(ROOT) as frozen:
@@ -479,15 +541,10 @@ async def main():
         # This dependency link is hidden behind the read-only sandbox mount.
         (frozen.path / "node_modules").symlink_to(ROOT / "node_modules", target_is_directory=True)
         frozen_bridge = load("magpie_harbor.frozen_agent", frozen.path / "benchmarks/harbor/magpie_harbor/agent.py")
-        output_modes = ["full", "summary"] if args.compare_verification_output else [args.verification_output]
-        for index in range(1, args.iterations + 1):
-            # Alternate order across attempts to expose rather than hide cache warming.
-            variants = output_modes if index % 2 else list(reversed(output_modes))
-            for variant in variants:
-                args.verification_output = variant
-                for mode in args.modes:
-                    results.append(await trial(args, sandbox_module, frozen_bridge, mode, index))
+        results, planned_trials, stop_reason = await run_trials(args, sandbox_module, frozen_bridge)
     summary = {"schema_version": 1, "model": args.model, "trials": results,
+               "planned_trials": planned_trials, "completed_trials": len(results),
+               "stopped_early": stop_reason is not None, "stop_reason": stop_reason,
                "verified": all(item["verified"] for item in results),
                "note": "Independent candidate runs, not cumulative promotion; no automatic patch application or savings guarantee."}
     (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")

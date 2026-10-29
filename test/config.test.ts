@@ -28,11 +28,11 @@ async function fixture(run: (f: { root: string; project: string; global: string;
 test('CLI-only defaults use a savings margin without context budgeting', async () => {
   await fixture(async f => {
     const options = await loadOptions(undefined, f.project);
-    assert.deepEqual(options, { enabled: true, maxSessionBytes: 67_108_864, delayRequests: 1,
+    assert.deepEqual(options, { enabled: true, observeOnly: false, maxSessionBytes: 67_108_864, delayRequests: 0,
       minSavingsTokens: 256,
       gatewayTimeoutMs: undefined, shellToolName: undefined, recoveryCommand: undefined });
     assert.deepEqual(parseOptions({ delayRequests: 0 }), {
-      enabled: true, maxSessionBytes: 67_108_864, delayRequests: 0,
+      enabled: true, observeOnly: false, maxSessionBytes: 67_108_864, delayRequests: 0,
       minSavingsTokens: 256,
     });
     const { config, sources } = await loadConfig(f.project);

@@ -4,7 +4,7 @@ import { chmod, mkdir, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
-import { addMetrics, emptyMetrics, metricsSchema } from './metrics.js';
+import { addMetrics, compactMetrics, emptyMetrics, metricsSchema, storedMetricsSchema } from './metrics.js';
 import type { Metrics } from './metrics.js';
 
 const markSchema = z.discriminatedUnion('disposition', [
@@ -55,7 +55,8 @@ const storedLayerSchema = layerSchema.omit({ text: true }).extend({ textHash: ha
 const storedEntrySchema = entrySchema.omit({ text: true, folded: true, layers: true }).extend({
   textHash: hashSchema, foldedHash: hashSchema.optional(), layers: z.array(storedLayerSchema),
 });
-const storedSnapshotSchema = snapshotSchema.omit({ entries: true }).extend({
+const storedSnapshotSchema = snapshotSchema.omit({ entries: true, metrics: true }).extend({
+  metrics: storedMetricsSchema,
   entries: z.array(storedEntrySchema),
   payloadBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   sessionLimitBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
@@ -95,6 +96,10 @@ export interface ObservationCompletion {
 type StoredSnapshot = z.infer<typeof storedSnapshotSchema>;
 type SessionQuotaPolicy = 'configure' | 'preserve' | 'enforce';
 const defaultSessionLimitBytes = 64 * 1024 * 1024;
+
+function serializeSnapshot<T extends { metrics: Metrics }>(snapshot: T): string {
+  return JSON.stringify({ ...snapshot, metrics: compactMetrics(snapshot.metrics) });
+}
 
 export const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
@@ -382,7 +387,8 @@ export class Store {
         const row: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
         if (row === null) throw new Error('Unknown context scope');
         const session = sessionRowSchema.parse(row);
-        const stored = storedSnapshotSchema.parse(JSON.parse(session.snapshot));
+        const rawSnapshot = JSON.parse(session.snapshot) as Record<string, unknown>;
+        const stored = storedSnapshotSchema.parse(rawSnapshot);
         const metrics = addMetrics(stored.metrics, increment);
         let decision = stored.decision;
         const observed = z.object({ requestId: z.string().uuid() }).safeParse(decision.observation);
@@ -397,13 +403,19 @@ export class Store {
           return;
         }
         const { payloadBytes, sessionLimitBytes, ...base } = stored;
-        const previousBytes = payloadBytes ?? legacyPayloadBytes(database, JSON.stringify(base));
-        const nextBytes = previousBytes + Buffer.byteLength(JSON.stringify(metrics)) - Buffer.byteLength(JSON.stringify(stored.metrics))
-          + Buffer.byteLength(JSON.stringify(decision)) - Buffer.byteLength(JSON.stringify(stored.decision));
+        const rawBase = { ...rawSnapshot };
+        delete rawBase.payloadBytes;
+        delete rawBase.sessionLimitBytes;
+        const rawBaseText = JSON.stringify(rawBase);
+        const baseText = serializeSnapshot(base);
+        const recordedBytes = payloadBytes ?? legacyPayloadBytes(database, rawBaseText);
+        const previousBytes = recordedBytes + Buffer.byteLength(baseText) - Buffer.byteLength(rawBaseText);
+        const nextSnapshot = { ...base, decision, metrics };
+        const nextBytes = previousBytes + Buffer.byteLength(serializeSnapshot(nextSnapshot)) - Buffer.byteLength(baseText);
         const limit = sessionLimitBytes ?? defaultSessionLimitBytes;
         if (nextBytes > limit) throw new Error('Session archive full; statistics not committed');
         database.query('UPDATE sessions SET revision = ?, snapshot = ? WHERE scope = ?')
-          .run(session.revision + 1, JSON.stringify({ ...base, decision, metrics, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
+          .run(session.revision + 1, serializeSnapshot({ ...nextSnapshot, payloadBytes: nextBytes, sessionLimitBytes: limit }), scope);
         const lifetime = addMetrics(readLifetimeMetrics(database), increment);
         database.query("INSERT INTO meta (key, value) VALUES ('lifetime-metrics', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
           .run(JSON.stringify(lifetime));
@@ -453,14 +465,14 @@ export class Store {
     });
 
     // Keep SQLite closed while an asynchronous caller prepares its projection.
-    const before = JSON.stringify(original.snapshot);
+    const before = serializeSnapshot(original.snapshot);
     const previousMetrics = structuredClone(original.snapshot.metrics);
     signal?.throwIfAborted();
     const result = await run(original.snapshot);
     signal?.throwIfAborted();
     const snapshot = snapshotSchema.parse(original.snapshot);
     validateLayers(snapshot);
-    const after = JSON.stringify(snapshot);
+    const after = serializeSnapshot(snapshot);
     const payloadBytes = Buffer.byteLength(after);
     // maxBytes is this operation's ceiling. Only the configured request may change
     // the persisted quota; recovery tools preserve it.
@@ -480,7 +492,7 @@ export class Store {
       return result;
     }
     const { stored, blobs } = encode(snapshot);
-    const serialized = JSON.stringify({ ...stored, payloadBytes, sessionLimitBytes });
+    const serialized = serializeSnapshot({ ...stored, payloadBytes, sessionLimitBytes });
     const metricsDelta = metricsDifference(previousMetrics, snapshot.metrics);
     const metricsChanged = JSON.stringify(previousMetrics) !== JSON.stringify(snapshot.metrics);
 

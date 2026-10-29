@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "benchmark": "automatic-repeated-source-read-live-provider-pair",
+  "completed_at": "2026-10-29",
+  "model_requested": "claude-sonnet-5",
+  "model_reported": "claude-sonnet-5",
+  "route": "OpenAI-compatible Chat Completions",
+  "usage_source": "provider response usage.prompt_tokens and usage.completion_tokens",
+  "implementation": {
+    "hook": "src/context.hooks.ts:onRequest",
+    "hook_sha256": "790cfc69babbf7433bebadf5e6220ba1174d72d8964e4b4e499ba3867c6c60b1",
+    "git_revision": "f9d27c5",
+    "worktree_changes_present": true,
+    "published_package_loaded": false
+  },
+  "pair_design": {
+    "protocol": "chat",
+    "same_input_body": true,
+    "same_isolated_archive_and_session": true,
+    "arm_order": ["baseline", "folding"],
+    "requests_per_arm": 1,
+    "source_path": "worker.ts",
+    "source_complete_reads": 2,
+    "source_utf8_bytes_per_read": 16700,
+    "source_sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a",
+    "task": "What integer does operation237 return? Reply only with that integer.",
+    "expected_answer": "237",
+    "hook_options": {
+      "baseline_delay_requests": 999,
+      "folding_delay_requests": 0,
+      "min_savings_tokens": 256
+    }
+  },
+  "baseline": {
+    "projected_request_json_bytes": 35712,
+    "input_tokens": 10957,
+    "output_tokens": 2,
+    "finish_reason": "stop",
+    "answer": "237",
+    "answer_correct": true
+  },
+  "folding": {
+    "projected_request_json_bytes": 18985,
+    "input_tokens": 6047,
+    "output_tokens": 2,
+    "finish_reason": "stop",
+    "answer": "237",
+    "answer_correct": true,
+    "second_read_replaced_by_verified_reference": true
+  },
+  "delta": {
+    "projected_request_json_bytes_saved": 16727,
+    "provider_input_tokens_saved": 4910,
+    "provider_output_tokens_saved": 0
+  },
+  "limitations": [
+    "One synthetic paired task with one provider request per arm; the baseline arm ran first.",
+    "The measured JSON byte count excludes HTTP framing and headers.",
+    "Provider token usage is not a billing amount and does not account for provider-specific pricing or caching.",
+    "The hook was imported directly from the worktree; this is not installed-plugin adoption or aggregate task evidence."
+  ]
+}
