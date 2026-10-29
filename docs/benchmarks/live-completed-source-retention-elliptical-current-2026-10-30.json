@@ -1,0 +1,500 @@
+{
+  "schema_version": 1,
+  "benchmark": "live-completed-source-read-retention-elliptical",
+  "generated_at": "2026-10-29T17:38:36.454Z",
+  "claim_under_test": "Measure provider input usage and answer preservation for an elliptical follow-up after a completed full source read; include any archive recovery calls.",
+  "model_requested": "claude-sonnet-5",
+  "route": "OpenAI-compatible /v1/chat/completions",
+  "usage_source": "provider response usage.prompt_tokens and usage.completion_tokens; cache fields recorded only when explicitly returned",
+  "implementation": {
+    "hook": "src/context.hooks.ts:onRequest",
+    "hook_sha256": "074c3b24b790ae0bd4316dae8cc06ecd45e54e3ea3450c68052a269211563623",
+    "published_package_loaded": false
+  },
+  "design": {
+    "planned_pairs": 2,
+    "order": "alternating baseline/folding, then folding/baseline",
+    "max_requests_per_user_turn": 5,
+    "max_output_tokens": 512,
+    "task_sha256": "8e13eeead6f858dab7d30d102e39bca07b789e4501407a4b0dd17d6d16527124",
+    "source_sha256": "559ae860f030885a4951cb70e5f727ef36775320aa5ea6b5ff57b21e30ff1c1f",
+    "source_utf8_bytes": 17890,
+    "scenario": "elliptical",
+    "source_question_index": 237,
+    "related_followup_index": null,
+    "questions": [
+      "Use read_file to inspect worker.ts. What integer does operation237() return? Reply with only the integer.",
+      "What about 238? Reply with only the integer."
+    ],
+    "expected_answers": [
+      "603357",
+      "562591"
+    ],
+    "baseline_delay_requests": 999,
+    "folding_delay_requests": 0,
+    "min_savings_tokens": 256,
+    "isolated_temp_workspace": true,
+    "bounded_tool_runner": true
+  },
+  "machine_at_start": {
+    "load_average": [
+      4.58,
+      4.49,
+      4.7
+    ],
+    "logical_cores": 24
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 1,
+        "session": "completed-read-01-baseline",
+        "scope": "d09e6a67e81a3e13b0ecf0ff13ec1c5b77b57455142e2a3be43e575c48461c2f",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "562591"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13781,
+        "provider_output_tokens": 15,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 8931,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2995,
+            "hook_on_request_ms": 57,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2643,
+            "hook_on_request_ms": 51,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 20225,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 3041,
+            "hook_on_request_ms": 10,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6563,
+              "output_tokens": 4,
+              "total_tokens": 6567,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 1,
+        "session": "completed-read-01-folding",
+        "scope": "991e303543f716420b0470b45ea415762e38e07e16368862ff79992482f1df27",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "562591"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 1,
+        "tool_errors": 0,
+        "request_count": 4,
+        "folded_source_requests": 2,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 10085,
+        "provider_output_tokens": 157,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 10994,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2218,
+            "hook_on_request_ms": 5,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2410,
+            "hook_on_request_ms": 5,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 2452,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3514,
+            "hook_on_request_ms": 7,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 1163,
+              "output_tokens": 142,
+              "total_tokens": 1305,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 3,
+            "user_turn": 1,
+            "raw_request_json_bytes": 20753,
+            "sent_request_json_bytes": 3465,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2748,
+            "hook_on_request_ms": 8,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 1704,
+              "output_tokens": 4,
+              "total_tokens": 1708,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 3696,
+        "provider_output_tokens_delta": 142,
+        "end_to_end_ms_saved": -2063,
+        "recovery_tool_calls_added": 1
+      }
+    },
+    {
+      "pair": 2,
+      "order": [
+        "folding",
+        "baseline"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 2,
+        "session": "completed-read-02-baseline",
+        "scope": "b9a7b196b11ac401d381e20644eb44e998ac8eb6243a8ccaf265d2704c089fee",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "562591"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 2,
+        "read_call_user_turns": [
+          0,
+          1
+        ],
+        "recovery_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 4,
+        "folded_source_requests": 0,
+        "full_source_requests": 3,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 26417,
+        "provider_output_tokens": 527,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 31294,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2943,
+            "hook_on_request_ms": 4,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2455,
+            "hook_on_request_ms": 5,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 20225,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 22964,
+            "hook_on_request_ms": 13,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 6563,
+              "output_tokens": 512,
+              "total_tokens": 7075,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 3,
+            "user_turn": 1,
+            "raw_request_json_bytes": 39374,
+            "sent_request_json_bytes": 39859,
+            "references": 0,
+            "full_source_copies": 2,
+            "provider_wait_ms": 2878,
+            "hook_on_request_ms": 6,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 12636,
+              "output_tokens": 4,
+              "total_tokens": 12640,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 2,
+        "session": "completed-read-02-folding",
+        "scope": "b2ab11aa6c1f76cddcfa9b712e4057e57cf4339cbb4a672486944463a8df6d74",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "562591"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 1,
+        "tool_errors": 0,
+        "request_count": 4,
+        "folded_source_requests": 2,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 10087,
+        "provider_output_tokens": 148,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 11348,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2381,
+            "hook_on_request_ms": 65,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2585,
+            "hook_on_request_ms": 5,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 2452,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3799,
+            "hook_on_request_ms": 8,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 1165,
+              "output_tokens": 133,
+              "total_tokens": 1298,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 3,
+            "user_turn": 1,
+            "raw_request_json_bytes": 20740,
+            "sent_request_json_bytes": 3452,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2475,
+            "hook_on_request_ms": 5,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 1704,
+              "output_tokens": 4,
+              "total_tokens": 1708,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 16330,
+        "provider_output_tokens_delta": -379,
+        "end_to_end_ms_saved": 19946,
+        "recovery_tool_calls_added": 1
+      }
+    }
+  ],
+  "summary": {
+    "planned_pairs": 2,
+    "completed_pairs": 2,
+    "valid_pairs": 2,
+    "correct_answers": 8,
+    "provider_input_token_savings": {
+      "median": 10013,
+      "range": [
+        3696,
+        16330
+      ],
+      "positive_pairs": 2
+    },
+    "sent_request_json_bytes_saved": {
+      "median": 34244,
+      "range": [
+        14308,
+        54180
+      ]
+    },
+    "folding_recovery_calls": 2,
+    "baseline_recovery_calls": 0,
+    "cache_usage_reported_in_all_requests": false
+  },
+  "limitations": [
+    "The task deliberately asks two questions about one generated file; it does not measure ordinary follow-up prevalence.",
+    "Recovery command calls and their provider usage are included, but the command subtype (grep, peek, restore) is not recorded.",
+    "This is a real provider with a bounded local tool loop, not Magpie/OpenCode host dispatch.",
+    "Provider token counts are not billing amounts; no price schedule was applied.",
+    "Small pair counts are exploratory and wall-clock differences are not a speedup claim."
+  ],
+  "run_error": null
+}
