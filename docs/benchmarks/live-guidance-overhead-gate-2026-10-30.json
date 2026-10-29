@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "benchmark": "live-guidance-overhead-current-gate",
+  "generated_at": "2026-10-29T17:10:05.328Z",
+  "claim_under_test": "On a short request below the current guidance threshold, provider input tokens are lower when the gate omits guidance than when the same guidance is forced in.",
+  "provider_model_requested": "claude-sonnet-5",
+  "gate_source_sha256": "074c3b24b790ae0bd4316dae8cc06ecd45e54e3ea3450c68052a269211563623",
+  "guidance_source_sha256": "d4a3bbd33beedecbb165112ad05a932d5927ae41ce63ae5788c4e44fd0adebff",
+  "request_sha256": "7dbb9140378aec9ba2cc9e564bf1c2ac1652ac8288e1e5de624de56e8a90894c",
+  "planned_pairs": 3,
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "gated",
+        "forced"
+      ],
+      "arms": {
+        "gated": {
+          "guide_added": false,
+          "request_json_bytes": 471,
+          "provider_model": "claude-sonnet-5",
+          "finish_reason": "stop",
+          "exact_answer": true,
+          "usage": {
+            "input_tokens": 473,
+            "output_tokens": 6,
+            "total_tokens": 479,
+            "cache_read_tokens": null,
+            "cache_write_tokens": null
+          }
+        },
+        "forced": {
+          "guide_added": true,
+          "request_json_bytes": 956,
+          "provider_model": "claude-sonnet-5",
+          "finish_reason": "stop",
+          "exact_answer": true,
+          "usage": {
+            "input_tokens": 647,
+            "output_tokens": 6,
+            "total_tokens": 653,
+            "cache_read_tokens": null,
+            "cache_write_tokens": null
+          }
+        }
+      },
+      "provider_input_tokens_saved": 174,
+      "valid": true
+    },
+    {
+      "pair": 2,
+      "order": [
+        "forced",
+        "gated"
+      ],
+      "arms": {
+        "forced": {
+          "guide_added": true,
+          "request_json_bytes": 956,
+          "provider_model": "claude-sonnet-5",
+          "finish_reason": "stop",
+          "exact_answer": true,
+          "usage": {
+            "input_tokens": 647,
+            "output_tokens": 6,
+            "total_tokens": 653,
+            "cache_read_tokens": null,
+            "cache_write_tokens": null
+          }
+        },
+        "gated": {
+          "guide_added": false,
+          "request_json_bytes": 471,
+          "provider_model": "claude-sonnet-5",
+          "finish_reason": "stop",
+          "exact_answer": true,
+          "usage": {
+            "input_tokens": 473,
+            "output_tokens": 6,
+            "total_tokens": 479,
+            "cache_read_tokens": null,
+            "cache_write_tokens": null
+          }
+        }
+      },
+      "provider_input_tokens_saved": 174,
+      "valid": true
+    },
+    {
+      "pair": 3,
+      "order": [
+        "gated",
+        "forced"
+      ],
+      "arms": {
+        "gated": {
+          "guide_added": false,
+          "request_json_bytes": 471,
+          "provider_model": "claude-sonnet-5",
+          "finish_reason": "stop",
+          "exact_answer": true,
+          "usage": {
+            "input_tokens": 473,
+            "output_tokens": 6,
+            "total_tokens": 479,
+            "cache_read_tokens": null,
+            "cache_write_tokens": null
+          }
+        },
+        "forced": {
+          "guide_added": true,
+          "request_json_bytes": 956,
+          "provider_model": "claude-sonnet-5",
+          "finish_reason": "stop",
+          "exact_answer": true,
+          "usage": {
+            "input_tokens": 647,
+            "output_tokens": 6,
+            "total_tokens": 653,
+            "cache_read_tokens": null,
+            "cache_write_tokens": null
+          }
+        }
+      },
+      "provider_input_tokens_saved": 174,
+      "valid": true
+    }
+  ],
+  "run_error": null,
+  "summary": {
+    "completed_pairs": 3,
+    "valid_pairs": 3,
+    "exact_answers": 6,
+    "provider_input_tokens_saved_by_gate": {
+      "median": 174,
+      "range": [
+        174,
+        174
+      ],
+      "positive_pairs": 3
+    },
+    "request_json_bytes_saved_by_gate": [
+      485,
+      485,
+      485
+    ],
+    "cache_usage_reported_for_all_requests": false
+  }
+}

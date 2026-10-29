@@ -8,6 +8,9 @@ import { createInterface } from 'node:readline';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { onRequest, onResponse } from '../../src/context.hooks.js';
+import { parseRegions } from '../../src/annotations.js';
+import { extractSpans } from '../../src/protocol.js';
+import { sourceMarkerOffsets } from '../../src/source.js';
 import { statistics } from '../../src/statistics.js';
 
 type RecordValue = Record<string, unknown>;
@@ -16,6 +19,33 @@ const record = (value: unknown): value is RecordValue => value !== null
   && typeof value === 'object' && !Array.isArray(value);
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
 const MAX_LINE_BYTES = 16 * 1024 * 1024;
+
+function assistantRegions(body: RecordValue): number {
+  return extractSpans(body, 'chat').filter(span => span.role === 'assistant')
+    .reduce((count, span) => count + parseRegions([{ id: span.id, text: span.text }]).length, 0);
+}
+
+function verifiedToolRegions(body: RecordValue): number {
+  return extractSpans(body, 'chat').filter(span => span.role === 'tool' && span.source)
+    .reduce((count, span) => {
+      const markerOffsets = sourceMarkerOffsets(span.text, span.source!.path);
+      const part = { id: span.id, text: span.text, ...(markerOffsets === undefined ? {} : { markerOffsets }) };
+      return count + parseRegions([part]).length;
+    }, 0);
+}
+
+export function measureNewFoldedRegions(before: RecordValue, after: RecordValue): { assistant: number; tool: number } {
+  const original = new Map(extractSpans(before, 'chat').map(span => [JSON.stringify(span.path), span]));
+  const folded = { assistant: 0, tool: 0 };
+  const references = (text: string) => [...text.matchAll(/\[\[cf:v2:[a-f0-9]{12,64}\]\]/g)].length;
+  for (const span of extractSpans(after, 'chat')) {
+    if (span.role !== 'assistant' && span.role !== 'tool') continue;
+    const prior = original.get(JSON.stringify(span.path));
+    if (!prior || (span.role === 'tool' && !prior.source)) continue;
+    folded[span.role] += Math.max(0, references(span.text) - references(prior.text));
+  }
+  return folded;
+}
 
 class BridgeError extends Error {
   constructor(readonly code: string, message: string) { super(message); }
@@ -73,6 +103,7 @@ export class FoldingBridge {
           maxSessionBytes: 64 * 1024 * 1024 },
       });
       const projectionMs = performance.now() - start;
+      const regions = measureNewFoldedRegions(input.body, body as RecordValue);
       // Read only the hook's trusted completion state, never a scope-shaped
       // string from user/model text. Failed projections create no new capability.
       const hookState = state.contextFoldingStatistics;
@@ -84,7 +115,14 @@ export class FoldingBridge {
       }
       this.pending = { body, state };
       return { body, scope: this.scope, input_bytes: bytes(input.body), output_bytes: bytes(body),
-        projection_ms: projectionMs, folded: record(hookState) && hookState.folded === true };
+        projection_ms: projectionMs, folded: record(hookState) && hookState.folded === true,
+        assistant_regions_seen: assistantRegions(input.body),
+        verified_tool_regions_seen: verifiedToolRegions(input.body), folded_by_role: regions };
+    }
+    if (input.op === 'inspect') {
+      requireCondition(!this.pending, 'request_pending', 'Complete the previous request first');
+      requireCondition(Array.isArray(input.messages), 'invalid_request', 'Inspect requires transcript messages');
+      return { assistant_authored_regions: assistantRegions({ messages: input.messages }) };
     }
     if (input.op === 'response') {
       requireCondition(this.pending, 'no_request', 'No projected request is pending');

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-29",
+  "model": "claude-sonnet-5",
+  "task": "Investigate nested context-fold annotation behavior from parsing through request projection and archive recovery. Check whether a completed inner region stays recoverable when it sits inside a completed outer region, including when the inner region is already an existing reference. Build a minimal product-level reproducer. If it exposes a bug, make the smallest fix and verify exact recovered text plus keep/reference behavior. If it does not, leave source unchanged and report the evidence.",
+  "limits": {
+    "max_turns": 8,
+    "max_output_tokens": 4096,
+    "verification": "bun test --isolate --timeout=15000 test/folding.test.ts test/recovery-tool.test.ts"
+  },
+  "controller_prompt": {
+    "shared_prompt_primes_markers": false,
+    "folding_arm_receives_plugin_marker_guidance": true
+  },
+  "source_snapshot": {
+    "revision": "f9d27c5cece8183420ae405bf2bbcdd0b7e3d566",
+    "files": 196,
+    "bytes": 2986123,
+    "sha256": "9bec892b8578e1ed5c4adbd7743a020618b818825d204cf653e21f5618883dc3",
+    "same_for_both_arms": true
+  },
+  "baseline": {
+    "completion": "max-turns",
+    "requests": 8,
+    "verified": false,
+    "changed_files": [],
+    "folded_requests": 0,
+    "assistant_regions_seen_max": 0,
+    "verified_tool_regions_seen_max": 24,
+    "folded_regions_by_role": { "assistant": 0, "tool": 0 },
+    "provider_prompt_tokens": 207017,
+    "provider_completion_tokens": 506,
+    "first_request": { "input_bytes": 6151, "projected_bytes": 6151, "prompt_tokens": 2504 }
+  },
+  "folding": {
+    "completion": "error",
+    "error": "Incomplete or filtered assistant response",
+    "requests": 7,
+    "verified": false,
+    "changed_files": [],
+    "folded_requests": 4,
+    "assistant_regions_seen_max": 0,
+    "verified_tool_regions_seen_max": 38,
+    "folded_regions_by_role": { "assistant": 0, "tool": 29 },
+    "provider_prompt_tokens": 196254,
+    "provider_completion_tokens": 4710,
+    "first_request": { "input_bytes": 6152, "projected_bytes": 6610, "prompt_tokens": 2670 },
+    "last_request": {
+      "input_bytes": 196275,
+      "projected_bytes": 123109,
+      "prompt_tokens": 46736,
+      "completion_tokens": 4096
+    }
+  },
+  "assistant_authored_marker_blocks_in_transcript": { "baseline": 0, "folding": 0 },
+  "conclusion": "This run provides no assistant-authored marker adoption. Folding projected 29 new references from verified read results across four requests. The arms followed different trajectories: baseline hit the turn limit, while folding hit the output cap; neither produced a verified candidate. Provider usage totals are not a valid cost or quality comparison, and no savings claim follows from them."
+}

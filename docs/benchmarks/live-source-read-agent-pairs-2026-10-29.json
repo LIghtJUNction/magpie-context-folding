@@ -1,0 +1,1024 @@
+{
+  "schema_version": 1,
+  "benchmark": "live-repeated-source-read-agent-pairs",
+  "generated_at": "2026-10-29T13:26:22.634Z",
+  "claim_under_test": "Automatic folding lowers provider-reported input tokens while preserving the answer on a forced repeated-read tool loop.",
+  "model_requested": "claude-sonnet-5",
+  "route": "OpenAI-compatible /v1/chat/completions",
+  "usage_source": "provider response usage.prompt_tokens and usage.completion_tokens; cache fields recorded only when explicitly returned",
+  "implementation": {
+    "hook": "src/context.hooks.ts:onRequest",
+    "hook_sha256": "790cfc69babbf7433bebadf5e6220ba1174d72d8964e4b4e499ba3867c6c60b1",
+    "published_package_loaded": false
+  },
+  "design": {
+    "planned_pairs": 5,
+    "order": "alternating baseline/folding, then folding/baseline",
+    "max_turns_per_arm": 5,
+    "temperature": 0,
+    "task_sha256": "b59d068388ef478fc74103b0053dff65bbb73c39ffb1ed66585bd94e8d8306f7",
+    "source_path": "worker.ts",
+    "source_utf8_bytes_per_read": 16700,
+    "source_sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a",
+    "required_read_calls": 2,
+    "required_separate_turns": true,
+    "hook_options": {
+      "baseline_delay_requests": 999,
+      "folding_delay_requests": 0,
+      "min_savings_tokens": 256
+    },
+    "isolated_temp_workspace": true,
+    "bounded_tool_runner": true
+  },
+  "trial_loaded_from": "current worktree hook, not the installed package",
+  "machine_at_start": {
+    "load_average": [
+      3.36,
+      2.72,
+      2.87
+    ],
+    "logical_cores": 24
+  },
+  "preflight": {
+    "passed": true,
+    "auto_reference_detected": true
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 1,
+        "session": "live-read-pair-01",
+        "scope": "32532e3c2b2ef8b968a0bb1be4b0770688d51406d0c20f8737da45e57a395d5a",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 0,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 17991,
+        "provider_output_tokens": 133,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 11382,
+        "provider_wait_ms": 11340,
+        "hook_on_request_ms": 15,
+        "local_tool_ms": 8,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 124,
+              "total_tokens": 6103,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35928,
+            "sent_request_json_bytes": 36386,
+            "references": 0,
+            "full_source_copies": 2,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 11157,
+              "output_tokens": 2,
+              "total_tokens": 11159,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 1,
+        "session": "live-read-pair-01",
+        "scope": "7fe02c05ef42085e3ed99d01b9799bf175c0d563f13a98e47b638e4b59bd7b8e",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13133,
+        "provider_output_tokens": 137,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 11321,
+        "provider_wait_ms": 11288,
+        "hook_on_request_ms": 16,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "length",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 128,
+              "total_tokens": 6107,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 36091,
+            "sent_request_json_bytes": 19824,
+            "references": 1,
+            "full_source_copies": 1,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6299,
+              "output_tokens": 2,
+              "total_tokens": 6301,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 4858,
+        "provider_output_tokens_saved": -4,
+        "sent_request_json_bytes_saved": 16562,
+        "end_to_end_ms_saved": 61
+      }
+    },
+    {
+      "pair": 2,
+      "order": [
+        "folding",
+        "baseline"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 2,
+        "session": "live-read-pair-02",
+        "scope": "5aa92318b9eacb1fc496fd93545af21879b7f26525cd0e215e05fa3553ab11b9",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 0,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 17948,
+        "provider_output_tokens": 39,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 12645,
+        "provider_wait_ms": 12611,
+        "hook_on_request_ms": 14,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 30,
+              "total_tokens": 6009,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35823,
+            "sent_request_json_bytes": 36281,
+            "references": 0,
+            "full_source_copies": 2,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 11114,
+              "output_tokens": 2,
+              "total_tokens": 11116,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 2,
+        "session": "live-read-pair-02",
+        "scope": "1bc1a232f1e340bd4152fb562d8f6b872b9af0ae75ffc7036b470173db377c29",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13033,
+        "provider_output_tokens": 30,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 9610,
+        "provider_wait_ms": 9578,
+        "hook_on_request_ms": 16,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 21,
+              "total_tokens": 6000,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35811,
+            "sent_request_json_bytes": 19544,
+            "references": 1,
+            "full_source_copies": 1,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6199,
+              "output_tokens": 2,
+              "total_tokens": 6201,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 4915,
+        "provider_output_tokens_saved": 9,
+        "sent_request_json_bytes_saved": 16737,
+        "end_to_end_ms_saved": 3035
+      }
+    },
+    {
+      "pair": 3,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 3,
+        "session": "live-read-pair-03",
+        "scope": "9401ddb65db3b3cd48392d747ec58993ebb8433bdb13f40c56d3a276c761b1d5",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 0,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 17944,
+        "provider_output_tokens": 30,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 10837,
+        "provider_wait_ms": 10809,
+        "hook_on_request_ms": 15,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 21,
+              "total_tokens": 6000,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35811,
+            "sent_request_json_bytes": 36269,
+            "references": 0,
+            "full_source_copies": 2,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 11110,
+              "output_tokens": 2,
+              "total_tokens": 11112,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 3,
+        "session": "live-read-pair-03",
+        "scope": "0fab297850056c73352a5715556af538748c7427d0fdf228844551d4b545914a",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13028,
+        "provider_output_tokens": 30,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 10047,
+        "provider_wait_ms": 10019,
+        "hook_on_request_ms": 14,
+        "local_tool_ms": 1,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 21,
+              "total_tokens": 6000,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35811,
+            "sent_request_json_bytes": 19544,
+            "references": 1,
+            "full_source_copies": 1,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6194,
+              "output_tokens": 2,
+              "total_tokens": 6196,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 4916,
+        "provider_output_tokens_saved": 0,
+        "sent_request_json_bytes_saved": 16725,
+        "end_to_end_ms_saved": 790
+      }
+    },
+    {
+      "pair": 4,
+      "order": [
+        "folding",
+        "baseline"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 4,
+        "session": "live-read-pair-04",
+        "scope": "836de951b8f53f33f15fab747640db4181dfd85469f02a5d97d1d50861063c01",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 0,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 17944,
+        "provider_output_tokens": 30,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 10521,
+        "provider_wait_ms": 10491,
+        "hook_on_request_ms": 14,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 21,
+              "total_tokens": 6000,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35811,
+            "sent_request_json_bytes": 36269,
+            "references": 0,
+            "full_source_copies": 2,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 11110,
+              "output_tokens": 2,
+              "total_tokens": 11112,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 4,
+        "session": "live-read-pair-04",
+        "scope": "659e94befcd78c5d1b66ba97b60d371fa7c973661f4359261a8e17a048e01bda",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13033,
+        "provider_output_tokens": 30,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 10148,
+        "provider_wait_ms": 10120,
+        "hook_on_request_ms": 13,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 21,
+              "total_tokens": 6000,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35811,
+            "sent_request_json_bytes": 19544,
+            "references": 1,
+            "full_source_copies": 1,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6199,
+              "output_tokens": 2,
+              "total_tokens": 6201,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 4911,
+        "provider_output_tokens_saved": 0,
+        "sent_request_json_bytes_saved": 16725,
+        "end_to_end_ms_saved": 373
+      }
+    },
+    {
+      "pair": 5,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 5,
+        "session": "live-read-pair-05",
+        "scope": "5fc7e973c1d23ecfd918876a9a5cb862cd9021c3f9c79c8faf668d6f314f023e",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 0,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 18036,
+        "provider_output_tokens": 137,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 14142,
+        "provider_wait_ms": 14113,
+        "hook_on_request_ms": 13,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "length",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 128,
+              "total_tokens": 6107,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 36092,
+            "sent_request_json_bytes": 36550,
+            "references": 0,
+            "full_source_copies": 2,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 11202,
+              "output_tokens": 2,
+              "total_tokens": 11204,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 5,
+        "session": "live-read-pair-05",
+        "scope": "5790d337499f275375fa45dfc581485605cfa99c1d87c24704fafa3197b396d4",
+        "completion": "final",
+        "final_answer": "237",
+        "answer_correct": true,
+        "success": true,
+        "read_calls": 2,
+        "read_call_turns": [
+          0,
+          1
+        ],
+        "read_results": [
+          {
+            "turn": 0,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          },
+          {
+            "turn": 1,
+            "utf8_bytes": 16700,
+            "sha256": "96e793454b2bb09f7349535b387fbae96c72c10a4b48ee93df61f6a02581264a"
+          }
+        ],
+        "other_tool_calls": 0,
+        "tool_errors": 0,
+        "request_count": 3,
+        "auto_folded_source_reads": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13030,
+        "provider_output_tokens": 30,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 44010,
+        "provider_wait_ms": 43975,
+        "hook_on_request_ms": 16,
+        "local_tool_ms": 0,
+        "requests": [
+          {
+            "turn": 0,
+            "raw_request_json_bytes": 1170,
+            "sent_request_json_bytes": 1628,
+            "references": 0,
+            "full_source_copies": 0,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 855,
+              "output_tokens": 7,
+              "total_tokens": 862,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "raw_request_json_bytes": 18472,
+            "sent_request_json_bytes": 18930,
+            "references": 0,
+            "full_source_copies": 1,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 5979,
+              "output_tokens": 21,
+              "total_tokens": 6000,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "raw_request_json_bytes": 35811,
+            "sent_request_json_bytes": 19544,
+            "references": 1,
+            "full_source_copies": 1,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6196,
+              "output_tokens": 2,
+              "total_tokens": 6198,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 5006,
+        "provider_output_tokens_saved": 107,
+        "sent_request_json_bytes_saved": 17006,
+        "end_to_end_ms_saved": -29868
+      }
+    }
+  ],
+  "summary": {
+    "planned_pairs": 5,
+    "completed_pairs": 5,
+    "valid_pairs": 5,
+    "correct_answers": 10,
+    "provider_input_token_savings": {
+      "median": 4915,
+      "range": {
+        "min": 4858,
+        "max": 5006
+      },
+      "positive_pairs": 5
+    },
+    "sent_request_json_byte_savings": {
+      "median": 16725,
+      "range": {
+        "min": 16562,
+        "max": 17006
+      }
+    },
+    "end_to_end_milliseconds_saved": {
+      "median": 373,
+      "range": {
+        "min": -29868,
+        "max": 3035
+      }
+    },
+    "cache_usage_reported_in_all_requests": false
+  },
+  "run_error": null,
+  "limitations": [
+    "The task deliberately requires the same source read twice; it does not measure how often ordinary agents repeat reads.",
+    "This uses the real provider and production hook with a bounded local tool loop, not Magpie/OpenCode host dispatch.",
+    "Provider token counts and cache counts are not a billing amount; no price schedule was applied.",
+    "Five pairs are a small sample; wall-clock results are exploratory and no speedup claim is made."
+  ]
+}

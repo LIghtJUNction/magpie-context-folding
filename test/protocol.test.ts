@@ -190,7 +190,7 @@ const protocols: Protocol[] = ["chat", "responses", "anthropic", "gemini"];
 test("file reads expose raw path provenance across protocols without changing IDs or wire data", () => {
   for (const protocol of protocols) {
     for (const name of ["read", "Read", "read_file"]) {
-      for (const key of ["path", "file_path", "filePath", "absolute_path"]) {
+      for (const key of ["path", "file_path", "filePath", "absolute_path", "absolutePath"]) {
         const body = readExchange(protocol, { [key]: "../raw/./file.ts" }, name);
         const original = structuredClone(body);
         const spans = extractSpans(body, protocol);
@@ -233,7 +233,7 @@ test("only explicit valid read calls can identify file outputs", () => {
     for (const name of ["write", "Write", "edit", "bash", "cat", "mcp__read_file"]) {
       assert.ok(extractSpans(readExchange(protocol, { path: "a", command: "cat a" }, name, "a: file contents"), protocol).every((span) => span.source === undefined));
     }
-    for (const args of [{}, { path: "" }, { path: "  " }, { path: ["a"] }, { path: "a", file_path: "b" }, "malformed JSON", "null"]) {
+    for (const args of [{}, { path: "" }, { path: "  " }, { path: ["a"] }, { path: "a", file_path: "b" }, { path: "a", absolutePath: "b" }, "malformed JSON", "null"]) {
       assert.ok(extractSpans(readExchange(protocol, args), protocol).every((span) => span.source === undefined), `${protocol}/${JSON.stringify(args)}`);
     }
     for (const output of ["Error: could not read a", "ENOENT: a", "<tool_use_error>missing a</tool_use_error>", "File not found: a", "Permission denied: a", '{"error":"missing a"}']) {

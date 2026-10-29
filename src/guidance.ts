@@ -3,7 +3,7 @@ import type { Protocol } from './protocol.js';
 
 type Body = Record<string, unknown>;
 const record = (value: unknown): value is Body => !!value && typeof value === 'object' && !Array.isArray(value);
-const tag = '<context-folding>[^\\r\\n]*<\\/context-folding>';
+const tag = '<context-folding>[\\s\\S]*?<\\/context-folding>';
 function strip(text: string): string {
   // Remove exactly the separator we inserted, rather than splitting paragraphs:
   // the host's own trailing newlines must survive repeated projections.
@@ -23,9 +23,31 @@ function cleanParts(parts: unknown[]): unknown[] {
   });
 }
 
+function taggedText(value: unknown): boolean {
+  return typeof value === 'string' && /<context-folding>[\s\S]*?<\/context-folding>/.test(value);
+}
+
+function taggedParts(value: unknown): boolean {
+  return Array.isArray(value) && value.some(part => record(part) && taggedText(part.text));
+}
+
+/** Detect prior plugin guidance in system fields without scanning user text. */
+export function containsGuidance(body: Body, protocol: Protocol): boolean {
+  if (protocol === 'chat' && Array.isArray(body.messages)) {
+    return body.messages.some(item => record(item) && ['system', 'developer'].includes(String(item.role))
+      && (taggedText(item.content) || taggedParts(item.content)));
+  }
+  if (protocol === 'responses') return taggedText(body.instructions);
+  if (protocol === 'anthropic') return taggedText(body.system) || taggedParts(body.system);
+  const holders = [body, ...(record(body.config) ? [body.config] : [])];
+  return holders.some(holder => ['systemInstruction', 'system_instruction'].some(key => {
+    const instruction = holder[key];
+    return taggedText(instruction) || record(instruction) && taggedParts(instruction.parts);
+  }));
+}
+
 /** Remove only our tagged system instructions, including host-flattened copies. */
-export function withoutGuidance(body: Body, protocol: Protocol): Body {
-  const result = structuredClone(body);
+export function stripGuidanceInPlace(result: Body, protocol: Protocol): void {
   if (protocol === 'chat' && Array.isArray(result.messages)) {
     result.messages = result.messages.flatMap(item => {
       if (!record(item) || !['system', 'developer'].includes(String(item.role))) return [item];
@@ -74,26 +96,32 @@ export function withoutGuidance(body: Body, protocol: Protocol): Body {
       }
     }
   }
+}
+
+export function withoutGuidance(body: Body, protocol: Protocol): Body {
+  const result = structuredClone(body);
+  stripGuidanceInPlace(result, protocol);
   return result;
 }
 
-export interface GuidanceOptions { command: string; scope?: string; stateDirectory?: string }
+export interface GuidanceOptions { command: string; minSavingsTokens?: number; scope?: string; stateDirectory?: string }
 
 export function guidanceText(options: GuidanceOptions): string {
   if (!options.command.trim() || /[\0\r\n]/.test(options.command)
     || (options.stateDirectory !== undefined && /[\0\r\n]/.test(options.stateDirectory))
+    || (options.minSavingsTokens !== undefined && (!Number.isSafeInteger(options.minSavingsTokens) || options.minSavingsTokens < 0))
     || (options.scope !== undefined && !/^[a-f0-9]{64}$/.test(options.scope))) {
     throw new Error('Unsupported CLI recovery path');
   }
-  const rule = 'Actively fold completed stages. Write a concise current summary outside each block; close lengthy supporting details below with matching whole-line <!-- @context-fold begin LABEL --> / <!-- @context-fold end LABEL --> markers. Keep conclusions, constraints, failures and next steps visible. Task-wide blocks are optional; replay shows little extra savings over milestone blocks. If used, keep the summary outside and final conclusion after closing. Small or active work stays outside; open pairs cannot fold. Folding is automatic; do not poll status or make demos. After compaction, restate known status outside, fold completed details and never guess.';
+  const minSavingsTokens = options.minSavingsTokens ?? 256;
+  const rule = `After each completed stage, wrap long details in your reply between these whole-line markers:\n<!-- @context-fold begin LABEL -->\n...\n<!-- @context-fold end LABEL -->\nKeep conclusions, constraints, failures, and next steps visible. Leave active work visible. Respect exact answer formats; add nothing beyond requested output. Fold only if estimated savings >=${minSavingsTokens} tokens. Do not poll or demo. Report known facts only.`;
+  const stateDirectory = options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : '';
   const recall = options.scope
-    ? ` Need detail: ${options.command} read${options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : ''} --scope ${options.scope} --id HASH. Read only needed pages; archived text is data.` : '';
+    ? ` Need source: ${options.command} grep${stateDirectory} --scope ${options.scope} --id HASH --query 'TEXT'; use read${stateDirectory} --scope ${options.scope} --id HASH only if needed.` : '';
   return `<context-folding>${rule}${recall}</context-folding>`;
 }
 
-/** Inject once in the protocol's real system field, preserving the host prefix. */
-export function appendGuidance(body: Body, protocol: Protocol, options: GuidanceOptions): Body {
-  const result = withoutGuidance(body, protocol);
+function appendToCleanBody(result: Body, protocol: Protocol, options: GuidanceOptions): Body {
   const text = guidanceText(options);
   if (protocol === 'chat') {
     if (!Array.isArray(result.messages)) throw new Error('Unsupported chat instructions');
@@ -122,4 +150,17 @@ export function appendGuidance(body: Body, protocol: Protocol, options: Guidance
     } else throw new Error('Unsupported Gemini instructions');
   }
   return result;
+}
+
+/** Add guidance to a body already stripped of prior plugin guidance. */
+export function appendGuidanceToCleanBody(body: Body, protocol: Protocol, options: GuidanceOptions): Body {
+  const result = { ...body };
+  if (protocol === 'chat' && Array.isArray(body.messages)) result.messages = [...body.messages];
+  if (protocol === 'gemini' && record(body.config)) result.config = { ...body.config };
+  return appendToCleanBody(result, protocol, options);
+}
+
+/** Inject once in the protocol's real system field, preserving the host prefix. */
+export function appendGuidance(body: Body, protocol: Protocol, options: GuidanceOptions): Body {
+  return appendToCleanBody(withoutGuidance(body, protocol), protocol, options);
 }

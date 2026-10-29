@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "benchmark": "paired-live-provider-hook-projection",
+  "completed_at": "2026-10-29",
+  "model": "claude-sonnet-5",
+  "route": "OpenAI-compatible Chat Completions",
+  "usage_source": "provider response usage.prompt_tokens and usage.completion_tokens",
+  "working_tree": {
+    "hook": "src/context.hooks.ts:onRequest",
+    "published_package_loaded": false,
+    "published_package_version_checked": "0.5.1",
+    "source_read": "src/protocol.ts",
+    "source_read_utf8_bytes": 30888,
+    "folded_references": 6,
+    "projected_request_bytes_before_shared_output_constraint": {
+      "baseline": 33948,
+      "folding": 19288
+    },
+    "projected_tool_reply_bytes": {
+      "baseline": 30888,
+      "folding": 16429
+    },
+    "hook_options": {
+      "baseline_delay_requests": 999,
+      "folding_delay_requests": 0,
+      "min_savings_tokens": 256
+    }
+  },
+  "accepted_pairs": [
+    {
+      "task": "Copy the exact default shell whitelist literals in order.",
+      "baseline": {
+        "input_tokens": 12305,
+        "output_tokens": 99,
+        "finish_reason": "stop",
+        "answer_correct": true
+      },
+      "folding": {
+        "input_tokens": 7467,
+        "output_tokens": 99,
+        "finish_reason": "stop",
+        "answer_correct": true
+      },
+      "input_token_delta": 4838,
+      "input_reduction_ratio": 0.3933,
+      "tool_calls": 0
+    },
+    {
+      "task": "Trace the visible chat allowed_tools auto branch and report the selected shell.",
+      "baseline": {
+        "input_tokens": 12369,
+        "output_tokens": 167,
+        "finish_reason": "stop",
+        "answer_correct": true
+      },
+      "folding": {
+        "input_tokens": 7532,
+        "output_tokens": 182,
+        "finish_reason": "stop",
+        "answer_correct": true
+      },
+      "input_token_delta": 4837,
+      "input_reduction_ratio": 0.3911,
+      "tool_calls": 0
+    }
+  ],
+  "paired_attempts": [
+    {
+      "attempt": 1,
+      "task": "List the default shell whitelist and shell-disable conditions.",
+      "max_completion_tokens": 256,
+      "baseline": {
+        "input_tokens": 12269,
+        "output_tokens": 256,
+        "finish_reason": "length",
+        "quality": "incomplete"
+      },
+      "folding": {
+        "input_tokens": 7432,
+        "output_tokens": 256,
+        "finish_reason": "length",
+        "quality": "incomplete"
+      }
+    },
+    {
+      "attempt": 2,
+      "task": "Copy the exact default shell whitelist as JSON.",
+      "max_completion_tokens": 128,
+      "baseline": {
+        "input_tokens": 12273,
+        "output_tokens": 108,
+        "finish_reason": "stop",
+        "quality": "correct values but fenced format"
+      },
+      "folding": {
+        "input_tokens": 7436,
+        "output_tokens": 128,
+        "finish_reason": "length",
+        "quality": "incomplete"
+      }
+    },
+    {
+      "attempt": 3,
+      "task": "Copy the exact default shell whitelist as JSON.",
+      "max_completion_tokens": 256,
+      "baseline": {
+        "input_tokens": 12279,
+        "output_tokens": 98,
+        "finish_reason": "stop",
+        "quality": "correct"
+      },
+      "folding": {
+        "input_tokens": 7442,
+        "output_tokens": 256,
+        "finish_reason": "length",
+        "quality": "incomplete"
+      }
+    },
+    {
+      "attempt": 4,
+      "task": "Copy the exact default shell whitelist as one-line JSON with a shared developer format constraint.",
+      "max_completion_tokens": 128,
+      "baseline": {
+        "input_tokens": 12305,
+        "output_tokens": 99,
+        "finish_reason": "stop",
+        "quality": "correct"
+      },
+      "folding": {
+        "input_tokens": 7467,
+        "output_tokens": 99,
+        "finish_reason": "stop",
+        "quality": "correct"
+      }
+    },
+    {
+      "attempt": 5,
+      "task": "Trace the visible chat allowed_tools auto branch and report the selected shell.",
+      "max_completion_tokens": 128,
+      "baseline": {
+        "input_tokens": 12369,
+        "output_tokens": 128,
+        "finish_reason": "length",
+        "quality": "valid correct JSON, but length-limited"
+      },
+      "folding": {
+        "input_tokens": 7532,
+        "output_tokens": 128,
+        "finish_reason": "length",
+        "quality": "valid correct JSON, but length-limited"
+      }
+    },
+    {
+      "attempt": 6,
+      "task": "Trace the visible chat allowed_tools auto branch and report the selected shell.",
+      "max_completion_tokens": 256,
+      "baseline": {
+        "input_tokens": 12369,
+        "output_tokens": 167,
+        "finish_reason": "stop",
+        "quality": "correct"
+      },
+      "folding": {
+        "input_tokens": 7532,
+        "output_tokens": 182,
+        "finish_reason": "stop",
+        "quality": "correct"
+      }
+    }
+  ],
+  "all_trial_provider_usage": {
+    "paired_requests": 12,
+    "baseline_input_tokens": 73864,
+    "folding_input_tokens": 44841,
+    "combined_input_tokens": 118705,
+    "baseline_output_tokens": 856,
+    "folding_output_tokens": 1049,
+    "combined_output_tokens": 1905
+  },
+  "limitations": [
+    "The six attempt pairs use a controlled shared history; each pair differs by the hook's folding projection and its recovery guidance.",
+    "Only two short source-reading tasks passed answer and normal-completion checks in both arms.",
+    "The quality tasks did not require archive recovery; additional recovery requests may reduce savings.",
+    "The provider returned no cached-token breakdown or billing amount.",
+    "Usage measures the current uncommitted worktree hook, not the installed or published package.",
+    "Input-token reduction is not an invoice saving estimate."
+  ]
+}

@@ -66,3 +66,145 @@ npm run bench:quality -- --output .local-tests/luna-feedback-example --candidate
 正式失败样本和全部用量见 [cost-speed-quality-results.json](cost-speed-quality-results.json)。
 
 小样本的模型随机性、服务端缓存与调度波动仍存在。只有正确率不下降时，才考虑保留降低输入的配置；观察不到稳定改进时，报告实际值，不把单次波动写成省钱保证。
+
+## 折叠策略的缓存费用敏感性
+
+2026-10-29 对四种策略执行了相同的七轮合成请求回放，结果见 [fold-strategy-cache-cost-2026-10-29.json](benchmarks/fold-strategy-cache-cost-2026-10-29.json)。新增的费用代理把连续请求共有的消息前缀视作缓存读取，其余消息字节视作普通输入；缓存读取单价按普通输入单价的 0%、10%、25%、50% 和 100% 分别计算。它用于显示决策对缓存价格的敏感程度，不是供应商 token 或账单。
+
+| 策略 | 请求总字节 | 缓存读取为普通价 10% 时的输入费用代理 | 相对 no-fold 的盈亏平衡缓存读取价 |
+| --- | ---: | ---: | ---: |
+| no-fold | 715,234 | 213,811.9 字节等值 | 基线 |
+| milestone-only | 169,496 | 160,468.4 字节等值 | 0.2499% |
+| one-shot-total | 558,859 | 199,163.5 字节等值 | 0.6979% |
+| hierarchical | 169,289 | 160,916.6 字节等值 | 0.3446% |
+
+在缓存读取完全免费的同一代理下，no-fold 为 158,271，milestone-only 为 159,638 字节等值；因此少发字节并不保证输入费用更低。代理只用 JSON 消息的 UTF-8 前缀，未计供应商 tokenizer、缓存块边界和最小长度、缓存写入、输出费用或工具费用；此合成回放也没有调用模型。当前数据支持的是“折叠收益受缓存价格影响”，不支持真实账单节省结论。
+
+复现：`npm run bench:fold-strategies -- --delay-requests 1 docs/benchmarks/fold-strategy-cache-cost-2026-10-29.json`。脚本记录源码文件哈希，便于区分提交基线与工作树内容。
+
+## 默认请求延迟 0/1 合成回放
+
+2026-10-29 使用同一源码工作树和生产 `onRequest` 钩子，各回放四种策略、七次请求；两个运行除 `delayRequests` 外条件相同。脚本逐项断言每个里程碑摘要和任务结论在折叠后仍可见。默认值 `0` 在首次收到完整闭合区域的请求中折叠；显式 `1` 多留一个完整观察机会。
+
+| 策略 | delay 0 请求字节 | delay 1 请求字节 | 少发字节 |
+| --- | ---: | ---: | ---: |
+| 不折叠 | 714,835 | 714,835 | 0 |
+| 每个里程碑折叠 | 12,535 | 169,097 | 156,562 |
+| 任务总块一次折叠 | 401,656 | 558,460 | 156,804 |
+| 总任务 + 里程碑嵌套折叠 | 11,692 | 168,890 | 157,198 |
+
+完整逐请求结果：[delay 0](benchmarks/fold-strategy-cache-cost-delay-0-2026-10-29.json)、[delay 1](benchmarks/fold-strategy-cache-cost-delay-1-2026-10-29.json)。复现命令：
+
+```sh
+npm run bench:fold-strategies -- --delay-requests 0 docs/benchmarks/fold-strategy-cache-cost-delay-0-2026-10-29.json
+npm run bench:fold-strategies -- --delay-requests 1 docs/benchmarks/fold-strategy-cache-cost-delay-1-2026-10-29.json
+```
+
+这是合成消息的 UTF-8 请求字节数，不是 tokenizer token、模型质量或账单；运行没有调用模型或供应商缓存。它说明立即折叠能减少这条固定请求轨迹中的重复发送，不能单独证明真实任务节省金额或质量不变。对净收益谨慎的配置仍可显式设置 `delay_requests = 1`。
+
+## Magpie 回复 usage 观测
+
+Magpie 完整响应回调现按匹配成功的请求记录回复中可识别的协议 usage：输入、输出 token；缓存读取和写入只在回复实际含对应字段时累计。输入和输出字段必须同时存在，否则将成功回复计为 usage 不完整。数据只存数字，按会话 scope 汇总，并分成请求投影“含折叠内容”“不含折叠内容”、`observe_only` 基线和无法分类的旧累计；只观测模式原样发送请求，不加折叠或恢复提示，但继续采集回复 usage。CLI `stats` 可查看累计分组；本地 HTML 报告也会在每个状态会话中显示对应分组，方便人工并排检查隔离运行。分组没有自动配对相同任务、模型或输出质量；人工按相同条件采样并检查输出质量后，才可用于有意义的对照，仍不直接证明账单节省。
+
+这是比 JSON 字节 `/ 4` 更接近真实请求的用量证据，但它仍来自客户端协议回复，不是渠道账单，也没有“不折叠同一任务”的对照值。缓存 token 已包含或分拆于协议输入统计中，不能重复相加。要得出节省结论，还需在相同任务、模型和质量标准下做 A/B，并计算标记、查询、恢复与额外模型往返。
+
+2026-10-29 将通用折叠指导从 445 B 缩至 388 B；加入动态收益门槛后为 397 B。发现旧提示把 begin/end 示例写在同一行，和解析器要求每个标记独占一行相矛盾。当前提示将多行、可解析的标记示例写清后为 423 B；含默认恢复命令、状态目录和 scope 时为 750 B，仍比原版本少 22 B（约 5.5 个 `字节 / 4` 估算 token）。提示告知模型当前配置的最低估算收益 token 数（默认 256），并要求每个完成阶段把长细节包在标记内、将结论摘要留在外面。解析器回归检查确认示例能被识别；这不等于真实模型已采用标记或账单已降低。
+
+同日只读检查全局 Magpie 插件：运行的是缓存包 `magpie-context-folding@0.5.1`，其提示为 687 B；带同一恢复命令、状态目录和 scope 时为 1,063 B。该包的累计统计为 2,968 次成功 hook、2,968 次 guide-only、0 次成功折叠、0 个折叠项目；本地 `estimatedTokenDelta` 为 -486,597，属于 JSON 字节 `/ 4` 估算值，不是供应商 usage 或账单。CLI 汇总没有提供对应的模型 usage。已安装缓存与当前工作树源码不同，因此这些计数不能验证本次工作树提示是否会增加有效折叠；当前改动尚未进入运行中的插件。
+
+同日修正 guide-only 请求准备：清理旧 guidance 和 recovery metadata 时只复制协议指令所在的外壳，保留未改动的对话历史；无折叠时也不再执行丢弃的校验注入、空替换和重复注入。`npm run bench:hook-projection -- --output docs/benchmarks/hook-projection-2026-10-29.json` 在 403,213 B 的 Chat 请求（96 条 Assistant 消息、各含 4,096 B 负载、无折叠）上交替运行 15 轮，输出逐项相同且输入未变。Bun 1.4.0 / Linux x64 的本次中位数为旧路径 4.560 ms、新路径 1.463 ms；绝对耗时在本机连续回放间波动明显，只用于同轮路径对比。
+
+2026-10-30 将提示改为按需注入：新会话只有在文本估算足以覆盖最低净收益门槛与 scoped 指导开销估算（规则 JSON 字节 `/ 4`，另预留 64 B 字段开销）时才加入提示；已有指导会话继续保留，可恢复引用始终得到恢复命令。这个判定只序列化短系统规则，不为估算开销重新序列化整段对话。这样短请求不会为未来不确定的折叠先支付固定输入开销，旧 scope-only metadata 仍会清理。四种协议的本地 hook 测试覆盖短请求省略、长上下文注入、已有提示续接及折叠后的恢复信息。后续真实 provider 试验确认该合成任务的短首请求没有附加指导，长源码上下文会启用指导；试验未单独对照旧版的无条件注入，所以门槛本身对质量与 usage 的增益尚未隔离。
+
+折叠投影也从整请求 `structuredClone` 改为只复制被改路径上的容器；公开 `replaceExtractedSpans` API 保持深拷贝语义。基准在四种协议、约 403–409 KB 历史、每个请求替换 3 段长细节，比较一次投影和模拟 hook 所需的连续三次投影；输出与旧实现深度相同，原输入未变，未改消息仍共享。Bun 1.4.0 / Linux x64 的三次投影中位数如下：
+
+| 协议 | 请求字节 | 深拷贝三次 | 路径复制三次 |
+| --- | ---: | ---: | ---: |
+| Chat | 402,859 | 2.544 ms | 0.060 ms |
+| Responses | 408,909 | 2.968 ms | 0.082 ms |
+| Anthropic | 405,267 | 2.584 ms | 0.148 ms |
+| Gemini | 404,221 | 4.819 ms | 0.301 ms |
+
+完整逐轮样本与源码 SHA-256 见[基准记录](benchmarks/hook-projection-2026-10-29.json)。三次投影与新折叠 hook 的投影调用数一致，但没有运行完整 `onRequest`、存储、网络或模型；结果只证明该合成复制路径更快，不能外推任务总耗时、token 或账单。
+
+同一基准还对照了 `onRequest` 的大对象统计：折叠成功路径把输入、清理后 body、结果和两份投影共 5 个对象用于指标，旧写法会序列化 10 次；请求内缓存后每个对象只序列化一次，共 5 次。四协议合成样本里，重复统计与缓存统计的中位数如下：
+
+| 协议 | 重复序列化 | 请求内缓存 |
+| --- | ---: | ---: |
+| Chat | 3.172 ms | 1.226 ms |
+| Responses | 2.411 ms | 0.913 ms |
+| Anthropic | 3.239 ms | 1.605 ms |
+| Gemini | 2.622 ms | 1.060 ms |
+
+该段只计序列化和 token 字节估算，不是完整 hook 的延迟测量；缓存仅在单次请求内使用，且只用于不再修改的对象。它降低本地统计开销，不改变发送给模型的请求，也不能证明 token 或账单减少。完整样本和源码指纹见[基准记录](benchmarks/hook-projection-2026-10-29.json)。
+
+同日以当前工作树复跑并另存[复跑记录](benchmarks/hook-projection-rerun-2026-10-29.json)，不覆盖上面的早先样本。15 轮交替中，403,213 B Chat guide-only 合成请求的旧路径中位数为 2.870 ms，新路径 0.956 ms；四协议三次折叠投影的深拷贝 / 路径复制中位数分别为 Chat 1.249 / 0.040 ms、Responses 1.747 / 0.057 ms、Anthropic 2.372 / 0.100 ms、Gemini 3.252 / 0.110 ms。此结果覆盖路径复制和序列化微基准，不包括完整 hook、存储、网络或模型，也不证明模型输入或账单减少。
+
+### Luna 质量对照的路由复查
+
+2026-10-29 重新运行两轮 full/summary 对照。四个 trial 都在首个模型请求收到 HTTP 404，未产生答案，因此没有质量分数；输入、输出 token 和费用均未知。full 的验证披露为 27,577 B，summary 为 219 B，这只记录请求消息大小，不表示模型实际处理量或节省金额。只读 `/v1/models` 返回 12 个模型 ID，没有包含 `luna` 的 ID；这与当前请求模型不可用相符，但不构成账单证据。完整失败记录见 [luna-quality-route-recheck-2026-10-29.json](benchmarks/luna-quality-route-recheck-2026-10-29.json)。
+
+本次四个失败 trial 各耗时约 26–29 秒。控制器现会在 HTTP 401、403 或 404 后停止同一批剩余试验；若没有候选文件改动，还会跳过重复的干净验收和 acceptance 检查，并记录计划数、完成数与停止原因。其他错误仍按原流程处理。
+
+### Claude Sonnet 5 的真实 hook 试跑
+
+2026-10-29 使用配置路由中可用的 `claude-sonnet-5`，通过 `self-iterate.py` 在隔离沙箱各跑一次 baseline 和 folding；同一任务要求压缩 `guidanceText` 并运行指导测试。每组最多 7 次请求。两组都通过了前后指导测试，但都达到轮数上限、没有交付改动，因此质量验收未通过。
+
+Provider 回报 baseline 输入 122,970 tokens、输出 468；folding 输入 85,495、输出 510。folding 组 2 个请求使用了折叠视图；归档的是 `src/annotations.ts` 中带源码标记的 `parseRegions` 区域（SHA-256 `cd78759388a110d9a5b228ae3d4784e1b95b584c86a94233e96e61fbf3a66402`），不是模型在回复中主动写出的折叠标记。这个试跑说明真实 hook 能折叠标记过的源码读取结果，但不能证明提示提升了 Agent 的标记采用率。
+
+这只是每组一次的非确定性观察：baseline 读了 42,391 字符的完整 `package.json`，folding 组只用 `grep` 查看脚本，执行轨迹不同，37,475-token 的输入差不能归因于折叠。两组都未完成任务，也没有账单或缓存 token 数据，所以不据此宣称省钱。原始轨迹已在本机分析后清理，脱敏汇总见[试跑记录](benchmarks/live-folding-pilot-2026-10-29.json)。
+
+### Sonnet 5 的成对 Provider 用量对照
+
+2026-10-29 从同一份 `src/protocol.ts` 完整读取结果生成 baseline 与 folding 请求，使用当前工作树的生产 `onRequest` hook 投影，再发给同一模型路由。baseline 保留完整工具回复但启用 guide-only；folding 将 6 段源码区替换为归档引用，并附上恢复指引。投影前请求为 33,948 B / 19,288 B，工具回复为 30,888 B / 16,429 B。
+
+| 相同任务的成对结果 | baseline 输入 / 输出 token | folding 输入 / 输出 token | 少用输入 token | 答案检查 |
+| --- | ---: | ---: | ---: | --- |
+| 抄出默认 shell 名单 | 12,305 / 99 | 7,467 / 99 | 4,838（39.3%） | 两边完全匹配 |
+| 推演 `allowed_tools` 的 shell 选择 | 12,369 / 167 | 7,532 / 182 | 4,837（39.1%） | 两边都返回 `exec_command`，理由正确 |
+
+这两对都只发出一次完成请求，没有工具调用，模型也正常结束。六对试验中每对 provider 回报的输入差都在 4,837–4,838 token；为调好可判分的输出格式，第 1–3、5 对有截断、格式不合格或被 token 上限终止，四对用量均保留。全部 12 个试验请求共用了 118,705 输入和 1,905 输出 token；按每个后续同规模请求少 4,837 token 估算，约 25 次才能抵回这轮验证消耗（仅输入 token 数相抵，不是美元盈亏）。完整逐对记录见[基准 JSON](benchmarks/live-provider-paired-projection-2026-10-29.json)。
+
+这是当前未发布工作树上的直接 Provider usage 证据，不是已安装的 `magpie-context-folding@0.5.1` 实测。样本只检查了两个简短源码阅读题，不能代表完整改码任务。Provider 没返回缓存 token 分类或账单；恢复归档的后续请求也可能吃掉部分节省。因此目前可说这两条相同请求在 folding 投影下少用了约 39% 输入 token，不能换算美元，也不能外推为普遍任务节省。
+
+### Sonnet 5 的 `absolutePath` 改码试跑
+
+同日让 `claude-sonnet-5` 为文件读取来源识别补上 `absolutePath`，并扩展跨协议、工具名和冲突路径测试。folding 组读取时确认 `readSource` 区域被折叠，恢复该区域一次；7 次请求中 5 次使用折叠视图。它只修改了 `src/protocol.ts` 和 `test/protocol.test.ts`，独立验证与 acceptance 都通过 22 项测试。模型随后触及 7 轮上限，没返回最终说明；我检查并应用了候选中的三处改动，本地再次跑出 22/22。
+
+这次不能作为有效 A/B：baseline 在首个请求就用满 2,048 输出 token，工具调用被截断；folding 共报告 145,314 输入和 5,344 输出 token，但任务轨迹没有正常结束。两组用量不能相减来推断节省。下次改码试跑应提高输出上限，并保证结束回复也有一轮预算。完整计数和失败条件见[试跑 JSON](benchmarks/absolutePath-live-coding-trial-2026-10-29.json)。这些改动仍只在当前工作树，未代表已发布或安装包行为。
+
+### 助手主动标记采用试跑
+
+为避免控制器替插件提示模型写标记，baseline 与 folding 共用的 system prompt 不再提 `@context-fold`；只有 folding 请求会收到生产 hook 的标记指导。`claude-sonnet-5` 在嵌套恢复任务中两组都没有写出助手标记。folding hook 在 4 个请求里把 29 个经验证源码读取区投影成引用，助手内容折叠数为 0。
+
+这组试验也没有完成任务：baseline 到 8 轮上限，folding 的最后回复达到 4,096 输出 token 上限；两边均无候选改动或独立验收。Provider 回报的输入合计为 207,017 对 196,254 token，但请求轨迹不同且 folding 被截断，这些数不能证明成本节省。逐项记录见[试跑 JSON](benchmarks/context-adoption-live-trial-2026-10-29.json)。
+
+### 已归档源码的重复读取（当前未发布工作树）
+
+为覆盖 agent 不写标记的情况，hook 现可复用同一路径下已归档的完整读取：当前上下文里的旧读取引用必须能在本 session 归档中唯一解析，新完整读取的路径与正文哈希都必须匹配。旧原文被裁掉后，重复读取仍可压缩；内容改变、换路径、部分读取或未知引用都会保留。配置的 `delay_requests` 和最低净收益门槛继续生效。
+
+`test/source-provenance.test.ts` 的本地合成用例覆盖 Chat、Responses、Anthropic、Gemini，也验证新读取先经历默认宽限请求；完整 JSON 请求在计入恢复提示后仍至少缩短该重复源码长度的一半。定向测试 13 项通过；`bun test test/*.test.ts` 为 277 项通过；类型检查通过。这证明的是可恢复的请求字节减少，不是 provider token 或账单变化。此工作树源码尚未发布；真实 agent 采纳率、生产工作负载和账单变化仍未知。
+
+随后用当前工作树的 `onRequest` 做了一对真实 provider 投影：同一份 Chat 请求包含 `worker.ts` 两次完整读取，任务只问 `operation237()` 返回值。baseline 保留两个源码副本，folding 把第二份替换成可验证引用；两次都由 `claude-sonnet-5` 正常结束并回答 `237`。Provider 回报输入从 10,957 降至 6,047 token，序列化后的请求 JSON 从 35,712 降至 18,985 字节。完整设置、实现指纹和逐臂数据见[实测记录](benchmarks/automatic-source-read-live-pair-2026-10-29.json)。这是一组 360 行合成源码、每臂一次请求的直接 hook 对照，不是已安装插件的采纳率或真实账单测量；baseline 先于 folding 运行。
+
+### 重复源码读取的五组 agent 闭环（当前未发布工作树）
+
+为检查多轮上下文中的实际 token 用量，使用[可复跑脚本](../scripts/live-source-read-agent-benchmark.mjs)交替执行 5 组 baseline/folding。每次都让 `claude-sonnet-5` 在两个 assistant 回合各读取一次生成的 16.7 KB `worker.ts`，最后回答 `operation237()`；共 5/5 组有效、10/10 次答对。每臂都发出 3 个 provider 请求并调用读取工具两次；folding 每组自动折叠一次重复读取，baseline 没有折叠。
+
+五组中，整段任务的 provider 输入 token 均减少：中位数 4,915（范围 4,858–5,006），约为 baseline 总输入的 27.0%–27.8%；序列化请求 JSON 中位减少 16,725 字节（范围 16,562–17,006）。每臂三次请求的 `onRequest` hook 总耗时为 13–16 ms。Provider 等待为 9.6–44.0 秒，端到端耗时差异方向不稳定，因此不据此声称提速。30 个请求都没有提供 cache read/write token 字段，所以也不能换算账单。
+
+这项试验刻意保证发生重复读取，只证明重复源码在后续上下文中被折叠时能减少本次任务的输入；它没有减少工具调用，也不能说明真实任务里重复读取有多常见。本次直接加载当前工作树 hook，未经过 Magpie host dispatch；当前 Magpie 插件列表仍显示已安装的 `0.5.1`，因此结果不代表已安装版本、日常工作负载或实际账单。逐臂用量、时延、折叠次数和请求元数据见[五组实测 JSON](benchmarks/live-source-read-agent-pairs-2026-10-29.json)。
+
+### 已完成回答后的旧源码折叠试验（当前未发布工作树）
+
+2026-10-30 修正基准提示后重跑真实 provider 对照：三组 baseline/folding 都正确回答两题（12/12），每组先完整读取 `worker.ts`，再回答一个无关的新问题。折叠组 provider 输入 token 分别少 5,400、5,398、5,397，中位少 **5,398**；请求 JSON 中位少 **17,783 B**（范围 17,783–17,819 B），每组都只折叠一次旧源码且没有恢复调用。短首请求没有附加指导（原始与发送 JSON 均为 1,135 B）；包含源码的后续请求才注入 scoped 指导。
+
+逐请求用量、时延和本次实测源码哈希见[修正提示后的三组实测 JSON](benchmarks/live-completed-source-retention-guidance-gate-exact-format-2026-10-30.json)，脚本见[可复现实验](../scripts/live-completed-source-retention-benchmark.mjs)。之后仅把“标记即提前注入”收窄为“可恢复引用才提前注入”；本试验的大源码请求独立超过注入门槛，因此覆盖的发送路径不变，但 JSON 哈希不是最终工作树的逐字节哈希。该试验直接加载未发布工作树，没有经过 Magpie host dispatch。模型响应未提供缓存 token；这证明该合成任务中 provider 输入减少且答案通过，不证明账单节省、真实工作负载收益或提速。
+
+此前一份“exact-format”试验要求模型回答十进制整数，却在第二题要求输出 `SAPPHIRE`，系统与用户指令冲突；其数据已排除，不纳入结论。
+
+### 短请求跳过指导的真实 provider 对照（当前未发布工作树）
+
+2026-10-30 用同一条短 Chat 请求交替比较当前 `onRequest` 门控和强制附加相同指导文本，`claude-sonnet-5` 三组均答对（6/6）。门控组每次报告 473 个输入 token，强制指导组 647 个，三组都少 174 token；发送 JSON 每次少 485 B。逐组数据和源码哈希见[实测记录](benchmarks/live-guidance-overhead-gate-2026-10-30.json)，脚本见[可复现实验](../scripts/live-guidance-overhead-benchmark.mjs)。Provider 未报告缓存 token；这量出该短请求的提示开销，不等同账单节省或生产流量收益。实验直接运行当前未发布工作树；主机当前仍加载 0.5.1，因此此改动尚未影响主机请求。
+
+早期版本在紧接着询问同一源码时会恢复整份文件；2/3 组配对有效，11/12 个答案通过检查，有效配对的输入 token 中位反而增加 2,046，并出现两次恢复调用；记录见[相关追问试验](benchmarks/live-completed-source-retention-2026-10-30.json)。当前实现会在新问题提到文件名、源码标识符或明显回指时保留完整读取，并在恢复提示中建议先用归档 `grep` 查短片段。这个保护依赖文本线索，无法完全判断语义相关性；需要未命中的细节时仍可按引用恢复。Chat、Responses、Anthropic、Gemini 的边界测试和归档短片段检索测试均通过。
