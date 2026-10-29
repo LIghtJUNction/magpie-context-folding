@@ -209,4 +209,8 @@ Provider 回报 baseline 输入 122,970 tokens、输出 468；folding 输入 85,
 
 随后把同一源码整理为独立的 `0.5.2` 本地候选提交 `1fdaad6`，在 Magpie 中启用该路径并关闭旧的 `0.5.1` 项。打包安装验收和路径直载验收都通过 18/18 个合成 host 请求，响应 hook 成功 18 次、失败/未验证为 0；来源哈希与上面的真实 provider 对照一致。这里证明候选已能经 Magpie host 执行并保留折叠行为；真实 provider 试验仍只证明输入 token 减少，缓存字段缺失，实际账单金额和持续生产收益尚未确认。该候选尚未发布到 npm。
 
-早期版本在紧接着询问同一源码时会恢复整份文件；2/3 组配对有效，11/12 个答案通过检查，有效配对的输入 token 中位反而增加 2,046，并出现两次恢复调用；记录见[相关追问试验](benchmarks/live-completed-source-retention-2026-10-30.json)。当前实现会在新问题提到文件名、源码标识符或明显回指时保留完整读取，并在恢复提示中建议先用归档 `grep` 查短片段。这个保护依赖文本线索，无法完全判断语义相关性；需要未命中的细节时仍可按引用恢复。Chat、Responses、Anthropic、Gemini 的边界测试和归档短片段检索测试均通过。
+早期版本在紧接着询问同一源码时会恢复整份文件；2/3 组配对有效，11/12 个答案通过检查，有效配对的输入 token 中位反而增加 2,046，并出现两次恢复调用；记录见[相关追问试验](benchmarks/live-completed-source-retention-2026-10-30.json)。当前实现会在新问题提到文件名、源码标识符或常见源码/答案回指词时保留完整读取，并在恢复提示中建议先用归档 `grep` 查短片段。这个保护依赖文本线索，无法完全判断语义相关性；需要未命中的细节时仍可按引用恢复。Chat、Responses、Anthropic、Gemini 的边界测试和归档短片段检索测试均通过。
+
+### 短省略式追问的归档检索
+
+2026-10-30 在同一段 17,890 B 的生成源码后追问“What about 238?”，与两组 baseline 交替对照。baseline 保留完整源码；folding 把源码归档后，每组各发生一次归档恢复命令调用。第二组 baseline 还完整重读源码一次，folding 臂只读初次源码并发生一次恢复调用。两组共 8 个答案都正确；Provider 输入 token 分别少 3,696 和 16,330，中位少 10,013；发送 JSON 中位少 34,244 B。该结果使用的 `onRequest` SHA 与本机 0.5.2 候选一致，但通过有界本地工具循环直连 Provider，未经过 Magpie host。闭环耗时一组慢 2.1 秒、另一组快 19.9 秒，波动太大，不能证明提速。Provider 未返回缓存 token，且只有两组、合成源码；恢复命令具体是 `grep`、peek 还是完整恢复没有记录。这证明该场景能在一次归档恢复后答对并减少输入 token，不证明账单金额或常见追问上的普遍收益。逐项记录见[实测 JSON](benchmarks/live-completed-source-retention-elliptical-current-2026-10-30.json)，脚本见[实验脚本](../scripts/live-completed-source-retention-benchmark.mjs)。
