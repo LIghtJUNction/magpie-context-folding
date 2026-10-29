@@ -207,4 +207,6 @@ Provider 回报 baseline 输入 122,970 tokens、输出 468；folding 输入 85,
 
 2026-10-30 用同一条短 Chat 请求交替比较当前 `onRequest` 门控和强制附加相同指导文本，`claude-sonnet-5` 三组均答对（6/6）。门控组每次报告 473 个输入 token，强制指导组 647 个，三组都少 174 token；发送 JSON 每次少 485 B。逐组数据和源码哈希见[实测记录](benchmarks/live-guidance-overhead-gate-2026-10-30.json)，脚本见[可复现实验](../scripts/live-guidance-overhead-benchmark.mjs)。Provider 未报告缓存 token；这量出该短请求的提示开销，不等同账单节省或生产流量收益。实验直接运行当前未发布工作树；主机当前仍加载 0.5.1，因此此改动尚未影响主机请求。
 
+随后把同一源码整理为独立的 `0.5.2` 本地候选提交 `1fdaad6`，在 Magpie 中启用该路径并关闭旧的 `0.5.1` 项。打包安装验收和路径直载验收都通过 18/18 个合成 host 请求，响应 hook 成功 18 次、失败/未验证为 0；来源哈希与上面的真实 provider 对照一致。这里证明候选已能经 Magpie host 执行并保留折叠行为；真实 provider 试验仍只证明输入 token 减少，缓存字段缺失，实际账单金额和持续生产收益尚未确认。该候选尚未发布到 npm。
+
 早期版本在紧接着询问同一源码时会恢复整份文件；2/3 组配对有效，11/12 个答案通过检查，有效配对的输入 token 中位反而增加 2,046，并出现两次恢复调用；记录见[相关追问试验](benchmarks/live-completed-source-retention-2026-10-30.json)。当前实现会在新问题提到文件名、源码标识符或明显回指时保留完整读取，并在恢复提示中建议先用归档 `grep` 查短片段。这个保护依赖文本线索，无法完全判断语义相关性；需要未命中的细节时仍可按引用恢复。Chat、Responses、Anthropic、Gemini 的边界测试和归档短片段检索测试均通过。
