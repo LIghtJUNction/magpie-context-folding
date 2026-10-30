@@ -47,6 +47,11 @@ const snapshotSchema = z.object({
   cycle: z.number().int().nonnegative().optional(),
   requestHash: z.string().optional(),
   projectedHash: z.string().optional(),
+  guidance: z.object({
+    noFoldPrompts: z.number().int().nonnegative().default(0),
+    nextCycle: z.number().int().nonnegative().default(0),
+    lastPromptCycle: z.number().int().nonnegative().optional(),
+  }).optional(),
   decision: z.record(z.string(), z.unknown()).default({}),
   metrics: metricsSchema.default(emptyMetrics),
 });

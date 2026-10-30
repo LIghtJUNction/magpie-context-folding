@@ -8,7 +8,7 @@
 
 0.5.0 起，折叠由 Agent 写出的标记请求，并受最小节省量等条件约束。没有智力、平衡、经济档位，也不需要先列目录、再调用 `mark`。未标记的内容保持完整。
 
-**本文描述 0.5.1 release。** 旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
+**本文描述 0.5.2 release。** 旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
 
 ## 文本管道：ctxf
 
@@ -39,7 +39,7 @@ ctxf fold --language python < module.py > module.folded.txt
 安装已发布版本：
 
 ```sh
-magpie plugin add npm:magpie-context-folding@0.5.1
+magpie plugin add npm:magpie-context-folding@0.5.2
 ```
 
 npm 版本通过 GitHub Actions Trusted Publishing 发布：完成 npm 与 GitHub Actions 的 Trusted Publisher 绑定后，推送匹配 `package.json` 版本的 `v*` GitHub Release 会先运行验证，再用 OIDC 发布并生成 provenance，无需长期 npm token 或本机 OTP。
@@ -58,7 +58,7 @@ Magpie 直接加载 TypeScript 源码，不依赖安装时执行构建脚本。�
 
 ### 2. 给 Agent 一段短提示词
 
-插件会自动向请求加入简短指导；也可以按宿主需要补充下面的提示词：
+插件会自动向请求加入简短指导；如果连续提示没有触发折叠，同一会话的重复提示会逐步减少。成功折叠或需要恢复引用时仍会加入指导。也可以按宿主需要补充下面的提示词：
 
 > 主动用折叠标记管理上下文，不要等窗口紧张。每完成一段实质性工作，先在标记外写简明且可独立理解的当前摘要，再紧接着用 `<!-- @context-fold begin task-details -->` 和 `<!-- @context-fold end task-details -->` 包住该阶段已完成的较长支撑过程。结论、约束、失败和下一步留在摘要里；摘要必须在细节折叠后仍能说明任务进展。不要一开始打开包住全部工作的总标记。小段和仍在进行的内容不必标记；未闭合的标记不能折叠。默认设置下，完整标记首次出现在下一请求时，符合净节省条件的内容会保存并折叠。源码使用相同标记和对应语言的注释语法。不要计算哈希；需要原文时，用系统给出的 scope 和短哈希通过 shell 调用本地 CLI。
 
@@ -88,6 +88,8 @@ validate_options(&options)?;
 Python 用 `#`，JavaScript/TypeScript 用 `//`，也可使用对应语言的完整块注释。折叠只改变发送给模型的视图，原文件不改写。Magpie 请求钩子会处理能够核实来源的单一文本源码读取结果；普通工具 JSON、部分读取及无法确认格式的结果保持原样。其他宿主需要接入[源码适配器](context-folding/README.md#source-annotations-and-compact-reads)。
 
 网关对 Python 和 JavaScript/TypeScript 使用保守词法过滤，排除字符串里的伪标记；遇到 f-string、无法可靠区分的模板插值或 JSX 等复杂结构时保留该份源码。独立 Python 核心使用 Python tokenizer 和可选的 JS/TS Tree-sitter 语法分析，能力范围不同。其他语言仍使用整行字面协议，不能保证排除多行字符串中的伪标记。
+
+首次完整读取源码时，如果当前问题唯一点名一个函数，插件可在完整文件已归档的前提下，只把该函数和可确认的文件级字面量常量放入后续请求；无法唯一定位时保留整份源码。片段明确提示可用 `grep/read` 回查未包含的定义。四种请求协议的本地合成基准见[用量、速度与任务质量记录](docs/cost-speed-quality.md#首次完整源码读取的函数定向投影本地合成未调用-provider)。
 
 ## 短哈希与恢复
 
@@ -166,7 +168,7 @@ min_savings_tokens = 256
 
 ### 已安装插件的 Magpie gateway smoke
 
-测试脚本从 Magpie 本机 npm 插件安装目录读取已安装的 `magpie-context-folding`，复制到临时隔离目录，在 bubblewrap、临时 HOME/XDG 和独立 localhost 合成模型下启动真实 Magpie host。它发送 18 个 Chat Completions 请求，并检查闭合标记延迟、重试、折叠引用、系统指导、CLI 分页读取、文件导出、显式恢复、会话隔离和源码只读等行为。逐步断言见 [`scripts/host-smoke.py`](scripts/host-smoke.py) 与 [`scripts/installed-package-smoke.py`](scripts/installed-package-smoke.py)。
+测试脚本从 Magpie 本机 npm 插件安装目录读取已安装的 `magpie-context-folding`，复制到临时隔离目录，在 bubblewrap、临时 HOME/XDG 和独立 localhost 合成模型下启动真实 Magpie host。当前脚本发送 29 个 Chat Completions 请求，并检查标准 `Read` 工具的 `absolutePath` 路径、闭合标记延迟、重试、折叠引用、指导提示退避、CLI 分页读取、文件导出、显式恢复、会话隔离和源码只读等行为。逐步断言见 [`scripts/host-smoke.py`](scripts/host-smoke.py) 与 [`scripts/installed-package-smoke.py`](scripts/installed-package-smoke.py)。
 
 需要 Linux、bubblewrap、Magpie、Bun 1.4+ 和已安装的 npm 插件。默认读取 `~/.config/magpie/plugins/node_modules/magpie-context-folding`；也可通过 `--package` 指定安装目录。测试不修改现有 Magpie 插件配置或当前 gateway，不连接供应商模型。
 
@@ -174,7 +176,7 @@ min_savings_tokens = 256
 npm ci
 npm run test:host:installed
 # 核对指定版本：
-npm run test:host:installed -- --expected-version 0.5.1
+npm run test:host:installed -- --expected-version 0.5.2
 # 非默认安装位置：
 npm run test:host:installed -- --package /absolute/path/to/magpie-context-folding
 ```
@@ -184,6 +186,10 @@ npm run test:host:installed -- --package /absolute/path/to/magpie-context-foldin
 同一条已发生请求轨迹中，未折叠请求估算为 14,377，折叠请求估算为 2,624（按 JSON UTF-8 字节数除以 4，约减少 81.8%）。这是请求序列化大小估算，不是供应商 tokenizer 用量、反事实完整历史比较或账单节省。机器回执见 [`docs/benchmarks/host-smoke-npm-0.5.0-2026-10-28.json`](docs/benchmarks/host-smoke-npm-0.5.0-2026-10-28.json)。
 
 2026-10-29 发布并安装 npm `0.5.1` 后，在 Magpie `0.1.1948`、Bun `1.4.0` 上复跑：18 项检查及 18 次请求全部通过，hook 失败和未验证均为 0，46,278 字节原文精确恢复。已安装源码逐文件匹配 `v0.5.1`；这份验收使用已安装制品和本地合成上游，原始记录见 [`0.5.1 安装验收`](docs/benchmarks/host-smoke-npm-0.5.1-2026-10-29.json)。
+
+2026-10-30，候选源码通过隔离 host smoke：29/29 请求抵达本地合成上游，response hook 成功 29 次，失败和未验证均为 0；46,278 字节合成原文可精确恢复。源码归档用标准 `Read` + `absolutePath` 工具形态验证。六个不同的长上下文请求实测指导提示序列为“注入两次、省略三次、再注入”，全场景指标为 `guideOnlyRequests=17`、`guidanceSuppressedRequests=4`。这验证候选源码在真实 Magpie/Bun 请求链上的指导退避、响应指标和归档恢复；本地合成上游不提供真实模型 token 或账单证据，也不表示生产插件已重载。
+
+同日另做一组隔离宿主的真实 Provider 对照：两臂都正确回答 `391`，完整源码基线为 12,238 输入 token，折叠一条源码后为 1,176，少 11,062（90.4%）；转发请求体从 34,064 B 降为 2,203 B。该单组实验使用合成 Read 历史，只把最后追问发送给 Provider；它不是账单节省或生产插件验收。脚本、逐项指标和限制见[用量记录](docs/cost-speed-quality.md#magpie-宿主中的真实-provider-单对验证)与[原始 JSON](docs/benchmarks/live-magpie-provider-host-ab-validated-2026-10-30.json)。
 
 ### 归档树查询微基准
 

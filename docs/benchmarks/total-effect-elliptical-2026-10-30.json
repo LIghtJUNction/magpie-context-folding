@@ -1,0 +1,689 @@
+{
+  "schema_version": 1,
+  "benchmark": "live-completed-source-read-retention-elliptical",
+  "generated_at": "2026-10-29T18:33:47.858Z",
+  "claim_under_test": "Compare provider input usage and answer preservation with the hook bypassed versus local folding onRequest for a elliptical follow-up after a completed full source read; include any archive recovery calls.",
+  "model_requested": "claude-sonnet-5",
+  "route": "OpenAI-compatible /v1/chat/completions",
+  "usage_source": "provider response usage.prompt_tokens and usage.completion_tokens; cache fields recorded only when explicitly returned",
+  "implementation": {
+    "hook": "src/context.hooks.ts:onRequest",
+    "hook_sha256": "fdb228d11b066a0aac86c205e7060f21d787479904b67fef276d5c9d1e2f4ed0",
+    "baseline_hook_bypassed": true,
+    "published_package_loaded": false
+  },
+  "design": {
+    "planned_pairs": 3,
+    "order": "alternating baseline/folding, then folding/baseline",
+    "max_requests_per_user_turn": 5,
+    "max_output_tokens": 512,
+    "task_sha256": "8e13eeead6f858dab7d30d102e39bca07b789e4501407a4b0dd17d6d16527124",
+    "source_sha256": "559ae860f030885a4951cb70e5f727ef36775320aa5ea6b5ff57b21e30ff1c1f",
+    "source_utf8_bytes": 17890,
+    "scenario": "elliptical",
+    "source_question_index": 237,
+    "related_followup_index": null,
+    "questions": [
+      "Use read_file to inspect worker.ts. What integer does operation237() return? Reply with only the integer.",
+      "What about 238? Reply with only the integer."
+    ],
+    "expected_answers": [
+      "603357",
+      "562591"
+    ],
+    "baseline": "hook bypassed; raw request sent to provider",
+    "folding": "local onRequest hook with delayRequests=0",
+    "min_savings_tokens": 256,
+    "isolated_temp_workspace": true,
+    "bounded_tool_runner": true
+  },
+  "machine_at_start": {
+    "load_average": [
+      5.3,
+      6.59,
+      6.61
+    ],
+    "logical_cores": 24
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 1,
+        "session": "completed-read-01-baseline",
+        "scope": "250740643ba84f2e833de5bcb407a8335fdad701f8a73f190ab1d2e66c600ab4",
+        "completion": "wrong-answer",
+        "answers": [
+          "603357",
+          "The user is asking about operation238. I already have the file content from the earlier read_file call. Looking at the output, operation238() returns 562591.\n\nThe instruction says to emit exactly one structured call through an attached clean client task tool when it genuinely applies. But the question is a simple lookup of data I already have from the previous read_file result. There's no need to make another tool call - the data is already in a legitimate prior task result.\n\nWait, let me re-read: \"When an attached clean client task tool genuinely applies to the user's task, emit exactly one structured call through it... When no attached clean client tool genuinely applies, keep the applicable no-call outcome already defined completely unchanged.\"\n\nThe user asked \"What about 238? Reply with only the integer.\" This is asking about operation238(). I already have this data from the prior read_file result which showed: `export function operation238() { return 562591; }`\n\nSince I already have the answer from a legitimate prior task result, there's no need for another tool call. The \"no-call outcome\" is to reply with only the integer.\n\nThe answer is 562591.562591"
+        ],
+        "correct_answers": 1,
+        "success": false,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13433,
+        "provider_output_tokens": 523,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 12043,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3140,
+            "hook_on_request_ms": null,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 19627,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2400,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6366,
+              "output_tokens": 4,
+              "total_tokens": 6370,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 19740,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 6496,
+            "hook_on_request_ms": null,
+            "finish_reason": "length",
+            "usage": {
+              "input_tokens": 6389,
+              "output_tokens": 512,
+              "total_tokens": 6901,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 1,
+        "session": "completed-read-01-folding",
+        "scope": "9cd67666c178350de45999964f5390bad2d20b474268246a887cf1a30ffc6b18",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "562591"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 1,
+        "recovery_action_counts": {
+          "grep": 1,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 4,
+        "folded_source_requests": 2,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 10508,
+        "provider_output_tokens": 527,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 21133,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2695,
+            "hook_on_request_ms": 18,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 3106,
+            "hook_on_request_ms": 9,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 2452,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 11950,
+            "hook_on_request_ms": 9,
+            "finish_reason": "length",
+            "usage": {
+              "input_tokens": 1150,
+              "output_tokens": 512,
+              "total_tokens": 1662,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 3,
+            "user_turn": 1,
+            "raw_request_json_bytes": 21937,
+            "sent_request_json_bytes": 4649,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3311,
+            "hook_on_request_ms": 5,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 2140,
+              "output_tokens": 4,
+              "total_tokens": 2144,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": false,
+      "deltas": {
+        "provider_input_tokens_saved": 2925,
+        "provider_output_tokens_delta": 4,
+        "end_to_end_ms_saved": -9090,
+        "recovery_tool_calls_added": 1
+      }
+    },
+    {
+      "pair": 2,
+      "order": [
+        "folding",
+        "baseline"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 2,
+        "session": "completed-read-02-baseline",
+        "scope": "bf438652bd262109d378a7cfb7076f5af14e4a444f03ae3f70a66dc4ef10a970",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "562591"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13433,
+        "provider_output_tokens": 15,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 8766,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2368,
+            "hook_on_request_ms": null,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 19627,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 3574,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6366,
+              "output_tokens": 4,
+              "total_tokens": 6370,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 19740,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2823,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6389,
+              "output_tokens": 4,
+              "total_tokens": 6393,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 2,
+        "session": "completed-read-02-folding",
+        "scope": "ec4c22c43cf145159f0835464af6fae087c231d1977a8ce47bf29cdae8b4026d",
+        "completion": "wrong-answer",
+        "answers": [
+          "The user asked what integer operation237() returns. Looking at the file content, I can see: `export function operation237() { returI'm Claude, built by Anthropic. That topic is outside what I can discuss, but feel free to ask me any technical questions."
+        ],
+        "correct_answers": 0,
+        "success": false,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 2,
+        "folded_source_requests": 0,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 7253,
+        "provider_output_tokens": 609,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 9410,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3007,
+            "hook_on_request_ms": 4,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 97,
+              "total_tokens": 775,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19745,
+            "sent_request_json_bytes": 20230,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 6374,
+            "hook_on_request_ms": 4,
+            "finish_reason": "length",
+            "usage": {
+              "input_tokens": 6575,
+              "output_tokens": 512,
+              "total_tokens": 7087,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": false,
+      "deltas": {
+        "provider_input_tokens_saved": 6180,
+        "provider_output_tokens_delta": 594,
+        "end_to_end_ms_saved": -644,
+        "recovery_tool_calls_added": 0
+      }
+    },
+    {
+      "pair": 3,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 3,
+        "session": "completed-read-03-baseline",
+        "scope": "337232d922ebf913e18e3f1c5eab246a796d46218e989cdf9448ce747d8e097a",
+        "completion": "wrong-answer",
+        "answers": [
+          "603357",
+          "The user is asking about operation238. I already read the file and have the content. From the file read:\n\nexport function operation238() { return 562591; }\n\nThe user wants only the integer. But there's a final instruction saying I should emit a structured call through a tool if one genuinely applies. However, I already have the data from the earlier read_file call. The instruction says \"When an attached clean client task tool genuinely applies to the user's task, emit exactly one structured call through it.\"\n\nBut the question is just asking for a value I already have. Do I need to re-read the file? The user said \"For the first question, call read_file on worker.ts exactly once before answering.\" I already did that. For this follow-up, I have the data in context.\n\nThe instruction says to emit a structured call through a clean client task tool when it genuinely applies. But I already have the answer from the prior read. Re-reading would be redundant. The no-call outcome is already defined: \"When no attached clean client tool genuinely applies, keep the applicable no-call outcome already defined above completely unchanged.\"\n\nActually, the question is about data I already have. The task tool (read_file) already applied and was used. I don't need to call it again."
+        ],
+        "correct_answers": 1,
+        "success": false,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13433,
+        "provider_output_tokens": 523,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 11874,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2547,
+            "hook_on_request_ms": null,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 19627,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2548,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6366,
+              "output_tokens": 4,
+              "total_tokens": 6370,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 19740,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 6778,
+            "hook_on_request_ms": null,
+            "finish_reason": "length",
+            "usage": {
+              "input_tokens": 6389,
+              "output_tokens": 512,
+              "total_tokens": 6901,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 3,
+        "session": "completed-read-03-folding",
+        "scope": "38bb46caedf4400a833011afbcc47783393314bc3f1fc927b8b91cac26fd8940",
+        "completion": "wrong-answer",
+        "answers": [
+          "603357",
+          "603357"
+        ],
+        "correct_answers": 1,
+        "success": false,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 1,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 1
+        },
+        "tool_errors": 1,
+        "request_count": 4,
+        "folded_source_requests": 2,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 9928,
+        "provider_output_tokens": 200,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 11091,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2561,
+            "hook_on_request_ms": 4,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2550,
+            "hook_on_request_ms": 8,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19740,
+            "sent_request_json_bytes": 2452,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3737,
+            "hook_on_request_ms": 8,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 1147,
+              "output_tokens": 185,
+              "total_tokens": 1332,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 3,
+            "user_turn": 1,
+            "raw_request_json_bytes": 20494,
+            "sent_request_json_bytes": 3206,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2192,
+            "hook_on_request_ms": 4,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 1563,
+              "output_tokens": 4,
+              "total_tokens": 1567,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": false,
+      "deltas": {
+        "provider_input_tokens_saved": 3505,
+        "provider_output_tokens_delta": -323,
+        "end_to_end_ms_saved": 783,
+        "recovery_tool_calls_added": 1
+      }
+    }
+  ],
+  "summary": {
+    "planned_pairs": 3,
+    "completed_pairs": 3,
+    "valid_pairs": 0,
+    "correct_answers": 7,
+    "provider_input_token_savings": {
+      "median": null,
+      "range": null,
+      "positive_pairs": 0
+    },
+    "sent_request_json_bytes_saved": {
+      "median": null,
+      "range": null
+    },
+    "folding_recovery_calls": 0,
+    "baseline_recovery_calls": 0,
+    "recovery_action_counts": {
+      "baseline": {
+        "grep": 0,
+        "peek": 0,
+        "restore": 0,
+        "rejected": 0
+      },
+      "folding": {
+        "grep": 0,
+        "peek": 0,
+        "restore": 0,
+        "rejected": 0
+      }
+    },
+    "cache_usage_reported_in_all_requests": false
+  },
+  "limitations": [
+    "The task deliberately asks two questions about one generated file; it does not measure ordinary follow-up prevalence.",
+    "The agent may need an extra recovery or read tool call; those calls and their provider tokens are included.",
+    "This is a real provider with a bounded local tool loop, not Magpie/OpenCode host dispatch.",
+    "Provider token counts are not billing amounts; no price schedule was applied.",
+    "Small pair counts are exploratory and wall-clock differences are not a speedup claim."
+  ],
+  "run_error": null
+}

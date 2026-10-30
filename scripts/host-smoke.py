@@ -120,25 +120,38 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(serialized(value), encoding="utf-8")
 
 
-def verify_request(outgoing: dict, sent: dict) -> tuple[dict, str | None, dict]:
-    """Check the real wire request, including the default low-noise guidance."""
+def verify_request(
+    outgoing: dict, sent: dict, expect_guidance: bool | None = None,
+) -> tuple[dict, str | None, dict]:
+    """Check the wire request, including adaptive low-noise guidance."""
     clean = copy.deepcopy(outgoing)
     hints = [item for item in clean["messages"] if item.get("role") == "system"
              and isinstance(item.get("content"), str) and GUIDANCE.fullmatch(item["content"])]
-    assert len(hints) == 1, f"expected exactly one system guidance, found {len(hints)}"
+    assert len(hints) <= 1, f"expected at most one system guidance, found {len(hints)}"
+    if expect_guidance is not None:
+        assert bool(hints) is expect_guidance, (
+            f"guidance presence was {bool(hints)}, expected {expect_guidance}"
+        )
     assert not any(item.get("role") == "system" and isinstance(item.get("content"), str)
                    and BUDGET.fullmatch(item["content"]) for item in clean["messages"]), "removed context budget was injected"
-    scope_match = re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"])
+    scope_match = (
+        re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"])
+        if hints else None
+    )
     scope = scope_match[1] if scope_match else None
     assert outgoing["model"] == "m1", f"unexpected routed model: {outgoing['model']}"
     # Magpie changes fake/m1 to m1 after the hook. Count the same model name to
     # compare full hook payloads, including guidance and all client declarations.
     estimated = {**outgoing, "model": sent["model"]}
     used = (len(serialized(estimated).encode("utf-8")) + 3) // 4
-    clean["messages"].remove(hints[0])
+    if hints:
+        clean["messages"].remove(hints[0])
     clean["model"] = sent["model"]
     assert clean["tools"] == sent["tools"], "client tool declarations changed"
-    return clean, scope, {"usedEstimate": used, "basis": "json-utf8-bytes/4"}
+    return clean, scope, {
+        "usedEstimate": used, "basis": "json-utf8-bytes/4",
+        "guidanceInjected": bool(hints),
+    }
 
 
 def advance(body: dict, message: str) -> dict:
@@ -234,13 +247,16 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 return sum(metrics.get(key, 0) for key in (
                     "successfulHookRequests", "failedHookRequests", "unverifiedHookRequests"))
 
-            def send(body: dict, session: str = "host-smoke") -> tuple[dict, str | None, dict]:
+            def send(
+                body: dict, session: str = "host-smoke",
+                expect_guidance: bool | None = None,
+            ) -> tuple[dict, str | None, dict]:
                 before = call({"action": "stats"})["metrics"]
                 count = len(fixture.upstream)
                 reply = request_json(gateway + "/v1/chat/completions", body, session)
                 assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
                 assert len(fixture.upstream) == count + 1, "request did not reach synthetic upstream exactly once"
-                output = verify_request(fixture.upstream[-1], body)
+                output = verify_request(fixture.upstream[-1], body, expect_guidance)
                 # Response hooks can finish after HTTP completion. Wait for their
                 # write before the next archive mutation; do not mistake an
                 # unverified host response for verified usage.
@@ -279,7 +295,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             declarations = [
                 {"type": "function", "function": {"name": "exec_command", "description": "Execute a shell command", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}},
                 {"type": "function", "function": {"name": "exec", "description": "Synthetic history only", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}}}},
-                {"type": "function", "function": {"name": "read", "description": "Synthetic Read history only", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+                {"type": "function", "function": {"name": "Read", "description": "Synthetic Read history only", "parameters": {"type": "object", "properties": {"absolutePath": {"type": "string"}}}}},
             ]
             first_part = "Beginning of completed research.\r\n" + "".join(
                 f"middle-evidence-{i:04d}: punctuation and CRLF; 原文必须可逆恢复。😀\r\n"
@@ -301,14 +317,14 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 }]},
                 {"role": "tool", "tool_call_id": "exec-1", "content": generic_result},
             ]}
-            open_output, opening_scope, _ = send(opening)
+            open_output, opening_scope, _ = send(opening, expect_guidance=True)
             assert open_output == opening, "an unfinished annotation changed the request"
             closed = copy.deepcopy(opening)
             closed["messages"].extend([
                 {"role": "assistant", "content": last_part + suffix},
                 {"role": "user", "content": "The annotation is now closed."},
             ])
-            first, first_scope, first_request = send(closed)
+            first, first_scope, first_request = send(closed, expect_guidance=True)
             assert first_scope is None and opening_scope is None and first == closed, "first closed observation did not keep its grace period"
             retry, retry_scope, _ = send(closed)
             assert retry_scope is None and retry == closed, "an identical retry consumed the grace period"
@@ -321,12 +337,26 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             expected["messages"][5]["content"] = reference + suffix
             assert folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
             assert folded_request["usedEstimate"] < first_request["usedEstimate"], "fold did not reduce the outgoing estimate"
-            repeated, _, _ = send(advanced)
+            repeated, _, _ = send(advanced, expect_guidance=True)
             assert repeated == expected, "a repeated request changed the projection"
             projected = copy.deepcopy(fixture.upstream[-1])
             projected["model"] = "fake/m1"
-            replayed, _, _ = send(projected)
+            replayed, _, _ = send(projected, expect_guidance=True)
             assert replayed == expected, "replaying a projected request duplicated guidance or re-folded a reference"
+            guidance_schedule = []
+            guidance_payload = "Large unmarked history for the adaptive guidance probe.\n" * 500
+            for cycle in range(6):
+                probe = {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
+                    {"role": "assistant", "content": guidance_payload},
+                    {"role": "user", "content": f"Distinct guidance cycle {cycle}."},
+                ]}
+                _, _, observed = send(
+                    probe, "host-smoke-guidance", expect_guidance=cycle in (0, 1, 5),
+                )
+                guidance_schedule.append(observed["guidanceInjected"])
+            assert guidance_schedule == [True, True, False, False, False, True], (
+                f"unexpected adaptive guidance schedule: {guidance_schedule}"
+            )
             status = call({"scope": scope, "action": "status"})
             scope_metrics = call({"scope": scope, "action": "stats"})["metrics"]
             assert status["entries"] == 1 and scope_metrics["itemsFolded"] == 1, "retry created duplicate archives or folds"
@@ -359,11 +389,17 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 return {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
                     {"role": "user", "content": "Inspect the synthetic source view."},
                     {"role": "assistant", "content": "Reading source.", "tool_calls": [{
-                        "id": call_id, "type": "function", "function": {"name": "read", "arguments": serialized({"path": str(source_path)})},
+                        "id": call_id, "type": "function", "function": {"name": "Read", "arguments": serialized({"absolutePath": str(source_path)})},
                     }]},
                     {"role": "tool", "tool_call_id": call_id, "content": text},
                     {"role": "user", "content": "Continue."},
                 ]}
+
+            def completed_source_body(text: str, call_id: str, followup: str) -> dict:
+                body = source_body(text, call_id)
+                body["messages"][-1] = {"role": "assistant", "content": "Read completed."}
+                body["messages"].append({"role": "user", "content": followup})
+                return body
 
             source_input = source_body(source_text, "read-1")
             source_first, _, _ = send(source_input, "host-smoke-source")
@@ -394,23 +430,83 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert send(unmarked, "host-smoke-source")[0] == unmarked
             unmarked_next = advance(unmarked, "Unmarked source must remain complete.")
             assert send(unmarked_next, "host-smoke-source")[0] == unmarked_next, "unmarked source was selected automatically"
+
+            unrelated_numeric_source = "\r\n".join(
+                f"export function entry{index}() {{ return 8341; }}" for index in range(90)
+            )
+            source_path.write_bytes(unrelated_numeric_source.encode("utf-8"))
+            unrelated_numeric_first = completed_source_body(
+                unrelated_numeric_source, "read-numeric-unrelated",
+                "Was the 8341 election result certified?",
+            )
+            unrelated_first_output, unrelated_first_scope, _ = send(unrelated_numeric_first, "host-smoke-numeric")
+            assert unrelated_first_scope is None and unrelated_first_output == unrelated_numeric_first, (
+                "the configured source-read grace request was not preserved"
+            )
+            unrelated_numeric = advance(
+                unrelated_numeric_first, "Did the 8341 election result pass the review?",
+            )
+            unrelated_numeric_expected = copy.deepcopy(unrelated_numeric)
+            unrelated_numeric_expected["messages"][2]["content"] = f"[[cf:v2:{sha256(unrelated_numeric_source)[:12]}]]"
+            unrelated_folded, unrelated_scope, _ = send(unrelated_numeric, "host-smoke-numeric")
+            assert unrelated_scope is not None and unrelated_folded == unrelated_numeric_expected, (
+                "a shared number in an unrelated question kept the completed source after its grace request"
+            )
+            read_all(unrelated_scope, unrelated_numeric_source)
+
+            identifier_source = "\r\n".join(
+                f"export function operation{index}() {{ return {100000 + index}; }}" for index in range(360)
+            )
+            source_path.write_bytes(identifier_source.encode("utf-8"))
+            identifier_followup = completed_source_body(
+                identifier_source, "read-numeric-identifier",
+                "What does operation238() return?",
+            )
+            identifier_first, _, _ = send(identifier_followup, "host-smoke-numeric")
+            assert identifier_first == identifier_followup, "an explicit source identifier was folded on its first request"
+            identifier_grace = advance(identifier_followup, "Will it rain tomorrow?")
+            identifier_grace_output, _, _ = send(identifier_grace, "host-smoke-numeric")
+            assert identifier_grace_output == identifier_grace, "the first unrelated request did not honor the configured grace"
+            identifier_next = advance(identifier_grace, "Is that train delayed?")
+            identifier_expected = copy.deepcopy(identifier_next)
+            identifier_expected["messages"][2]["content"] = f"[[cf:v2:{sha256(identifier_source)[:12]}]]"
+            identifier_output, identifier_scope, _ = send(identifier_next, "host-smoke-numeric")
+            assert identifier_scope is not None and identifier_output == identifier_expected, (
+                "an answered source-identifier turn did not fold after the unrelated grace request"
+            )
+            assert "--scope " + identifier_scope in serialized(fixture.upstream[-1]) and "grep" in serialized(fixture.upstream[-1]), (
+                "folded source did not include its scoped search command"
+            )
+            matches = call({"action": "grep", "scope": identifier_scope,
+                            "id": sha256(identifier_source)[:12], "query": "operation238()"})["matches"]
+            assert any("operation238()" in match["text"] for match in matches), "the exact source symbol was not searchable"
+            read_all(identifier_scope, identifier_source)
+            assert source_path.read_bytes() == identifier_source.encode("utf-8"), "automatic folding changed the source file"
             final_metrics = call({"action": "stats"})["metrics"]
+            assert final_metrics["guidanceSuppressedRequests"] >= 3, (
+                "suppressed guidance was not counted on the response hook"
+            )
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun via bubblewrap",
                 "provider": "local synthetic HTTP fixture; no external model was called",
                 "checks": [
                     "local CLI recovery without MCP", "open annotations stay visible", "first closed observation and identical retries stay visible",
                     "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
-                    "one concise system guidance; no context budgets", "projection replay does not duplicate guidance or archives",
+                    "adaptive guidance backoff and reinjection after folds; no context budgets",
+                    "projection replay does not duplicate guidance or archives",
+                    "host guidance schedule is inject, inject, suppress three, inject",
                     "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
                     "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
                     "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
                     "source files remain unchanged by folding", "unmarked source stays visible",
+                    "unrelated numeric coincidence folds completed source", "source identifier stays visible until answered, then grace precedes later fold",
                 ],
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
                 "firstRequestEstimate": first_request, "foldedRequestEstimate": folded_request,
+                "guidanceBackoffSchedule": guidance_schedule,
                 "responseHooks": {key: final_metrics[key] for key in (
-                    "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests")},
+                    "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests",
+                    "guideOnlyRequests", "guidanceSuppressedRequests")},
             }))
     except BaseException:
         if log_path.exists():

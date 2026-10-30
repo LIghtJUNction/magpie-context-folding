@@ -114,7 +114,7 @@ export function guidanceText(options: GuidanceOptions): string {
     throw new Error('Unsupported CLI recovery path');
   }
   const minSavingsTokens = options.minSavingsTokens ?? 256;
-  const rule = `After each completed stage, wrap long details in your reply between these whole-line markers:\n<!-- @context-fold begin LABEL -->\n...\n<!-- @context-fold end LABEL -->\nKeep conclusions, constraints, failures, and next steps visible. Leave active work visible. Respect exact answer formats; add nothing beyond requested output. Fold only if estimated savings >=${minSavingsTokens} tokens. Do not poll or demo. Report known facts only.`;
+  const rule = `After a substantial step, keep its result, constraints, failures, active work, and next step visible. Mark only completed supporting detail that future turns can recover:\n<!-- @context-fold begin LABEL -->\n...\n<!-- @context-fold end LABEL -->\nNever mark user text or exact-format answers. Fold only if estimated savings >=${minSavingsTokens} tokens. Do not demo. Report known facts only.`;
   const stateDirectory = options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : '';
   const recall = options.scope
     ? ` Need source: ${options.command} grep${stateDirectory} --scope ${options.scope} --id HASH --query 'TEXT'; use read${stateDirectory} --scope ${options.scope} --id HASH only if needed.` : '';
