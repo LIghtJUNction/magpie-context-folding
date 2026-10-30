@@ -64,6 +64,15 @@ function appendAnswer(body: Record<string, unknown>, protocol: Protocol): void {
         : { role: 'model', parts: [{ text: 'The first answer is complete.' }] };
   messages.splice(messages.length - 1, 0, answer);
 }
+function appendAssistantResponse(body: Record<string, unknown>, protocol: Protocol, text: string): void {
+  const messages = protocol === 'responses' ? body.input as Record<string, unknown>[]
+    : protocol === 'gemini' ? body.contents as Record<string, unknown>[] : body.messages as Record<string, unknown>[];
+  const answer = protocol === 'chat' ? { role: 'assistant', content: text }
+    : protocol === 'responses' ? { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }
+      : protocol === 'anthropic' ? { role: 'assistant', content: [{ type: 'text', text }] }
+        : { role: 'model', parts: [{ text }] };
+  messages.push(answer);
+}
 function setFollowup(body: Record<string, unknown>, protocol: Protocol, text: string): void {
   const messages = protocol === 'responses' ? body.input as Record<string, unknown>[]
     : protocol === 'gemini' ? body.contents as Record<string, unknown>[] : body.messages as Record<string, unknown>[];
@@ -98,7 +107,29 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
   test(`${protocol}: a source-related follow-up keeps the full read available`, async () => {
     await fixture(async ({ context }) => {
       const fastContext = { ...context, options: { delayRequests: 0 } };
-      for (const question of ['From worker.ts, what does operation341() return?', 'What was the result?']) {
+      for (const question of [
+        'From worker.ts, what was the answer?',
+        'What was the result?',
+        'What is the answer?',
+        'What is the value?',
+        'What does it return?',
+        'What does it do?',
+        'What does that function do?',
+        'What parameters does it accept?',
+        'What is its signature?',
+        'What is it for?',
+        'Can you explain the implementation?',
+        '请解释这个函数。',
+        '这个函数的返回值是什么？',
+        '请说明这个实现。',
+        '它返回什么？',
+        '这个函数做什么？',
+        '它需要什么参数？',
+        '这个函数有什么作用？',
+        'What about edge cases?',
+        'Could an empty input fail?',
+        '还有哪些边界情况？',
+      ]) {
         const input = readBody(protocol, completeSource);
         appendAnswer(input, protocol);
         setFollowup(input, protocol, question);
@@ -107,6 +138,97 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
         assert.equal(toolText(first, protocol), completeSource);
         assert.equal(toolText(current, protocol), completeSource);
       }
+    }, protocol);
+  });
+
+  test(`${protocol}: a source identifier keeps the read for its turn, then an unrelated turn folds it`, async () => {
+    await fixture(async ({ context, scope }) => {
+      const fastContext = { ...context, options: { delayRequests: 0 } };
+      for (const identifier of ['lookup', 'operation238']) {
+        const source = `export function ${identifier}() { return 8341; }\n`.repeat(90);
+        const input = readBody(protocol, source, `read-${identifier}`);
+        appendAnswer(input, protocol);
+        setFollowup(input, protocol, `What does ${identifier}() return?`);
+        const related = await onRequest(input, fastContext) as Record<string, unknown>;
+        assert.equal(toolText(related, protocol), source,
+          'the current question can use the completed read without a recovery round trip');
+
+        const answered = structuredClone(input);
+        appendAssistantResponse(answered, protocol, `${identifier} returns 8341.`);
+        const unrelated = progress(answered, protocol);
+        setFollowup(unrelated, protocol, 'Will it rain tomorrow?');
+        const originalBytes = Buffer.byteLength(JSON.stringify(unrelated));
+        const folded = await onRequest(unrelated, fastContext) as Record<string, unknown>;
+        const id = digest(source).slice(0, 12);
+        assert.equal(toolText(folded, protocol), `[[cf:v2:${id}]]`);
+        assert.ok(Buffer.byteLength(JSON.stringify(folded)) < originalBytes,
+          'after its answer, the old source no longer inflates an unrelated request');
+        assert.ok(JSON.stringify(folded).includes(`--scope ${scope}`), 'the archive remains scoped and recoverable');
+        const result = JSON.parse(await execute({ action: 'grep', scope, id: digest(source).slice(0, 12), query: `${identifier}()` })) as {
+          matches: { text: string }[];
+        };
+        assert.ok(result.matches.some(match => match.text.includes(`${identifier}()`)),
+          'the exact symbol is searchable in the archive after folding');
+      }
+    }, protocol);
+  });
+
+  test(`${protocol}: a longer identifier prefix does not retain the completed source`, async () => {
+    await fixture(async ({ context, scope }) => {
+      const fastContext = { ...context, options: { delayRequests: 0 } };
+      const source = 'export function operation238() { return 8341; }\n'.repeat(90);
+      const input = readBody(protocol, source, 'read-operation238-prefix');
+      appendAnswer(input, protocol);
+      setFollowup(input, protocol, 'Was operation2380 election result certified?');
+      const originalBytes = Buffer.byteLength(JSON.stringify(input));
+      const folded = await onRequest(input, fastContext) as Record<string, unknown>;
+      const id = digest(source).slice(0, 12);
+      assert.equal(toolText(folded, protocol), `[[cf:v2:${id}]]`);
+      assert.ok(Buffer.byteLength(JSON.stringify(folded)) < originalBytes,
+        'the unrelated longer identifier no longer forces the full source into the request');
+      const result = JSON.parse(await execute({ action: 'grep', scope, id, query: 'operation238()' })) as {
+        matches: { text: string }[];
+      };
+      assert.ok(result.matches.some(match => match.text.includes('operation238()')),
+        'the exact source identifier remains recoverable from the archive');
+    }, protocol);
+  });
+
+  test(`${protocol}: unrelated follow-ups allow a completed source read to fold`, async () => {
+    await fixture(async ({ context }) => {
+      const fastContext = { ...context, options: { delayRequests: 0 } };
+      const retained: string[] = [];
+      for (const question of [
+        'What about the schedule?',
+        '另外，今天几点了？',
+        'Can you explain the schedule?',
+        'What was the result of the election?',
+        'What was the previous election result?',
+        'Was the 8341 election result certified?',
+        'What is the value of the ticket?',
+        'Would you pick the same restaurant again?',
+        'What is the function of the election committee?',
+        'Can you explain the implementation schedule for the event?',
+        '之前的选举结果呢？',
+        '这次比赛结果和之前一样吗？',
+        '这个函数在选举委员会里的职能是什么？',
+        '实现活动日程的安排如何？',
+        '今天比赛的内容是什么？',
+        '今天的比赛结果呢？',
+        'Will it rain tomorrow?',
+        'Is that train delayed?',
+        'Does this restaurant serve lunch?',
+        'Does worker.tsx compile in the browser?',
+        '这家店卖午餐吗？',
+      ]) {
+        const input = readBody(protocol, completeSource);
+        appendAnswer(input, protocol);
+        setFollowup(input, protocol, question);
+        await onRequest(input, fastContext);
+        const current = await onRequest(input, fastContext) as Record<string, unknown>;
+        if (!/^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/.test(toolText(current, protocol))) retained.push(question);
+      }
+      assert.deepEqual(retained, [], 'unrelated questions should not keep the full source read');
     }, protocol);
   });
 }

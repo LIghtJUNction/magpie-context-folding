@@ -1,0 +1,639 @@
+{
+  "schema_version": 1,
+  "benchmark": "live-completed-source-read-retention-unrelated",
+  "generated_at": "2026-10-29T18:30:23.663Z",
+  "claim_under_test": "Compare provider input usage and answer preservation with the hook bypassed versus local folding onRequest for a unrelated follow-up after a completed full source read; include any archive recovery calls.",
+  "model_requested": "claude-sonnet-5",
+  "route": "OpenAI-compatible /v1/chat/completions",
+  "usage_source": "provider response usage.prompt_tokens and usage.completion_tokens; cache fields recorded only when explicitly returned",
+  "implementation": {
+    "hook": "src/context.hooks.ts:onRequest",
+    "hook_sha256": "fdb228d11b066a0aac86c205e7060f21d787479904b67fef276d5c9d1e2f4ed0",
+    "baseline_hook_bypassed": true,
+    "published_package_loaded": false
+  },
+  "design": {
+    "planned_pairs": 3,
+    "order": "alternating baseline/folding, then folding/baseline",
+    "max_requests_per_user_turn": 5,
+    "max_output_tokens": 512,
+    "task_sha256": "2ea5b426a5124544abba56c30d6f185161a18a1f6567ac798149c1c2c61e9736",
+    "source_sha256": "559ae860f030885a4951cb70e5f727ef36775320aa5ea6b5ff57b21e30ff1c1f",
+    "source_utf8_bytes": 17890,
+    "scenario": "unrelated",
+    "source_question_index": 237,
+    "related_followup_index": null,
+    "questions": [
+      "Use read_file to inspect worker.ts. What integer does operation237() return? Reply with only the integer.",
+      "Separate topic: reply with exactly the word SAPPHIRE and do not use tools."
+    ],
+    "expected_answers": [
+      "603357",
+      "SAPPHIRE"
+    ],
+    "baseline": "hook bypassed; raw request sent to provider",
+    "folding": "local onRequest hook with delayRequests=0",
+    "min_savings_tokens": 256,
+    "isolated_temp_workspace": true,
+    "bounded_tool_runner": true
+  },
+  "machine_at_start": {
+    "load_average": [
+      10.12,
+      7.81,
+      6.9
+    ],
+    "logical_cores": 24
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 1,
+        "session": "completed-read-01-baseline",
+        "scope": "b1b2e1dabaf885e76d860c6d7a0495e75648fb72aaf12595a64bd238a00a050e",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "SAPPHIRE"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13446,
+        "provider_output_tokens": 17,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 8805,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3985,
+            "hook_on_request_ms": null,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 19627,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2482,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6366,
+              "output_tokens": 4,
+              "total_tokens": 6370,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19770,
+            "sent_request_json_bytes": 19770,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2326,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6402,
+              "output_tokens": 6,
+              "total_tokens": 6408,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 1,
+        "session": "completed-read-01-folding",
+        "scope": "10245401f13da95532108ed8dedac11e3a3ef6fafe7cae59629c32e56508d5cc",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "SAPPHIRE"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 1,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 8392,
+        "provider_output_tokens": 17,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 8041,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2378,
+            "hook_on_request_ms": 25,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 3054,
+            "hook_on_request_ms": 7,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19770,
+            "sent_request_json_bytes": 2482,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2544,
+            "hook_on_request_ms": 9,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 1174,
+              "output_tokens": 6,
+              "total_tokens": 1180,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 5054,
+        "provider_output_tokens_delta": 0,
+        "end_to_end_ms_saved": 764,
+        "recovery_tool_calls_added": 0
+      }
+    },
+    {
+      "pair": 2,
+      "order": [
+        "folding",
+        "baseline"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 2,
+        "session": "completed-read-02-baseline",
+        "scope": "c8c6c17a2795494b1aa046e337ec2082cde9ad9f80f654166edd2515c7818c3a",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "SAPPHIRE"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13446,
+        "provider_output_tokens": 17,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 7561,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2484,
+            "hook_on_request_ms": null,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 19627,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2536,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6366,
+              "output_tokens": 4,
+              "total_tokens": 6370,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19770,
+            "sent_request_json_bytes": 19770,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2538,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6402,
+              "output_tokens": 6,
+              "total_tokens": 6408,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 2,
+        "session": "completed-read-02-folding",
+        "scope": "2bcb22385bf9d6bc59712c38fcc811302d4cc9d050810ab2d57c86d3993a9c94",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "SAPPHIRE"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 1,
+        "full_source_requests": 1,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 8398,
+        "provider_output_tokens": 17,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 10771,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 5738,
+            "hook_on_request_ms": 3,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 7,
+              "total_tokens": 685,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19627,
+            "sent_request_json_bytes": 20112,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2484,
+            "hook_on_request_ms": 81,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6540,
+              "output_tokens": 4,
+              "total_tokens": 6544,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19770,
+            "sent_request_json_bytes": 2482,
+            "references": 1,
+            "full_source_copies": 0,
+            "provider_wait_ms": 2368,
+            "hook_on_request_ms": 6,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 1180,
+              "output_tokens": 6,
+              "total_tokens": 1186,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": true,
+      "deltas": {
+        "provider_input_tokens_saved": 5048,
+        "provider_output_tokens_delta": 0,
+        "end_to_end_ms_saved": -3210,
+        "recovery_tool_calls_added": 0
+      }
+    },
+    {
+      "pair": 3,
+      "order": [
+        "baseline",
+        "folding"
+      ],
+      "baseline": {
+        "mode": "baseline",
+        "pair": 3,
+        "session": "completed-read-03-baseline",
+        "scope": "66dcd92f919915cf764843b8e3620fb2647a95010c826317d05557e32dbf42d3",
+        "completion": "final",
+        "answers": [
+          "603357",
+          "SAPPHIRE"
+        ],
+        "correct_answers": 2,
+        "success": true,
+        "read_calls": 1,
+        "read_call_user_turns": [
+          0
+        ],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 3,
+        "folded_source_requests": 0,
+        "full_source_requests": 2,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 13446,
+        "provider_output_tokens": 15,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 7906,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3070,
+            "hook_on_request_ms": null,
+            "finish_reason": "tool_calls",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 5,
+              "total_tokens": 683,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 1,
+            "user_turn": 0,
+            "raw_request_json_bytes": 19609,
+            "sent_request_json_bytes": 19609,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2402,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6366,
+              "output_tokens": 4,
+              "total_tokens": 6370,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          },
+          {
+            "turn": 2,
+            "user_turn": 1,
+            "raw_request_json_bytes": 19752,
+            "sent_request_json_bytes": 19752,
+            "references": 0,
+            "full_source_copies": 1,
+            "provider_wait_ms": 2433,
+            "hook_on_request_ms": null,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 6402,
+              "output_tokens": 6,
+              "total_tokens": 6408,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "folding": {
+        "mode": "folding",
+        "pair": 3,
+        "session": "completed-read-03-folding",
+        "scope": "2a7b399c16e487f2708d24b77b993b33803123121c468cac12447f11512e2847",
+        "completion": "wrong-answer",
+        "answers": [
+          "3"
+        ],
+        "correct_answers": 0,
+        "success": false,
+        "read_calls": 0,
+        "read_call_user_turns": [],
+        "recovery_tool_calls": 0,
+        "recovery_action_counts": {
+          "grep": 0,
+          "peek": 0,
+          "restore": 0,
+          "rejected": 0
+        },
+        "tool_errors": 0,
+        "request_count": 1,
+        "folded_source_requests": 0,
+        "full_source_requests": 0,
+        "provider_model_reported": "claude-sonnet-5",
+        "provider_input_tokens": 678,
+        "provider_output_tokens": 1,
+        "provider_cache_read_tokens": null,
+        "provider_cache_write_tokens": null,
+        "end_to_end_ms": 3149,
+        "requests": [
+          {
+            "turn": 0,
+            "user_turn": 0,
+            "raw_request_json_bytes": 1135,
+            "sent_request_json_bytes": 1135,
+            "references": 0,
+            "full_source_copies": 0,
+            "provider_wait_ms": 3134,
+            "hook_on_request_ms": 8,
+            "finish_reason": "stop",
+            "usage": {
+              "input_tokens": 678,
+              "output_tokens": 1,
+              "total_tokens": 679,
+              "cache_read_tokens": null,
+              "cache_write_tokens": null
+            }
+          }
+        ]
+      },
+      "valid": false,
+      "deltas": {
+        "provider_input_tokens_saved": 12768,
+        "provider_output_tokens_delta": -14,
+        "end_to_end_ms_saved": 4757,
+        "recovery_tool_calls_added": 0
+      }
+    }
+  ],
+  "summary": {
+    "planned_pairs": 3,
+    "completed_pairs": 3,
+    "valid_pairs": 2,
+    "correct_answers": 10,
+    "provider_input_token_savings": {
+      "median": 5051,
+      "range": [
+        5048,
+        5054
+      ],
+      "positive_pairs": 2
+    },
+    "sent_request_json_bytes_saved": {
+      "median": 16803,
+      "range": [
+        16803,
+        16803
+      ]
+    },
+    "folding_recovery_calls": 0,
+    "baseline_recovery_calls": 0,
+    "recovery_action_counts": {
+      "baseline": {
+        "grep": 0,
+        "peek": 0,
+        "restore": 0,
+        "rejected": 0
+      },
+      "folding": {
+        "grep": 0,
+        "peek": 0,
+        "restore": 0,
+        "rejected": 0
+      }
+    },
+    "cache_usage_reported_in_all_requests": false
+  },
+  "limitations": [
+    "The task deliberately asks two questions about one generated file; it does not measure ordinary follow-up prevalence.",
+    "The agent may need an extra recovery or read tool call; those calls and their provider tokens are included.",
+    "This is a real provider with a bounded local tool loop, not Magpie/OpenCode host dispatch.",
+    "Provider token counts are not billing amounts; no price schedule was applied.",
+    "Small pair counts are exploratory and wall-clock differences are not a speedup claim."
+  ],
+  "run_error": null
+}

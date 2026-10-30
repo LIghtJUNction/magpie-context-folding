@@ -105,7 +105,7 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
   const session = `completed-read-${String(pair).padStart(2, '0')}-${mode}`;
   const scope = await store.scopeFor(JSON.stringify([session, 'completed-source-retention-benchmark', 'tool-loop', cwd]));
   const state = {};
-  const context = contextFor({ model, session, cwd, delayRequests: mode === 'baseline' ? 999 : 0, state });
+  const context = contextFor({ model, session, cwd, delayRequests: 0, state });
   const body = bodyFor(model);
   const metrics = { requests: [], answers: [], answerTurns: [], readCalls: 0, readCallTurns: [], recoveryCalls: 0,
     recoveryActionCounts: { grep: 0, peek: 0, restore: 0, rejected: 0 },
@@ -121,8 +121,8 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
       const raw = structuredClone(body);
       const rawBytes = Buffer.byteLength(JSON.stringify(raw));
       const hookStarted = performance.now();
-      const projected = await onRequest(raw, context);
-      const hookMs = performance.now() - hookStarted;
+      const projected = mode === 'baseline' ? raw : await onRequest(raw, context);
+      const hookMs = mode === 'baseline' ? null : performance.now() - hookStarted;
       const spans = extractSpans(projected, 'chat');
       const references = spans.filter(span => span.role === 'tool' && /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/.test(span.text)).length;
       const fullSourceCopies = spans.filter(span => span.role === 'tool' && span.source?.path === 'worker.ts' && span.text === source).length;
@@ -131,10 +131,10 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
       let reply;
       try { reply = await request(endpoint, apiKey, projected); }
       catch (error) {
-        await onResponse({}, { ...context, success: false, request: projected, protocol: 'chat' });
+        if (mode !== 'baseline') await onResponse({}, { ...context, success: false, request: projected, protocol: 'chat' });
         metrics.requests.push({ turn, user_turn: userTurn, raw_request_json_bytes: rawBytes, sent_request_json_bytes: sentBytes,
           references, full_source_copies: fullSourceCopies, provider_wait_ms: Math.round(performance.now() - providerStarted),
-          hook_on_request_ms: Math.round(hookMs), status: 'provider-error', error_code: error.message,
+          hook_on_request_ms: hookMs === null ? null : Math.round(hookMs), status: 'provider-error', error_code: error.message,
           usage: { input_tokens: null, output_tokens: null, total_tokens: null, cache_read_tokens: null, cache_write_tokens: null } });
         metrics.completion = 'provider-error';
         return { mode, pair, session, scope, ...metrics, error: error.message };
@@ -145,8 +145,8 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
       metrics.providerModel ??= typeof reply.model === 'string' ? reply.model : null;
       metrics.requests.push({ turn, user_turn: userTurn, raw_request_json_bytes: rawBytes, sent_request_json_bytes: sentBytes,
         references, full_source_copies: fullSourceCopies, provider_wait_ms: Math.round(providerMs),
-        hook_on_request_ms: Math.round(hookMs), finish_reason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : null, usage });
-      await onResponse(reply, { ...context, success: true, request: projected, protocol: 'chat' });
+        hook_on_request_ms: hookMs === null ? null : Math.round(hookMs), finish_reason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : null, usage });
+      if (mode !== 'baseline') await onResponse(reply, { ...context, success: true, request: projected, protocol: 'chat' });
       if (!choice?.message || choice.message.role !== 'assistant') { metrics.completion = 'invalid-provider-response'; break; }
       const assistant = choice.message;
       const calls = Array.isArray(assistant.tool_calls) ? assistant.tool_calls : [];
@@ -251,15 +251,17 @@ await mkdir(join(cwd, '.git'), { recursive: true, mode: 0o700 });
 await writeFile(workerPath, source, { mode: 0o600 });
 
 let report = { schema_version: 1, benchmark: `live-completed-source-read-retention-${scenario}`, generated_at: new Date().toISOString(),
-  claim_under_test: `Measure provider input usage and answer preservation for a ${scenario} follow-up after a completed full source read; include any archive recovery calls.`,
+  claim_under_test: `Compare provider input usage and answer preservation with the hook bypassed versus local folding onRequest for a ${scenario} follow-up after a completed full source read; include any archive recovery calls.`,
   model_requested: model, route: 'OpenAI-compatible /v1/chat/completions',
   usage_source: 'provider response usage.prompt_tokens and usage.completion_tokens; cache fields recorded only when explicitly returned',
-  implementation: { hook: 'src/context.hooks.ts:onRequest', hook_sha256: hookHash, published_package_loaded: false },
+  implementation: { hook: 'src/context.hooks.ts:onRequest', hook_sha256: hookHash, baseline_hook_bypassed: true, published_package_loaded: false },
   design: { planned_pairs: PAIRS, order: 'alternating baseline/folding, then folding/baseline', max_requests_per_user_turn: MAX_REQUESTS_PER_USER_TURN,
     max_output_tokens: MAX_OUTPUT_TOKENS,
     task_sha256: taskHash, source_sha256: sha256(source), source_utf8_bytes: Buffer.byteLength(source),
     scenario, source_question_index: firstIndex, related_followup_index: scenario === 'related' ? followupIndex : null,
-    questions, expected_answers: expected, baseline_delay_requests: 999, folding_delay_requests: 0,
+    questions, expected_answers: expected,
+    baseline: 'hook bypassed; raw request sent to provider',
+    folding: 'local onRequest hook with delayRequests=0',
     min_savings_tokens: 256, isolated_temp_workspace: true, bounded_tool_runner: true },
   machine_at_start: { load_average: loadavg(), logical_cores: cpus().length }, pairs: [], summary: null,
   limitations: ['The task deliberately asks two questions about one generated file; it does not measure ordinary follow-up prevalence.',

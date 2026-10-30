@@ -7,24 +7,35 @@ import { estimateTokens } from '../src/metrics.js';
 import { appendRecoveryMetadata } from '../src/recovery.js';
 import { cleanRequestBody } from '../src/request-clean.js';
 import { extractSpans, type Protocol } from '../src/protocol.js';
-import { bodyFor, fixture, marked } from './helpers.js';
+import { bodyFor, fixture, marked, progress } from './helpers.js';
 
 const options = { command: 'magpie-context-folding' };
 const countGuides = (value: unknown) => JSON.stringify(value).match(/<context-folding>/g)?.length ?? 0;
 const folded = (body: Record<string, unknown>, protocol: Protocol) => extractSpans(body, protocol)
   .some(span => span.text.includes('[[cf:v2:'));
+function appendUserTurn(body: Record<string, unknown>, protocol: Protocol, text: string): Record<string, unknown> {
+  const next = structuredClone(body);
+  if (protocol === 'chat' || protocol === 'anthropic') {
+    (next.messages as unknown[]).push({ role: 'user', content: text });
+  } else if (protocol === 'responses') {
+    (next.input as unknown[]).push({ role: 'user', content: [{ type: 'input_text', text }] });
+  } else {
+    (next.contents as unknown[]).push({ role: 'user', parts: [{ text }] });
+  }
+  return next;
+}
 
 test('guidance preserves useful context and avoids folding details still in use', () => {
   const text = guidanceText(options);
-  assert.match(text, /After each completed stage, wrap long details in your reply between these whole-line markers/);
-  assert.match(text, /Keep conclusions, constraints, failures, and next steps visible/);
-  assert.match(text, /Respect exact answer formats; add nothing beyond requested output/);
+  assert.match(text, /After a substantial step, keep its result, constraints, failures, active work, and next step visible/);
+  assert.match(text, /Mark only completed supporting detail that future turns can recover/);
+  assert.match(text, /Never mark user text or exact-format answers/);
   assert.deepEqual(parseRegions([{ id: 'guidance', text }]).map(region => region.text), ['...'], 'the sample marker block must satisfy the real parser');
-  assert.match(text, /Leave active work visible/);
-  assert.match(text, /do not poll or demo/i);
+  assert.doesNotMatch(text, /CLI recovery|--scope|grep/i, 'unscoped guidance must not mention unavailable archive commands');
+  assert.match(text, /Do not demo/i);
   assert.match(text, /Report known facts only/);
   assert.match(guidanceText({ ...options, minSavingsTokens: 512 }), />=512 tokens/);
-  assert.ok(Buffer.byteLength(text) <= 450, 'common guidance stays within a 113-token byte/4 proxy budget');
+  assert.ok(Buffer.byteLength(text) <= 410, 'unscoped guidance omits archive commands until a recovery scope exists');
 });
 
 test('scoped recovery guidance searches archived text before reading pages', () => {
@@ -104,6 +115,73 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
     }, protocol);
   });
 
+  test(`${protocol}: archived recovery instructions appear for a relevant follow-up only`, async () => {
+    await fixture(async ({ context, store, scope }) => {
+      const fastContext = { ...context, options: { delayRequests: 0 } };
+      const source = 'export function operation341() { return 341; }\n'.repeat(250);
+      let request = bodyFor(protocol, marked(source));
+      let output = await onRequest(request, fastContext) as Record<string, unknown>;
+      assert.equal(folded(output, protocol), true);
+      assert.equal(countGuides(output), 1, 'a new fold includes its recovery instructions');
+      const retry = await onRequest(request, fastContext) as Record<string, unknown>;
+      assert.equal(countGuides(retry), 1, 'a retried request keeps its recovery instructions');
+      const afterRetry = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
+      assert.equal(afterRetry.guidance?.noFoldPrompts, 0, 'a host retry must not consume another prompt cycle');
+      request = cleanRequestBody(output, protocol);
+
+      let unnecessaryGuideBytes = 0;
+      for (const question of [
+        'What about the schedule?',
+        'What was the result of the election?',
+        'What about the same schedule?',
+        'What was the previous election result?',
+        'What is the function of the election committee?',
+        'Can you explain the implementation schedule for the event?',
+      ]) {
+        request = appendUserTurn(request, protocol, question);
+        output = await onRequest(request, fastContext) as Record<string, unknown>;
+        assert.equal(folded(output, protocol), true, 'unrelated follow-ups keep only the archive reference');
+        assert.equal(countGuides(output), 0, 'unrelated follow-ups do not carry archive commands');
+        const withForcedGuide = appendGuidanceToCleanBody(output, protocol, {
+          command: 'magpie-context-folding', minSavingsTokens: 256, scope, stateDirectory: store.directory,
+        });
+        unnecessaryGuideBytes += Buffer.byteLength(JSON.stringify(withForcedGuide)) - Buffer.byteLength(JSON.stringify(output));
+        request = cleanRequestBody(output, protocol);
+      }
+      assert.ok(unnecessaryGuideBytes > 0, 'the omitted recovery guide has a positive JSON-byte counterfactual');
+
+      request = appendUserTurn(request, protocol, 'What does operation341() return?');
+      output = await onRequest(request, fastContext) as Record<string, unknown>;
+      assert.equal(countGuides(output), 1, 'a source-specific follow-up receives recovery instructions on demand');
+      assert.match(JSON.stringify(output), new RegExp(`--scope ${scope}`));
+      assert.doesNotMatch(JSON.stringify(output), /export function operation341\(\)/,
+        'the archived source stays folded while its recovery path is exposed');
+    }, protocol);
+  });
+
+  test(`${protocol}: general guidance backoff counts distinct request cycles only`, async () => {
+    await fixture(async ({ context, store, scope }) => {
+      const fastContext = { ...context, options: { delayRequests: 0 } };
+      let request = bodyFor(protocol, 'Completed investigation details.\n'.repeat(250));
+      let output = await onRequest(request, fastContext) as Record<string, unknown>;
+      assert.equal(countGuides(output), 1);
+      const retry = await onRequest(request, fastContext) as Record<string, unknown>;
+      assert.equal(countGuides(retry), 1);
+      const afterRetry = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
+      assert.equal(afterRetry.guidance?.noFoldPrompts, 1, 'a retry cannot consume another reminder slot');
+
+      request = cleanRequestBody(output, protocol);
+      const guideCounts = [1, 1];
+      for (let turn = 0; turn < 6; turn++) {
+        request = progress(request, protocol);
+        output = await onRequest(request, fastContext) as Record<string, unknown>;
+        guideCounts.push(countGuides(output));
+        request = cleanRequestBody(output, protocol);
+      }
+      assert.deepEqual(guideCounts, [1, 1, 1, 0, 0, 0, 1, 0]);
+    }, protocol);
+  });
+
   test(`${protocol}: clean-body insertion matches normal guidance without mutating its input`, () => {
     const original = bodyFor(protocol);
     const withGuide = appendGuidance(original, protocol, options);
@@ -139,7 +217,14 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       await onResponse({}, { ...largeContext, success: true, request: output });
       assert.equal((await store.readStats(scope)).metrics.estimatedTokenDelta,
         String(estimateTokens(large) - estimateTokens(output)));
-      assert.deepEqual(await onRequest(output, largeContext), output, 'a replay does not accumulate instructions');
+      const replay = await onRequest(output, largeContext) as Record<string, unknown>;
+      assert.equal(folded(replay, protocol), true);
+      assert.deepEqual(replay, output, 'a retry of the exact projected request remains byte-for-byte stable');
+
+      const unrelated = appendUserTurn(cleanRequestBody(output, protocol), protocol, 'Continue.');
+      const next = await onRequest(unrelated, largeContext) as Record<string, unknown>;
+      assert.equal(folded(next, protocol), true);
+      assert.equal(countGuides(next), 0, 'an unrelated new turn does not repeat scoped recovery instructions');
     }, protocol);
   });
 }
