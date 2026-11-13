@@ -1,0 +1,84 @@
+{
+  "package": {
+    "version": "0.5.4",
+    "integrity": "sha512-CmpJBnwGw6cCEOClUHle0RJk8MtRXCygTokrY59msfhRzRHYoUDlwGKEkkGBNbXdtag2Y3bubXySCbqE3twfVw==",
+    "tarball": "https://registry.npmjs.org/magpie-context-folding/-/magpie-context-folding-0.5.4.tgz"
+  },
+  "verifiedNpmFiles": 126,
+  "enabled": true,
+  "publication": "https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/43470665586",
+  "installedHost": {
+    "result": "passed",
+    "host": "real Magpie and Bun via bubblewrap",
+    "provider": "local synthetic HTTP fixture; no external model was called",
+    "checks": [
+      "local CLI recovery without MCP",
+      "open annotations stay visible",
+      "first closed observation and identical retries stay visible",
+      "distinct requests fold explicit annotations",
+      "short SHA-256 references retain marker lines",
+      "system/user/unmarked text and tool calls/results remain intact",
+      "persistent proactive guidance on every recoverable request; no context budgets",
+      "projection replay does not duplicate guidance or archives",
+      "process reason/result markers survive folding and replay",
+      "canonical full-hash UTF-8 archive files are directly readable",
+      "host keeps one proactive rule across all six request cycles",
+      "paginated byte-for-byte Unicode/CRLF recovery",
+      "exclusive paste without text echo",
+      "unknown scope refused",
+      "explicit --restore persistently expands all slices",
+      "session isolation",
+      "source comments share the protocol",
+      "fresh Read occurrence gets its own grace period",
+      "changed source gets a new hash while old snapshots recover",
+      "source files remain unchanged by folding",
+      "unmarked source stays visible",
+      "unrelated numeric coincidence folds completed source",
+      "source identifier stays visible until answered, then grace precedes later fold"
+    ],
+    "upstreamRequests": 32,
+    "originalUtf8Bytes": 46278,
+    "firstRequestEstimate": {
+      "usedEstimate": 14580,
+      "basis": "json-utf8-bytes/4",
+      "guidanceInjected": true
+    },
+    "foldedRequestEstimate": {
+      "usedEstimate": 2864,
+      "basis": "json-utf8-bytes/4",
+      "guidanceInjected": true
+    },
+    "persistentGuidanceSchedule": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "responseHooks": {
+      "successfulHookRequests": 32,
+      "unverifiedHookRequests": 0,
+      "failedHookRequests": 0,
+      "guideOnlyRequests": 22,
+      "guidanceSuppressedRequests": 0
+    }
+  },
+  "runningGateway": {
+    "packageVersion": "0.5.4",
+    "gateway": "running local Magpie",
+    "model": "cursor/grok-4.7@256k",
+    "initialUserPrompt": "只输出 OK，不能输出其他内容。",
+    "reply": "OK",
+    "responseStatus": "confirmed",
+    "beforeJsonBytes": 367,
+    "afterJsonBytes": 1481,
+    "persistentRuleInjectedIntoShortFirstRequest": true,
+    "foldedRegions": 0
+  },
+  "independentCli": {
+    "version": "0.1.2",
+    "postCompactionUsesArrowMarkers": true,
+    "mandatoryLongReportsRule": true
+  }
+}
