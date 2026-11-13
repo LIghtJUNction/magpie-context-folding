@@ -9,6 +9,7 @@ export const optionsSchema = z.object({
   observeOnly: z.boolean().default(false),
   maxSessionBytes: z.number().int().positive().max(64 * 1024 * 1024).default(64 * 1024 * 1024),
   delayRequests: nonnegativeInteger.default(0),
+  // Accepted for existing configurations; closed markers no longer have a savings gate.
   minSavingsTokens: nonnegativeInteger.default(256),
   gatewayTimeoutMs: z.number().int().min(100).max(10_000).optional(),
   shellToolName: z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/).optional(),

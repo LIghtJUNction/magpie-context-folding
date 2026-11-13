@@ -193,26 +193,26 @@ test('a new request without old history reports no current folds while preservin
 });
 
 
-test('net-savings fallback retains the body and accounts for persistent rule overhead', async () => {
+test('direct folding reports actual bytes even when recovery overhead makes the request larger', async () => {
   await fixture(async ({ store, scope, context }) => {
     const input = bodyFor('chat', marked('x'.repeat(1500)));
     const ctx = { ...context, options: { delayRequests: 0, minSavingsTokens: 0,
       recoveryCommand: 'command-' + 'x'.repeat(3000) }, state: {} };
     const output = await onRequest(input, ctx);
     const decision = await latest(store, scope);
-    assert.equal(decision.reason, 'insufficient-net-savings');
-    assert.equal(decision.foldedRegions, 0);
+    assert.equal(decision.reason, 'annotated-regions-folded');
+    assert.equal(decision.foldedRegions, 1);
     assert.equal(decision.beforeBytes, bytes(input));
     assert.equal(decision.afterBytes, bytes(output));
     assert.ok(decision.afterBytes > decision.beforeBytes, 'persistent rule overhead is recorded honestly');
-    assert.ok(!JSON.stringify(output).includes('[[cf:v2:'));
+    assert.ok(JSON.stringify(output).includes('[[cf:v2:'));
     await onResponse({}, { ...ctx, success: true, request: output });
     const visible = await visibility({ scope });
     assert.equal(visible.selection, 'session');
     if (visible.selection !== 'session') throw new Error('Expected session observation');
-    assert.equal(visible.request?.reason, 'insufficient-net-savings');
+    assert.equal(visible.request?.reason, 'annotated-regions-folded');
     assert.equal(visible.request?.status, 'confirmed');
-    assert.match((await collectReport(scope)).sessions[0]!.reason, /净收益不足/);
-    assert.equal((await store.readStats(scope)).metrics.itemsFolded, 0);
+    assert.match((await collectReport(scope)).sessions[0]!.reason, /本次请求含折叠内容/);
+    assert.equal((await store.readStats(scope)).metrics.itemsFolded, 1);
   });
 });

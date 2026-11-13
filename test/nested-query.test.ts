@@ -257,32 +257,34 @@ test('file CLI reads nested originals without modifying fold state', async () =>
   });
 });
 
-test('net-savings rejection retains the complete waiting-parent closure without orphan archives', async () => {
+test('direct folding archives tiny descendants and retains waiting-parent cursors', async () => {
   const expensiveCommand = 'command-' + 'x'.repeat(3000);
   const parent = block('tiny', 'x') + '\n' + 'waiting context '.repeat(110);
   await fixture(async ({ context, scope, store }) => {
     const input = bodyFor('chat', block('parent', parent));
-    const rejected = await onRequest(input, { ...context, options: { delayRequests: 0,
+    const projected = await onRequest(input, { ...context, options: { delayRequests: 0,
       minSavingsTokens: 0, recoveryCommand: expensiveCommand } }) as Record<string, unknown>;
-    assert.deepEqual(withoutGuidance(rejected, 'chat'), input);
+    assert.notDeepEqual(withoutGuidance(projected, 'chat'), input);
     const state = await store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
-    assert.equal(state.entries.length, 0, 'a rejected new parent leaves no descendant archive');
+    assert.equal(state.entries.length, 2);
+    assert.equal(state.entries.find(entry => entry.id === digest('x'))!.text, 'x');
+    assert.equal(state.decision.foldedRegions, 1);
   });
   await fixture(async ({ context, scope, store }) => {
     const matured = block('matured', 'm'.repeat(1500));
     const options = { delayRequests: 1, minSavingsTokens: 0, recoveryCommand: expensiveCommand };
     await onRequest(bodyFor('chat', matured), { ...context, options });
     const input = bodyFor('chat', matured + '\n' + block('parent', parent));
-    const rejected = await onRequest(input, { ...context, options }) as Record<string, unknown>;
-    assert.deepEqual(withoutGuidance(rejected, 'chat'), input);
+    const projected = await onRequest(input, { ...context, options }) as Record<string, unknown>;
+    assert.notDeepEqual(withoutGuidance(projected, 'chat'), input);
     const state = await store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
     assert.equal(state.entries.length, 3);
     const waiting = state.entries.find(entry => entry.id === digest(parent))!;
     assert.deepEqual(waiting.annotation!.children!.map(child => child.id), [digest('x')]);
     assert.equal(state.entries.find(entry => entry.id === digest('x'))!.text, 'x');
     assert.equal(Object.values(waiting.occurrences!)[0]!.firstSeen, 1);
-    assert.equal(state.decision.foldedRegions, 0);
-    assert.ok(Number(state.decision.waiting) > 0 && Number(state.decision.skipped) > 0);
+    assert.equal(state.decision.foldedRegions, 1);
+    assert.ok(Number(state.decision.waiting) > 0 && Number(state.decision.skipped) === 0);
     const next = await onRequest(progress(input, 'chat'), { ...context, options: { delayRequests: 1, minSavingsTokens: 0 } });
     assert.equal(assistant(next).match(/\[\[cf:v2:/g)?.length, 2, 'the saved waiting cursor can mature on the next request');
   });

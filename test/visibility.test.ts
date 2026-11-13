@@ -121,17 +121,17 @@ test('visibility commands honor the explicit archive directory across shell envi
   });
 });
 
-test('insufficient net savings stays a recognized observation and preserves the original', async () => {
+test('a short closed block is reported as folded', async () => {
   await fixture(async ({ context, scope }) => {
     const original = '<!-- @context-fold begin short -->\nsmall completed note\n<!-- @context-fold end short -->';
     const input = bodyFor('chat', original);
     const projected = await onRequest(input, { ...context, options: { delayRequests: 0 } });
-    assert.ok(JSON.stringify(projected).includes('small completed note'));
+    assert.ok(!JSON.stringify(projected).includes('small completed note'));
     const status = await invoke(['statusline', '--scope', scope, '--json']);
     assert.equal(status.code, 0, status.err);
     const request = JSON.parse(status.out).request;
-    assert.equal(request.reason, 'insufficient-net-savings');
-    assert.equal(request.foldedRegions, 0);
+    assert.equal(request.reason, 'annotated-regions-folded');
+    assert.equal(request.foldedRegions, 1);
     assert.equal(request.waiting, 0);
   });
 });
