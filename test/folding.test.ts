@@ -151,18 +151,19 @@ test('a new open block does not revive previously completed work', async () => {
 
 test('earlier folding in the same message cannot restart a later block grace period', async () => {
   await fixture(async ({ context }) => {
-    const a = marked('A'.repeat(2400));
-    const b = marked('B'.repeat(2400)).replaceAll('research', 'later');
+    // Keep payloads above the persistent guide cost; this case isolates timing.
+    const a = marked('A'.repeat(6000));
+    const b = marked('B'.repeat(6000)).replaceAll('research', 'later');
     const first = bodyFor('chat', a);
     await onRequest(first, context);
     const second = bodyFor('chat', a + '\n' + b);
     const projected = await onRequest(second, context) as Record<string, unknown>;
     const text = extractSpans(projected, 'chat').find(span => span.role === 'assistant')!.text;
-    assert.equal(text.includes('A'.repeat(2400)), false);
-    assert.equal(text.includes('B'.repeat(2400)), true);
+    assert.equal(text.includes('A'.repeat(6000)), false);
+    assert.equal(text.includes('B'.repeat(6000)), true);
     const third = await onRequest(progress(projected, 'chat'), context) as Record<string, unknown>;
     const after = extractSpans(third, 'chat').find(span => span.role === 'assistant')!.text;
-    assert.equal(after.includes('B'.repeat(2400)), false);
+    assert.equal(after.includes('B'.repeat(6000)), false);
     assert.equal(after.match(/\[\[cf:v2:/g)?.length, 2);
   });
 });

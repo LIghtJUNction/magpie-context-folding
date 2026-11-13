@@ -27,15 +27,18 @@ function appendUserTurn(body: Record<string, unknown>, protocol: Protocol, text:
 
 test('guidance preserves useful context and avoids folding details still in use', () => {
   const text = guidanceText(options);
-  assert.match(text, /After a substantial step, keep its result, constraints, failures, active work, and next step visible/);
-  assert.match(text, /Mark only completed supporting detail that future turns can recover/);
-  assert.match(text, /Never mark user text or exact-format answers/);
-  assert.deepEqual(parseRegions([{ id: 'guidance', text }]).map(region => region.text), ['...'], 'the sample marker block must satisfy the real parser');
-  assert.doesNotMatch(text, /CLI recovery|--scope|grep/i, 'unscoped guidance must not mention unavailable archive commands');
-  assert.match(text, /Do not demo/i);
-  assert.match(text, /Report known facts only/);
-  assert.match(guidanceText({ ...options, minSavingsTokens: 512 }), />=512 tokens/);
-  assert.ok(Buffer.byteLength(text) <= 410, 'unscoped guidance omits archive commands until a recovery scope exists');
+  assert.match(text, /Mandatory context-management protocol/);
+  assert.match(text, /Long reviews and reports MUST use this format/);
+  assert.match(text, /close completed stages before the next user turn/);
+  assert.match(text, /Use task-specific descriptions/);
+  assert.match(text, /Keep current constraints, failures, and active essentials outside/);
+  assert.match(text, /Keep next steps outside/);
+  assert.match(text, /Skip markers for short replies or explicitly required JSON\/code-only\/exact answers; never mark user text/);
+  assert.match(text, /never invent metadata or count tokens/);
+  assert.match(text, /Read actual path only when needed/);
+  assert.deepEqual(parseRegions([{ id: 'guidance', text }]).map(region => region.text), ['...']);
+  assert.doesNotMatch(text, /--scope|grep/i, 'unscoped rules have no unavailable archive command');
+  assert.ok(Buffer.byteLength(text) <= 1200, 'persistent guidance has a bounded fixed overhead');
 });
 
 test('scoped recovery guidance searches archived text before reading pages', () => {
@@ -63,12 +66,12 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
     }
   });
 
-  test(`${protocol}: stale scope-only metadata is removed without adding guidance to short history`, async () => {
+  test(`${protocol}: stale scope-only metadata is replaced by one persistent rule`, async () => {
     await fixture(async ({ context }) => {
       const original = bodyFor(protocol, 'A short completed answer.');
       const legacy = appendRecoveryMetadata(original, protocol, 'a'.repeat(64));
       const output = await onRequest(legacy, context) as Record<string, unknown>;
-      assert.equal(countGuides(output), 0);
+      assert.equal(countGuides(output), 1);
       assert.doesNotMatch(JSON.stringify(output), /<context-budget|<context-folding scope=/);
       assert.deepEqual(withoutGuidance(output, protocol), original);
       assert.deepEqual(await onRequest(output, context), output);
@@ -91,17 +94,17 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
     if (protocol === 'chat') assert.deepEqual((once.messages as unknown[])[0], (input.messages as unknown[])[0]);
   });
 
-  test(`${protocol}: skips fixed guidance on short context and keeps it once useful or already present`, async () => {
+  test(`${protocol}: injects the rule from the first short request and accounts for its overhead`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const short = bodyFor(protocol, 'A short answer.');
       const skipped = await onRequest(short, context) as Record<string, unknown>;
-      assert.deepEqual(skipped, short);
-      assert.equal(countGuides(skipped), 0);
+      assert.deepEqual(withoutGuidance(skipped, protocol), short);
+      assert.equal(countGuides(skipped), 1);
       await onResponse({}, { ...context, request: skipped, success: true });
       const shortStats = await store.readStats(scope);
       assert.equal(shortStats.metrics.successfulHookRequests, 1);
-      assert.equal(shortStats.metrics.guideOnlyRequests, 0);
-      assert.equal(shortStats.metrics.estimatedTokenDelta, '0');
+      assert.equal(shortStats.metrics.guideOnlyRequests, 1);
+      assert.ok(BigInt(shortStats.metrics.estimatedTokenDelta) < 0n);
 
       const large = bodyFor(protocol, 'Completed investigation details.\n'.repeat(250));
       const guided = await onRequest(large, context) as Record<string, unknown>;
@@ -126,7 +129,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const retry = await onRequest(request, fastContext) as Record<string, unknown>;
       assert.equal(countGuides(retry), 1, 'a retried request keeps its recovery instructions');
       const afterRetry = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
-      assert.equal(afterRetry.guidance?.noFoldPrompts, 0, 'a host retry must not consume another prompt cycle');
+      assert.equal(afterRetry.guidance, undefined, 'persistent rules need no reminder cursor');
       request = cleanRequestBody(output, protocol);
 
       let unnecessaryGuideBytes = 0;
@@ -141,7 +144,8 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
         request = appendUserTurn(request, protocol, question);
         output = await onRequest(request, fastContext) as Record<string, unknown>;
         assert.equal(folded(output, protocol), true, 'unrelated follow-ups keep only the archive reference');
-        assert.equal(countGuides(output), 0, 'unrelated follow-ups do not carry archive commands');
+        assert.equal(countGuides(output), 1, 'the core rule persists on unrelated follow-ups');
+        assert.doesNotMatch(JSON.stringify(output), /--scope/);
         const withForcedGuide = appendGuidanceToCleanBody(output, protocol, {
           command: 'magpie-context-folding', minSavingsTokens: 256, scope, stateDirectory: store.directory,
         });
@@ -159,7 +163,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
     }, protocol);
   });
 
-  test(`${protocol}: general guidance backoff counts distinct request cycles only`, async () => {
+  test(`${protocol}: general guidance persists across distinct cycles and retries`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const fastContext = { ...context, options: { delayRequests: 0 } };
       let request = bodyFor(protocol, 'Completed investigation details.\n'.repeat(250));
@@ -168,7 +172,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const retry = await onRequest(request, fastContext) as Record<string, unknown>;
       assert.equal(countGuides(retry), 1);
       const afterRetry = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
-      assert.equal(afterRetry.guidance?.noFoldPrompts, 1, 'a retry cannot consume another reminder slot');
+      assert.equal(afterRetry.guidance, undefined);
 
       request = cleanRequestBody(output, protocol);
       const guideCounts = [1, 1];
@@ -178,7 +182,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
         guideCounts.push(countGuides(output));
         request = cleanRequestBody(output, protocol);
       }
-      assert.deepEqual(guideCounts, [1, 1, 1, 0, 0, 0, 1, 0]);
+      assert.deepEqual(guideCounts, [1, 1, 1, 1, 1, 1, 1, 1]);
     }, protocol);
   });
 
@@ -198,7 +202,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const short = bodyFor(protocol, marked('临时体验笔记：保存过程，需要时再读回原文。'));
       const shortOutput = await onRequest(short, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
       assert.equal(folded(shortOutput, protocol), false);
-      assert.equal(countGuides(shortOutput), 0, 'a short rejected annotation does not pay fixed guidance cost');
+      assert.equal(countGuides(shortOutput), 1, 'short requests still carry the proactive rule');
       assert.deepEqual(withoutGuidance(shortOutput, protocol), short);
       assert.doesNotMatch(JSON.stringify(shortOutput), /<context-budget|--scope/);
       const snapshot = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
@@ -224,7 +228,8 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const unrelated = appendUserTurn(cleanRequestBody(output, protocol), protocol, 'Continue.');
       const next = await onRequest(unrelated, largeContext) as Record<string, unknown>;
       assert.equal(folded(next, protocol), true);
-      assert.equal(countGuides(next), 0, 'an unrelated new turn does not repeat scoped recovery instructions');
+      assert.equal(countGuides(next), 1);
+      assert.doesNotMatch(JSON.stringify(next), /--scope/);
     }, protocol);
   });
 }

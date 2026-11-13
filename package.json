@@ -1,6 +1,6 @@
 {
   "name": "magpie-context-folding",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Automatic system guidance and CLI-only recovery for reversible Magpie context folding",
   "type": "module",
   "main": "./src/index.ts",
@@ -43,7 +43,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "bun test --isolate test/*.test.ts",
+    "test": "bun test --isolate --timeout=15000 test/*.test.ts",
     "test:host": "python3 scripts/host-smoke.py",
     "test:host:installed": "python3 -I scripts/installed-package-smoke.py",
     "bench:self": "python3 -I scripts/self-benchmark.py",

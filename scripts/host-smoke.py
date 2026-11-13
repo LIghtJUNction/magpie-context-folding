@@ -351,11 +351,11 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                     {"role": "user", "content": f"Distinct guidance cycle {cycle}."},
                 ]}
                 _, _, observed = send(
-                    probe, "host-smoke-guidance", expect_guidance=cycle in (0, 1, 5),
+                    probe, "host-smoke-guidance", expect_guidance=True,
                 )
                 guidance_schedule.append(observed["guidanceInjected"])
-            assert guidance_schedule == [True, True, False, False, False, True], (
-                f"unexpected adaptive guidance schedule: {guidance_schedule}"
+            assert guidance_schedule == [True] * 6, (
+                f"persistent rule disappeared: {guidance_schedule}"
             )
             status = call({"scope": scope, "action": "status"})
             scope_metrics = call({"scope": scope, "action": "stats"})["metrics"]
@@ -507,20 +507,18 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             process_replayed, _, _ = send(process_replay, "host-smoke-process")
             assert process_replayed == process_folded, "process metadata was folded again on replay"
             final_metrics = call({"action": "stats"})["metrics"]
-            assert final_metrics["guidanceSuppressedRequests"] >= 3, (
-                "suppressed guidance was not counted on the response hook"
-            )
+            assert final_metrics["guidanceSuppressedRequests"] == 0, "persistent rules were unexpectedly suppressed"
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun via bubblewrap",
                 "provider": "local synthetic HTTP fixture; no external model was called",
                 "checks": [
                     "local CLI recovery without MCP", "open annotations stay visible", "first closed observation and identical retries stay visible",
                     "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
-                    "adaptive guidance backoff and reinjection after folds; no context budgets",
+                    "persistent proactive guidance on every recoverable request; no context budgets",
                     "projection replay does not duplicate guidance or archives",
                     "process reason/result markers survive folding and replay",
                     "canonical full-hash UTF-8 archive files are directly readable",
-                    "host guidance schedule is inject, inject, suppress three, inject",
+                    "host keeps one proactive rule across all six request cycles",
                     "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
                     "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
                     "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
@@ -529,7 +527,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 ],
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
                 "firstRequestEstimate": first_request, "foldedRequestEstimate": folded_request,
-                "guidanceBackoffSchedule": guidance_schedule,
+                "persistentGuidanceSchedule": guidance_schedule,
                 "responseHooks": {key: final_metrics[key] for key in (
                     "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests",
                     "guideOnlyRequests", "guidanceSuppressedRequests")},

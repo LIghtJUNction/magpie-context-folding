@@ -193,7 +193,7 @@ test('a new request without old history reports no current folds while preservin
 });
 
 
-test('net-savings fallback omits guidance when it would make the candidate uneconomic', async () => {
+test('net-savings fallback retains the body and accounts for persistent rule overhead', async () => {
   await fixture(async ({ store, scope, context }) => {
     const input = bodyFor('chat', marked('x'.repeat(1500)));
     const ctx = { ...context, options: { delayRequests: 0, minSavingsTokens: 0,
@@ -204,8 +204,7 @@ test('net-savings fallback omits guidance when it would make the candidate uneco
     assert.equal(decision.foldedRegions, 0);
     assert.equal(decision.beforeBytes, bytes(input));
     assert.equal(decision.afterBytes, bytes(output));
-    assert.equal(decision.afterBytes, decision.beforeBytes, 'a rejected fold does not add fixed guidance overhead');
-    assert.deepEqual(output, input);
+    assert.ok(decision.afterBytes > decision.beforeBytes, 'persistent rule overhead is recorded honestly');
     assert.ok(!JSON.stringify(output).includes('[[cf:v2:'));
     await onResponse({}, { ...ctx, success: true, request: output });
     const visible = await visibility({ scope });
