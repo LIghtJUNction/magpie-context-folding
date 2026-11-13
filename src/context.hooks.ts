@@ -7,7 +7,7 @@ import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, sh
 import { cleanRequestBody } from './request-clean.js';
 import { containsRegion, outermost, parseRegions, regionReference, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, createJsonMeasurementCache, emptyMetrics, metricsSchema, type Metrics } from './metrics.js';
-import { extractSpans, projectExtractedSpans, recoveryShellName, type Protocol, type Span } from './protocol.js';
+import { extractSpans, projectExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
 import { focusedSourceExcerpt, renderFocusedSourceExcerpt } from './source-excerpt.js';
@@ -493,12 +493,9 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       reportHook(context, 'skipped');
       return input;
     }
-    // Recovery uses the host's existing shell, never a registered plugin tool.
-    // A shell-less request must retain its input, including all original text.
-    if (!recoveryShellName(body, ctx.protocol, options.shellToolName)) {
-      reportHook(context, 'skipped');
-      return input;
-    }
+    // Folding is a text/archive protocol, independent of the host's tool names.
+    // Persisted absolute paths and CLI recovery remain valid even when tools are
+    // wrapped, deferred, namespaced, disabled, or unavailable in this request.
     const store = new Store();
     const command = options.recoveryCommand ?? defaultRecoveryCommand();
     const decorate = (value: Body, scope?: string): Body => {
