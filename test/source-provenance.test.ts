@@ -164,7 +164,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
         assert.equal(toolText(folded, protocol), `[[cf:v2:${id}]]`);
         assert.ok(Buffer.byteLength(JSON.stringify(folded)) < originalBytes,
           'after its answer, the old source no longer inflates an unrelated request');
-        assert.ok(JSON.stringify(folded).includes(`--scope ${scope}`), 'the archive remains scoped and recoverable');
+        assert.ok(JSON.stringify(folded).includes('--dir'), 'the archive remains scoped and recoverable');
         const result = JSON.parse(await execute({ action: 'grep', scope, id: digest(source).slice(0, 12), query: `${identifier}()` })) as {
           matches: { text: string }[];
         };
@@ -243,7 +243,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       let folded = await onRequest(sourceRead, fastContext) as Record<string, unknown>;
       assert.match(toolText(folded, protocol), /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/);
       assert.equal(guideCount(folded), 1, 'the request that creates the archive includes its recovery command');
-      assert.match(JSON.stringify(folded), new RegExp(`--scope ${scope}`));
+      assert.match(JSON.stringify(folded), /--dir/);
 
       const unrelated = withoutMetadata(folded, protocol);
       setFollowup(unrelated, protocol, 'Does this restaurant serve lunch?');
@@ -262,7 +262,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       const onDemand = await onRequest(relevant, fastContext) as Record<string, unknown>;
       assert.match(toolText(onDemand, protocol), /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/);
       assert.equal(guideCount(onDemand), 1, 'a matching source question restores the recovery command on demand');
-      assert.match(JSON.stringify(onDemand), new RegExp(`--scope ${scope}`));
+      assert.match(JSON.stringify(onDemand), /--dir/);
       assert.doesNotMatch(JSON.stringify(onDemand), /export function lookup\(\)/,
         'the archived source stays folded while its exact recovery path is available');
       assert.deepEqual(await onRequest(onDemand, fastContext), onDemand, 'an exact projection retry stays unchanged');
@@ -330,6 +330,41 @@ test('unmarked source, read failures and missing provenance are never auto-selec
 const repeatedFile = Array.from({ length: 360 }, (_, index) => `export function operation${index}() { return ${index}; }\n`).join('');
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
+  for (const delayRequests of [0, 1]) test(`${protocol}: completed duplicate reads fold once per occurrence with delay ${delayRequests}`, async () => {
+    await fixture(async ({ context, scope, store }) => {
+      const delayedContext = { ...context, options: { delayRequests } };
+      const input = readBody(protocol, repeatedFile, 'read-1');
+      appendRead(input, protocol, repeatedFile, 'read-2');
+      appendAnswer(input, protocol);
+      setFollowup(input, protocol, 'Write a poem about the ocean.');
+      const original = structuredClone(input);
+      const reference = `[[cf:v2:${digest(repeatedFile).slice(0, 12)}]]`;
+
+      // A retry cannot consume the configured grace request.
+      for (let attempt = 0; delayRequests > 0 && attempt < 2; attempt++) {
+        const waiting = await onRequest(input, delayedContext) as Record<string, unknown>;
+        assert.deepEqual(extractSpans(waiting, protocol).filter(span => span.role === 'tool')
+          .map(span => span.text), [repeatedFile, repeatedFile]);
+      }
+      const next = structuredClone(input);
+      setFollowup(next, protocol, 'Write a poem about the mountains.');
+      const output = await onRequest(next, delayedContext) as Record<string, unknown>;
+      assert.deepEqual(extractSpans(output, protocol).filter(span => span.role === 'tool')
+        .map(span => span.text), [reference, reference]);
+      assert.deepEqual(input, original, 'projection leaves the caller history intact');
+      assert.equal((await store.readStats(scope)).metrics.itemsFolded, 2);
+
+      const replay = await onRequest(output, delayedContext) as Record<string, unknown>;
+      assert.deepEqual(extractSpans(replay, protocol).filter(span => span.role === 'tool')
+        .map(span => span.text), [reference, reference]);
+      assert.equal((await store.readStats(scope)).metrics.itemsFolded, 2, 'replay does not count another fold');
+      const recovered = JSON.parse(await execute({ action: 'read', scope,
+        id: digest(repeatedFile).slice(0, 12), limit: 24000 }));
+      assert.equal(recovered.text, repeatedFile);
+      assert.equal(recovered.sha256, digest(repeatedFile));
+    }, protocol);
+  });
+
   test(`${protocol}: only later identical full reads are folded automatically`, async () => {
     await fixture(async ({ context, scope }) => {
       const input = readBody(protocol, repeatedFile, 'read-1', 'read');

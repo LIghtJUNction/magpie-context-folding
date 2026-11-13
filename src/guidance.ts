@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Protocol } from './protocol.js';
 
@@ -113,10 +114,21 @@ export function guidanceText(options: GuidanceOptions): string {
     || (options.scope !== undefined && !/^[a-f0-9]{64}$/.test(options.scope))) {
     throw new Error('Unsupported CLI recovery path');
   }
-  const rule = `Mandatory context-management protocol. For every substantial reply or completed stage: write a brief current result outside, then wrap the long findings/explanation/evidence in literal whole-line delimiters:\n>> Specific reason for starting <<\n...\n<< Verified result of this stage >>\nKeep next steps outside. Use task-specific descriptions, not these placeholders or code fences. Long reviews and reports MUST use this format even when the user did not ask to compress. Mark proactively before sending; do not wait for reminders. Use one block per substantial stage, not per short bullet. Keep current constraints, failures, and active essentials outside; close completed stages before the next user turn. Skip markers for short replies or explicitly required JSON/code-only/exact answers; never mark user text or expose private reasoning. The plugin saves the body and generates line/hash/tokens/path metadata if worthwhile; never invent metadata or count tokens. Read actual path only when needed. Do not poll or demo. Report known facts only.`;
-  const stateDirectory = options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : '';
+  const rule = `Fold long assistant evidence/explanations, keeping conclusions, constraints, failures and next steps outside. Never wrap progress or tool-only work: tools are not folded. No empty blocks, copied logs or filler. Use exact whole-line delimiters, no Markdown prefixes. Close when the text ends. Skip short/exact-format answers; never expose private reasoning. Plugin generates metadata; markers alone prove no saving. Read actual path only when needed. Arrow keep blocks stay literal inside outer folds. Example (shortened):
+→ 不折叠开始
+Finding: retry can charge twice.
+>> Evidence for duplicate charging <<
+Both attempts use the same ID. The first debit commits before the connection drops. Retry calls debit() again without a completed-request check.
+→ 不折叠开始
+Keep visible: request_id=42; regression test still pending.
+← 不折叠结束
+Further detailed evidence goes here.
+<< Same request debited twice >>
+Next: add deduplication and test.
+← 不折叠结束`;
+  const archiveDirectory = options.stateDirectory ? ` --dir ${shellQuote(resolve(options.stateDirectory, 'archive'))}` : '';
   const recall = options.scope
-    ? ` Need source: ${options.command} grep${stateDirectory} --scope ${options.scope} --id HASH --query 'TEXT'; use read${stateDirectory} --scope ${options.scope} --id HASH only if needed.` : '';
+    ? ` Need source: read the actual path; or ${options.command} search${archiveDirectory} 'TEXT'; ${options.command} read${archiveDirectory} HASH.` : '';
   return `<context-folding>${rule}${recall}</context-folding>`;
 }
 

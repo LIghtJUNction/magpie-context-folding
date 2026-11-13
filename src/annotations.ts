@@ -17,6 +17,8 @@ export interface Region {
   hasReferences: boolean;
   referenceHash?: string;
   conversationMarker?: boolean;
+  /** Literal islands remain visible even inside an enclosing fold. */
+  retained?: { start: number; end: number }[];
 }
 
 function marker(line: string, conversationMarkers: boolean): { kind: 'begin' | 'end'; label: string; style: string } | 'invalid' | undefined {
@@ -52,6 +54,8 @@ export function parseRegions(parts: readonly TextPart[], conversationMarkers = t
   const stack: Frame[] = [];
   const rootOrdinals = new Map<string, number>();
   let order = 0;
+  let keepDepth = 0;
+  const protectedSlices: Slice[] = [];
   const append = (frames: Frame[], part: TextPart, offset: number, line: string) => {
     for (const frame of frames) {
       const last = frame.slices.at(-1);
@@ -81,10 +85,18 @@ export function parseRegions(parts: readonly TextPart[], conversationMarkers = t
     });
     const referenceText = frame.style === 'conversation'
       ? text.replace(/^line:\d+(?:\r\n|\r|\n)hash:[a-f0-9]{64}(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)/, '') : text;
-    const referenceHash = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(referenceText.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
+    const referenceHash = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(referenceText.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1]
+      ?? (frame.style === 'conversation' ? /^line:\d+(?:\r\n|\r|\n)hash:([a-f0-9]{64})(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)\.\.\./.exec(text)?.[1] : undefined);
     const region: Region = { label: frame.label, text, sha256: createHash('sha256').update(text, 'utf8').digest('hex'),
       slices, origin: frame.origin, children, ...(frame.style === 'conversation' ? { conversationMarker: true } : {}), hasReferences: /\[\[cf:/.test(text),
       ...(referenceHash ? { referenceHash } : {}) };
+    const retained = positions.flatMap(slice => protectedSlices.flatMap(keep => {
+      const start = Math.max(slice.start, keep.start);
+      const end = Math.min(slice.end, keep.end);
+      return keep.id === slice.id && start < end
+        ? [{ start: slice.offset + start - slice.start, end: slice.offset + end - slice.start }] : [];
+    }));
+    if (retained.length) region.retained = retained;
     regions.push(region);
     orders.set(region, frame.order);
     stack.at(-1)?.children.push(region);
@@ -93,6 +105,17 @@ export function parseRegions(parts: readonly TextPart[], conversationMarkers = t
     let offset = 0;
     for (const line of part.text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) ?? []) {
       if (!line) continue;
+      const literal = line.trim();
+      if (conversationMarkers && (literal === '→ 不折叠开始' || literal === '← 不折叠结束' || keepDepth > 0)) {
+        // Keep literal islands in any enclosing body; do not parse examples.
+        // An unclosed keep block protects the remaining text across parts.
+        protectedSlices.push({ id: part.id, start: offset, end: offset + line.length });
+        if (literal === '→ 不折叠开始') keepDepth++;
+        else if (literal === '← 不折叠结束') keepDepth = Math.max(0, keepDepth - 1);
+        append(stack, part, offset, line);
+        offset += line.length;
+        continue;
+      }
       const directive = part.markerOffsets && !part.markerOffsets.has(offset) ? undefined : marker(line, conversationMarkers);
       if (!directive || directive === 'invalid') {
         if (directive === 'invalid') for (const frame of stack) frame.invalid = true;
@@ -152,14 +175,38 @@ export function outermost<T extends { region: Region }>(selected: readonly T[]):
   return selected.filter(item => !selected.some(other => containsRegion(other.region, item.region)));
 }
 
+/** Map a complete archived body to just the ranges that may be replaced. */
+export function editableSlices(region: Region): Slice[] {
+  let offset = 0;
+  return region.slices.flatMap(slice => {
+    const end = offset + slice.end - slice.start;
+    let cursor = offset;
+    const result: Slice[] = [];
+    for (const keep of region.retained ?? []) {
+      if (keep.end <= cursor || keep.start >= end) continue;
+      if (keep.start > cursor) result.push({ id: slice.id, start: slice.start + cursor - offset,
+        end: slice.start + keep.start - offset });
+      cursor = Math.min(end, Math.max(cursor, keep.end));
+    }
+    if (cursor < end) result.push({ id: slice.id, start: slice.start + cursor - offset, end: slice.end });
+    offset = end;
+    return result;
+  });
+}
+
 /** Apply disjoint text ranges from the end so original offsets stay valid. */
 export function replaceRegions(parts: readonly TextPart[], selected: readonly { region: Region; reference: string }[]): Map<string, string> {
   // @context-fold begin replaceRegions-0085c09ff4
   const edits = new Map<string, { start: number; end: number; text: string }[]>();
   for (const { region, reference: text } of outermost(selected)) {
-    for (const slice of region.slices) {
+    let first = true;
+    for (const slice of editableSlices(region)) {
       const list = edits.get(slice.id) ?? [];
-      list.push({ start: slice.start, end: slice.end, text });
+      const original = region.slices.find(part => part.id === slice.id && part.start <= slice.start && part.end >= slice.end)!;
+      list.push({ start: slice.start, end: slice.end,
+        text: (region.conversationMarker && region.retained?.length && !first ? '...' : text)
+          + (slice.end < original.end ? '\n' : '') });
+      first = false;
       edits.set(slice.id, list);
     }
   }
@@ -182,5 +229,5 @@ export function regionReference(region: Region, hash: string, path?: string): st
   const newline = /\r\n|\r|\n/.exec(region.text)?.[0] ?? '\n';
   return [`line:${region.text.split(/\r\n|\r|\n/).length}`, `hash:${region.sha256}`,
     `tokens:${Math.ceil(Buffer.byteLength(region.text, 'utf8') / 4)}`,
-    'tokens_method:utf8-bytes/4-ceil', ...(path ? [`path:${path}`] : []), ref].join(newline);
+    'tokens_method:utf8-bytes/4-ceil', ...(path ? [`path:${path}`] : []), '...'].join(newline);
 }

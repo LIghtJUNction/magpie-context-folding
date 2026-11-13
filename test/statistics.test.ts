@@ -114,12 +114,12 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.deepEqual(lifetime.summary, session.summary);
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);
-    assert.deepEqual(await readdir(directory), ['state.sqlite']);
-    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'stats', '--json'], {
+    assert.deepEqual(await readdir(directory), ['archive', 'state.sqlite']);
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'stats'], {
       encoding: 'utf8', env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: directory },
     });
     assert.equal(cli.status, 0, cli.stderr);
-    assert.equal(JSON.parse(cli.stdout).metrics.itemsFolded, 2);
+    assert.equal(JSON.parse(cli.stdout).files, 2);
   });
 });
 
