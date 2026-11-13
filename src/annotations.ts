@@ -41,6 +41,23 @@ function marker(line: string, conversationMarkers: boolean): { kind: 'begin' | '
   // @context-fold end marker-68a6064dd3
 }
 
+/** Recognize projected references without interpreting literal keep examples. */
+export function annotationReferenceHash(text: string, conversationMarkers = true): string | undefined {
+  if (conversationMarkers && /→ 不折叠开始|← 不折叠结束/.test(text)) {
+    let keepDepth = 0;
+    text = (text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) ?? []).filter(line => {
+      const literal = line.trim();
+      if (literal === '→ 不折叠开始') { keepDepth++; return false; }
+      if (literal === '← 不折叠结束') { keepDepth = Math.max(0, keepDepth - 1); return false; }
+      return keepDepth === 0;
+    }).join('');
+  }
+  const referenceText = conversationMarkers
+    ? text.replace(/^line:\d+(?:\r\n|\r|\n)hash:[a-f0-9]{64}(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)/, '') : text;
+  return /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(referenceText.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1]
+    ?? (conversationMarkers ? /^line:\d+(?:\r\n|\r|\n)hash:([a-f0-9]{64})(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)\.\.\./.exec(text)?.[1] : undefined);
+}
+
 /** Scan editable text only. User/trust boundaries are split by the caller. */
 export function parseRegions(parts: readonly TextPart[], conversationMarkers = true): Region[] {
   interface Frame {
@@ -83,19 +100,16 @@ export function parseRegions(parts: readonly TextPart[], conversationMarkers = t
       return start && end ? [{ region, start: start.offset + first.start - start.start,
         end: end.offset + last.end - end.start }] : [];
     });
-    const referenceText = frame.style === 'conversation'
-      ? text.replace(/^line:\d+(?:\r\n|\r|\n)hash:[a-f0-9]{64}(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)/, '') : text;
-    const referenceHash = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(referenceText.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1]
-      ?? (frame.style === 'conversation' ? /^line:\d+(?:\r\n|\r|\n)hash:([a-f0-9]{64})(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)\.\.\./.exec(text)?.[1] : undefined);
-    const region: Region = { label: frame.label, text, sha256: createHash('sha256').update(text, 'utf8').digest('hex'),
-      slices, origin: frame.origin, children, ...(frame.style === 'conversation' ? { conversationMarker: true } : {}), hasReferences: /\[\[cf:/.test(text),
-      ...(referenceHash ? { referenceHash } : {}) };
     const retained = positions.flatMap(slice => protectedSlices.flatMap(keep => {
       const start = Math.max(slice.start, keep.start);
       const end = Math.min(slice.end, keep.end);
       return keep.id === slice.id && start < end
         ? [{ start: slice.offset + start - slice.start, end: slice.offset + end - slice.start }] : [];
     }));
+    const referenceHash = annotationReferenceHash(text, frame.style === 'conversation');
+    const region: Region = { label: frame.label, text, sha256: createHash('sha256').update(text, 'utf8').digest('hex'),
+      slices, origin: frame.origin, children, ...(frame.style === 'conversation' ? { conversationMarker: true } : {}), hasReferences: /\[\[cf:/.test(text),
+      ...(referenceHash ? { referenceHash } : {}) };
     if (retained.length) region.retained = retained;
     regions.push(region);
     orders.set(region, frame.order);
