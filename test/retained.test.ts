@@ -7,6 +7,25 @@ import { bodyFor, fixture } from './helpers.js';
 import { digest } from '../src/store.js';
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
+  test(`${protocol}: many literal islands do not inflate the projected folding cost`, async () => {
+    await fixture(async ({ context, scope, store }) => {
+      const island = '→ 不折叠开始\nkeep\n← 不折叠结束\n';
+      const original = Array.from({ length: 30 }, () => 'evidence '.repeat(15) + '\n' + island).join('') + 'done';
+      const input = bodyFor(protocol, '>> Review <<\n' + original + '\n<< Done >>');
+      const ctx = { ...context, options: { delayRequests: 0 } };
+      const projected = await onRequest(input, ctx) as Record<string, unknown>;
+      const text = extractSpans(projected, protocol).find(span => span.role === 'assistant')!.text;
+      assert.equal(text.split(island).length - 1, 30);
+      assert.ok(!text.includes('evidence'));
+      assert.equal((text.match(/^tokens_method:/gm) ?? []).length, 1);
+      const path = /^path:(.+)$/m.exec(text)?.[1];
+      assert.ok(path);
+      assert.equal(await readFile(path, 'utf8'), original);
+      assert.deepEqual(await onRequest(projected, ctx), projected);
+      assert.equal((await store.readStats(scope)).metrics.itemsFolded, 1);
+    }, protocol);
+  });
+
   test(`${protocol}: outer fold uses dots, keeps literal examples and archives the complete original`, async () => {
     await fixture(async ({ context, scope, store }) => {
       const island = '→ 不折叠开始\n>> Literal example <<\n[[cf:v2:123456789abc]]\n<< Literal end >>\n← 不折叠结束\n';
