@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-29",
+  "model": "claude-sonnet-5",
+  "task": "Add absolutePath to read-source path aliases and cover it across protocols, tool names, and conflicting aliases.",
+  "source_revision": "f9d27c5cece8183420ae405bf2bbcdd0b7e3d566",
+  "baseline": {
+    "completion": "error",
+    "requests": 1,
+    "usage_reported_by_provider": {
+      "prompt_tokens": 2213,
+      "completion_tokens": 2048,
+      "total_tokens": 4261
+    },
+    "error": "Incomplete or filtered assistant response; the 2048-token output cap stopped the tool call before execution.",
+    "changed_files": []
+  },
+  "folding": {
+    "completion": "max-turns",
+    "requests": 7,
+    "usage_reported_by_provider": {
+      "prompt_tokens": 145314,
+      "completion_tokens": 5344,
+      "total_tokens": 150658
+    },
+    "folded_requests": 5,
+    "recovery_calls": 1,
+    "changed_files": [
+      "src/protocol.ts",
+      "test/protocol.test.ts"
+    ],
+    "independent_verification": {
+      "exit_code": 0,
+      "tests_passed": 22,
+      "tests_failed": 0
+    },
+    "acceptance": {
+      "exit_code": 0,
+      "tests_passed": 22,
+      "tests_failed": 0
+    },
+    "verified_by_runner": false
+  },
+  "local_review": {
+    "candidate_changes": 3,
+    "candidate_matched_reviewed_files": true,
+    "focused_test_exit_code": 0,
+    "focused_tests_passed": 22,
+    "focused_tests_failed": 0
+  },
+  "conclusion": "This is not a valid paired cost or quality comparison: baseline stopped at the output cap, while folding reached the turn limit after editing and did not return a final report. Do not infer savings from the two usage totals."
+}

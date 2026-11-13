@@ -24,8 +24,7 @@ function cleanTextParts(parts: unknown[]): unknown[] {
 }
 
 /** Remove only plugin system metadata; conversation text is never interpreted. */
-export function withoutRecoveryMetadata(body: Body, protocol: Protocol): Body {
-  const result = structuredClone(body);
+export function stripRecoveryMetadataInPlace(result: Body, protocol: Protocol): void {
   if (protocol === 'chat' && Array.isArray(result.messages)) {
     result.messages = result.messages.flatMap(item => {
       if (!record(item) || !['system', 'developer'].includes(String(item.role))) return [item];
@@ -58,11 +57,18 @@ export function withoutRecoveryMetadata(body: Body, protocol: Protocol): Body {
       const instruction = holder[key];
       if (record(instruction) && Array.isArray(instruction.parts)) {
         const parts = cleanTextParts(instruction.parts);
-        if (parts.length || !instruction.parts.length || Object.keys(instruction).some(key => key !== 'parts')) instruction.parts = parts;
+        if (parts.length || !instruction.parts.length || Object.keys(instruction).some(key => key !== 'parts')) {
+          holder[key] = { ...instruction, parts };
+        }
         else delete holder[key];
       }
     }
   }
+}
+
+export function withoutRecoveryMetadata(body: Body, protocol: Protocol): Body {
+  const result = structuredClone(body);
+  stripRecoveryMetadataInPlace(result, protocol);
   return result;
 }
 

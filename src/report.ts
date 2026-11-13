@@ -3,10 +3,12 @@ import { stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import { stateDirectory } from './store.js';
-import { statistics } from './statistics.js';
+import { storedMetricsSchema } from './metrics.js';
+import { statistics, usageByFoldState } from './statistics.js';
 import { renderReport } from './report-html.js';
 
 const reasons: Record<string, string> = {
+  'observe-only': '只观测基线',
   'annotated-regions-folded': '本次请求含折叠内容',
   'annotation-grace-period': '闭合标记仍在等待周期',
   'no-eligible-annotations': '本次没有可折叠区域',
@@ -34,6 +36,7 @@ const reasons: Record<string, string> = {
   'explicitly-forgotten': '归档已明确清除',
 };
 const nextChecks: Record<string, string> = {
+  'observe-only': '请求原样通过，没有折叠内容或恢复提示；核对匹配成功的回复 usage，再与相同任务和模型的折叠运行比较。',
   'insufficient-net-savings': '完整请求的缩减未达到收益门槛，已保留原文。指导、CLI 路径和恢复定位开销已计入；不需要为短片段反复折叠或回查。',
   'annotated-regions-folded': '查看本次请求前后大小和响应核实状态。插件替换发给模型的请求视图，客户端保留的聊天历史不会因此收起。',
   'annotation-grace-period': '正文已经归档，当前请求仍保留原文。等待配置要求的后续不同请求；相同请求的重试不推进等待周期。',
@@ -77,10 +80,13 @@ const metadata = z.object({
     beforeBytes: count.optional(), afterBytes: count.optional(),
     foldedRegions: count.optional(), replayedReferences: count.optional(), waiting: count.optional(),
     observation: observation.optional() }).default({}),
+  metrics: storedMetricsSchema,
 });
 
 export interface ReportSession {
   label: string;
+  mode: 'folding' | 'observe-only';
+  usage: ReturnType<typeof usageByFoldState>;
   entries: number;
   foldedEntries: number;
   keptEntries: number;
@@ -139,7 +145,9 @@ export async function collectReport(scope?: string): Promise<EffectsReport> {
         const reason = typeof d.reason === 'string' && Object.hasOwn(reasons, d.reason)
           ? `${reasons[d.reason]} (${d.reason})` : '无记录或未识别的原因（已隐藏原值）';
         sessions.push({
-          label: `会话 ${sessions.length + 1}`, entries: snapshot.entries.length,
+          label: `会话 ${sessions.length + 1}`, mode: d.reason === 'observe-only' ? 'observe-only' : 'folding',
+          usage: usageByFoldState(snapshot.metrics),
+          entries: snapshot.entries.length,
           foldedEntries: snapshot.entries.filter(entry => entry.foldedHash !== undefined && !covered.has(entry.id)).length,
           keptEntries: snapshot.entries.filter(entry => entry.mark.disposition === 'keep').length,
           layers: snapshot.entries.reduce((sum, entry) => sum + entry.layers.length, 0),

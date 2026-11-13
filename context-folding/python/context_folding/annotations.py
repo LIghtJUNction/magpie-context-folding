@@ -158,7 +158,15 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
             problems.append(reason)
 
     for number, line in enumerate(lines, 1):
-        match = _comment_marker(line, marker_styles)
+        conversation = re.fullmatch(r"(>>|<<)[ \t]+(.+?)[ \t]+(<<|>>)", line.strip()) if language == "explicit" else None
+        if conversation and conversation[1] != conversation[3] and conversation[2].strip():
+            style = ("conversation", "")
+            operation = "begin" if conversation[1] == ">>" else "end"
+            name = conversation[2].strip()
+            match = (style, f"@context-fold {operation} placeholder")
+        else:
+            conversation = None
+            match = _comment_marker(line, marker_styles)
         if match is None or (comments is not None and number not in comments):
             continue
         style, body = match
@@ -168,7 +176,8 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
             for frame in opened:
                 frame["invalid"] = True
             continue
-        operation, name = marker.groups()
+        if conversation is None:
+            operation, name = marker.groups()
         if operation == "begin":
             opened.append({"name": name, "line": number, "style": style, "invalid": False})
             continue
@@ -176,7 +185,7 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
             problem("Unmatched source annotation")
             continue
         matching = next((index for index in range(len(opened) - 1, -1, -1)
-                         if (opened[index]["name"], opened[index]["style"]) == (name, style)), None)
+                         if opened[index]["style"] == style and (style == ("conversation", "") or opened[index]["name"] == name)), None)
         if matching != len(opened) - 1:
             problem("Unmatched source annotation")
             for frame in opened:
@@ -198,7 +207,8 @@ def discover_source(text: str, language: str | None = None, path: str | None = N
         sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         regions.append({"id": sha256[:12], "sha256": sha256, "name": name, "kind": "explicit",
                         "start": start, "end": end, "startLine": first + 1, "endLine": number - 1,
-                        "header": name, "parentId": None, "disposition": "foldable"})
+                        "header": frame["name"], "parentId": None, "disposition": "foldable",
+                        **({"conversationMarker": True} if style == ("conversation", "") else {})})
     if opened:
         problem("Unterminated source annotation")
     if len(regions) > 10000:

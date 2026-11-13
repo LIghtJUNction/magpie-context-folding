@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { digest, Store, type Entry, type Snapshot } from '../src/store.js';
-import { addMetrics, emptyMetrics } from '../src/metrics.js';
+import { addMetrics, compactMetrics, emptyMetrics } from '../src/metrics.js';
 
 const sessionLimit = 64 * 1024 * 1024;
 const entry = (id: string, text: string): Entry => ({ id, text, role: 'user', mark: { disposition: 'unmarked' }, layers: [] });
@@ -259,8 +259,9 @@ test('legacy v1 snapshots without metrics remain readable and gain no invented h
     await store.recordMetrics(scope, { originalReadCalls: 1, readChars: 10 });
     assert.equal((await store.readStats()).metrics.originalReadCalls, 1);
     assert.equal((await read(store, scope)).entries[0]?.text, original);
+    const snapshot = await read(store, scope);
     assert.deepEqual(inspect(directory, db => db.query("SELECT json_extract(snapshot, '$.payloadBytes') AS value FROM sessions WHERE scope = ?").get(scope)),
-      { value: Buffer.byteLength(JSON.stringify(await read(store, scope))) });
+      { value: Buffer.byteLength(JSON.stringify({ ...snapshot, metrics: compactMetrics(snapshot.metrics) })) });
   });
 });
 
@@ -380,7 +381,7 @@ test('metadata-only metrics updates honor session capacity, cancellation, and gl
   await fixture(async (store, directory) => {
     const scope = await store.scopeFor('metadata quota');
     await store.transaction(scope, true, sessionLimit, snapshot => { snapshot.entries.push(entry('one', 'original')); });
-    const payloadBytes = Buffer.byteLength(JSON.stringify(await read(store, scope)));
+    const payloadBytes = inspect(directory, db => (db.query("SELECT json_extract(snapshot, '$.payloadBytes') AS value FROM sessions WHERE scope = ?").get(scope) as { value: number }).value);
     await store.transaction(scope, false, payloadBytes + 16, snapshot => { snapshot.decision = { sized: 1 }; });
     await assert.rejects(store.recordMetrics(scope, { savingNanoUsdLower: '1'.repeat(100) }), /Session archive full/);
     assert.equal((await store.readStats()).metrics.savingNanoUsdLower, '0');

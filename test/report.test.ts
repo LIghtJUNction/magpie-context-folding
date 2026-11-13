@@ -7,6 +7,8 @@ import { Store } from '../src/store.js';
 import { collectReport } from '../src/report.js';
 import { escapeHtml, renderReport } from '../src/report-html.js';
 import { onRequest, onResponse } from '../src/context.hooks.js';
+import { emptyMetrics } from '../src/metrics.js';
+import { usageByFoldState } from '../src/statistics.js';
 
 const cli = join(import.meta.dir, '..', 'src', 'cli.ts');
 async function fixture(run: (directory: string, scope: string, invoke: (args: string[]) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
@@ -77,6 +79,7 @@ test('report CLI is private, offline and read-only with faithful counts and cand
     const report = await collectReport(scope);
     assert.equal(report.statistics.scope, 'session');
     assert.deepEqual(report.sessions[0], {
+      mode: 'folding', usage: usageByFoldState(emptyMetrics()),
       label: '会话 1', entries: 3, foldedEntries: 0, keptEntries: 1, layers: 1, groups: 1, foldedGroups: 1,
       reason: '字节更少；没有费用证明 (bytes-smaller-no-cost-proof)',
       nextCheck: '当前只证明候选字节更少。需要费用判断时，补齐相同任务全部新增成本边界并使用 cost 模式。', approved: true,
@@ -199,7 +202,7 @@ test('report on unused installation stays empty and creates no state directory',
     });
     const [code, , err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     assert.equal(code, 0, err);
-    assert.ok((await readFile(output, 'utf8')).includes('还没有归档会话'));
+    assert.ok((await readFile(output, 'utf8')).includes('还没有用量观测或归档会话'));
     await assert.rejects(stat(state), { code: 'ENOENT' });
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

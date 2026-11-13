@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Database } from 'bun:sqlite';
 import { Store, digest } from '../src/store.js';
+import { compactMetrics, parseStoredMetrics } from '../src/metrics.js';
 import { execute } from '../src/tool.js';
 
 async function fixture(run: (directory: string, scope: string, text: string) => Promise<void>) {
@@ -80,7 +81,9 @@ test('full archive remains readable and pasteable when read statistics cannot gr
     const database = new Database(join(directory, 'archive', 'state.sqlite'));
     const row = database.query('SELECT snapshot FROM sessions WHERE scope = ?').get(scope) as { snapshot: string };
     const stored = JSON.parse(row.snapshot);
-    stored.metrics.originalReadCalls = 9;
+    const metrics = parseStoredMetrics(stored.metrics);
+    metrics.originalReadCalls = 9;
+    stored.metrics = compactMetrics(metrics);
     stored.sessionLimitBytes = stored.payloadBytes;
     database.query('UPDATE sessions SET snapshot = ? WHERE scope = ?').run(JSON.stringify(stored), scope);
     database.close();

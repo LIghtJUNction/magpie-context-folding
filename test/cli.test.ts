@@ -70,7 +70,7 @@ test('CLI keeps recovery available with disabled, legacy or broken config and ex
     assert.equal(effective.code, 0);
     assert.equal(JSON.parse(effective.out).config.folding.enabled, false);
     assert.deepEqual(JSON.parse(effective.out).config.folding, {
-      enabled: false, max_session_bytes: 67_108_864, delay_requests: 1, min_savings_tokens: 256,
+      enabled: false, observe_only: false, max_session_bytes: 67_108_864, delay_requests: 0, min_savings_tokens: 256,
     });
     assert.ok(!effective.out.includes('secret'));
     assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
@@ -107,7 +107,7 @@ test('stats shows folding, detail views and compact token totals with exact JSON
     const result = await invoke(['stats', '--scope', scope]);
     assert.equal(result.code, 0, result.err);
     assert.ok(result.out.startsWith('统计范围：'));
-    assert.ok(result.out.includes('token 为估算值，不代表实际账单节省。'));
+    assert.ok(result.out.includes('净收益状态：未验证（实际账单和耗时未测）'));
     assert.ok(!result.out.includes('USD 0.000000000'));
     assert.ok(result.out.includes('折叠次数：7'));
     assert.ok(result.out.includes('查看详情次数：5'));

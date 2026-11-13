@@ -1,0 +1,108 @@
+{
+  "date": "2026-10-29",
+  "model": "codex/gpt-6-luna",
+  "model_catalog_probe": {
+    "path": "/v1/models",
+    "http_status": 200,
+    "listed_models": 12,
+    "matching_luna_ids": []
+  },
+  "planned_trials": 4,
+  "completed_trials": 4,
+  "trials": [
+    {
+      "trial": "01-baseline-full",
+      "disclosure": "full",
+      "verified": false,
+      "completion": "error",
+      "requests": 1,
+      "verification_message_bytes": 27577,
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "wall_seconds": 26.974067311006365,
+      "model_wall_seconds": null,
+      "model_reported": [
+        "unknown"
+      ],
+      "source_snapshot_sha256": "5b2c25afe0acf208f307d8277ecb87284b1802c61654ce16396066e2cb1b64d0",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "score": null,
+      "error": "Model HTTP 404; not retried"
+    },
+    {
+      "trial": "01-baseline-summary",
+      "disclosure": "summary",
+      "verified": false,
+      "completion": "error",
+      "requests": 1,
+      "verification_message_bytes": 219,
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "wall_seconds": 28.75073360800161,
+      "model_wall_seconds": null,
+      "model_reported": [
+        "unknown"
+      ],
+      "source_snapshot_sha256": "5b2c25afe0acf208f307d8277ecb87284b1802c61654ce16396066e2cb1b64d0",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "score": null,
+      "error": "Model HTTP 404; not retried"
+    },
+    {
+      "trial": "02-baseline-full",
+      "disclosure": "full",
+      "verified": false,
+      "completion": "error",
+      "requests": 1,
+      "verification_message_bytes": 27577,
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "wall_seconds": 27.98117514399928,
+      "model_wall_seconds": null,
+      "model_reported": [
+        "unknown"
+      ],
+      "source_snapshot_sha256": "5b2c25afe0acf208f307d8277ecb87284b1802c61654ce16396066e2cb1b64d0",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "score": null,
+      "error": "Model HTTP 404; not retried"
+    },
+    {
+      "trial": "02-baseline-summary",
+      "disclosure": "summary",
+      "verified": false,
+      "completion": "error",
+      "requests": 1,
+      "verification_message_bytes": 219,
+      "input_tokens": null,
+      "cached_input_tokens": null,
+      "output_tokens": null,
+      "wall_seconds": 25.72808627199265,
+      "model_wall_seconds": null,
+      "model_reported": [
+        "unknown"
+      ],
+      "source_snapshot_sha256": "5b2c25afe0acf208f307d8277ecb87284b1802c61654ce16396066e2cb1b64d0",
+      "excluded_paths": [
+        "scripts/cost-quality-benchmark.py"
+      ],
+      "verification_environment": "fresh frozen snapshot plus allowed candidate changes only",
+      "score": null,
+      "error": "Model HTTP 404; not retried"
+    }
+  ],
+  "cost_usd": null,
+  "interpretation": "No quality comparison: every arm failed after one HTTP 404 and returned no model answer or usage. The attempts may still have been billable; total cost is unknown."
+}

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, basename } from 'node:path';
 import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
 import { execute } from '../src/tool.js';
@@ -164,3 +166,23 @@ test('earlier folding in the same message cannot restart a later block grace per
     assert.equal(after.match(/\[\[cf:v2:/g)?.length, 2);
   });
 });
+
+
+for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
+  test(`${protocol}: process folding publishes a readable hash-named file before returning`, async () => {
+    await fixture(async ({ context }) => {
+      const text = ">> Code review started: changes against 'main' <<\n" + payload + '\n<< Code review finished >>';
+      const output = await onRequest(bodyFor(protocol, text), { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
+      const visible = extractSpans(output, protocol).filter(span => span.role === 'assistant').map(span => span.text).join('');
+      assert.ok(visible.startsWith(">> Code review started: changes against 'main' <<\nline:"));
+      assert.ok(visible.endsWith('\n<< Code review finished >>'));
+      const path = /^path:(.+)$/m.exec(visible)?.[1];
+      assert.ok(path && isAbsolute(path));
+      assert.equal(basename(path), digest(payload) + '.txt');
+      assert.equal(await readFile(path, 'utf8'), payload);
+      assert.ok(visible.includes('hash:' + digest(payload)));
+      const replay = await onRequest(output, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
+      assert.equal(extractSpans(replay, protocol).find(span => span.role === 'assistant')?.text, visible);
+    }, protocol);
+  });
+}

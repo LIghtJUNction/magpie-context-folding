@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "benchmark": "live-provider-hook-folding-pilot",
+  "completed_at": "2026-10-29",
+  "model": "claude-sonnet-5",
+  "runner": "uv run --project benchmarks/harbor --frozen python scripts/self-iterate.py",
+  "route_probe": {
+    "provider_input_tokens": 12,
+    "provider_output_tokens": 2,
+    "included_in_trials": false
+  },
+  "conditions": {
+    "iterations_per_mode": 1,
+    "max_requests_per_mode": 7,
+    "max_completion_tokens": 2048,
+    "verification_output": "summary",
+    "verify": "bun test --isolate --timeout=15000 test/guidance.test.ts",
+    "allowed_paths": [
+      "src/guidance.ts",
+      "test/guidance.test.ts"
+    ],
+    "task": "Reduce recurring folding-guidance overhead while preserving agent uptake. Inspect src/guidance.ts, the marker parser, and focused tests. Make the smallest wording change that lowers the common guidance byte count while retaining all of these behaviors: use parser-valid whole-line begin/end markers for long completed-stage details; keep concise conclusions, constraints, failures, and next steps outside; leave small, active, and open work visible; honor the configured minimum estimated savings threshold; do not poll or invent facts. Add or adjust tests for every preserved behavior and verify the sample with the real parser. Do not change folding, archive, or threshold behavior. Run the focused guidance test suite and report the exact common prompt byte count."
+  },
+  "trials": [
+    {
+      "mode": "baseline",
+      "requests": 7,
+      "completion": "max-turns",
+      "verified": false,
+      "changed_files": [],
+      "folded_requests": 0,
+      "provider_input_tokens": 122970,
+      "provider_output_tokens": 468,
+      "input_request_bytes_sum": 240361,
+      "projected_request_bytes_sum": 240361,
+      "verification_before_exit_code": 0,
+      "verification_after_exit_code": 0,
+      "cached_input_tokens_reported": false
+    },
+    {
+      "mode": "folding",
+      "requests": 7,
+      "completion": "max-turns",
+      "verified": false,
+      "changed_files": [],
+      "folded_requests": 2,
+      "provider_input_tokens": 85495,
+      "provider_output_tokens": 510,
+      "input_request_bytes_sum": 223805,
+      "projected_request_bytes_sum": 219005,
+      "verification_before_exit_code": 0,
+      "verification_after_exit_code": 0,
+      "cached_input_tokens_reported": false
+    }
+  ],
+  "fold_observation": {
+    "approved_regions": 1,
+    "source_file": "src/annotations.ts",
+    "source_sha256": "cd78759388a110d9a5b228ae3d4784e1b95b584c86a94233e96e61fbf3a66402",
+    "label": "parseRegions-9a007b50ac",
+    "estimated_net_savings_tokens": 886,
+    "estimate_basis": "JSON UTF-8 bytes / 4; not provider tokenization",
+    "model_authored_fold_markers_observed": false
+  },
+  "limitations": [
+    "One independent trajectory per mode; reads and tool choices differed.",
+    "Both trials reached the request limit without a candidate change, so task quality was not accepted.",
+    "The provider returned no cached-token counts or billing amounts.",
+    "The 37,475-token input difference is observational and cannot be attributed to folding."
+  ]
+}

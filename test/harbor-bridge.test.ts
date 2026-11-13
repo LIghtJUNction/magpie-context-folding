@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { measureNewFoldedRegions } from '../benchmarks/harbor/bridge.js';
 import { bodyFor, marked, payload, progress } from './helpers.js';
 
 type Reply = { id: unknown; ok: boolean; result?: any; error?: { code: string; message: string } };
@@ -73,6 +74,8 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
     assert.equal(assistantText(first.result.body), marked());
     assert.ok(first.result.projection_ms >= 0);
     assert.equal(first.result.input_bytes, Buffer.byteLength(JSON.stringify(original)));
+    assert.equal(first.result.assistant_regions_seen, 1);
+    assert.deepEqual(first.result.folded_by_role, { assistant: 0, tool: 0 });
     assert.equal((await call({ op: 'response', success: true })).ok, true);
 
     const retry = await call({ op: 'project', mode: 'folding', body: original });
@@ -85,6 +88,8 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
     const compact = assistantText(next.result.body);
     const hash = compact.match(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/)?.[1];
     assert.ok(hash);
+    assert.equal(next.result.folded_by_role.assistant, 1);
+    assert.equal(next.result.folded_by_role.tool, 0);
     assert.ok(next.result.output_bytes < next.result.input_bytes);
     // The bridge did not mutate the parent's authoritative original transcript.
     assert.equal((original.messages as any[])[2].content, marked());
@@ -108,6 +113,36 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
     const expanded = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
     assert.equal(assistantText(expanded.result.body), marked());
     await call({ op: 'response', success: true });
+  });
+});
+
+test('Harbor fold attribution distinguishes assistant notes from verified source reads', () => {
+  const assistant = bodyFor('chat');
+  const assistantProjection = structuredClone(assistant) as any;
+  assistantProjection.messages.find((message: any) => message.role === 'assistant').content = '[[cf:v2:123456789abc]]';
+  assert.deepEqual(measureNewFoldedRegions(assistant, assistantProjection), { assistant: 1, tool: 0 });
+
+  const source = {
+    model: 'fixture',
+    tools: [{ type: 'function', function: { name: 'read_file' } }],
+    messages: [
+      { role: 'assistant', content: null, tool_calls: [{ id: 'read-1', type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"src/note.ts"}' } }] },
+      { role: 'tool', tool_call_id: 'read-1', content: marked(payload, 'source') },
+      { role: 'assistant', content: 'Read complete.' },
+      { role: 'user', content: 'Continue.' },
+    ],
+  };
+  const sourceProjection = structuredClone(source) as any;
+  sourceProjection.messages.find((message: any) => message.role === 'tool').content = '[[cf:v2:abcdef123456]]';
+  assert.deepEqual(measureNewFoldedRegions(source, sourceProjection), { assistant: 0, tool: 1 });
+});
+
+test('Harbor bridge counts assistant annotations in the final transcript', async () => {
+  await withBridge(async ({ call }) => {
+    const body = bodyFor('chat');
+    const inspected = await call({ op: 'inspect', messages: body.messages });
+    assert.deepEqual(inspected.result, { assistant_authored_regions: 1 });
   });
 });
 

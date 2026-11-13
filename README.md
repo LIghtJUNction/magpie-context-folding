@@ -6,9 +6,9 @@
 
 **Agent 用一对注释圈出以后可以收起的内容；插件保存原文，等一个请求周期，再把它换成带短哈希的引用。**
 
-0.5.0 的折叠由 Agent 写出的标记请求，并受最小节省量等条件约束。没有智力、平衡、经济档位，也不需要先列目录、再调用 `mark`。未标记的内容保持完整。
+0.5.0 起，折叠由 Agent 写出的标记请求，并受最小节省量等条件约束。没有智力、平衡、经济档位，也不需要先列目录、再调用 `mark`。未标记的内容保持完整。
 
-**本文描述 0.5.0 release。** 旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
+**本文描述 0.5.1 release。** 旧版测试与费用分析是历史材料，不能作为新实现的效果证明。
 
 ## 文本管道：ctxf
 
@@ -39,7 +39,7 @@ ctxf fold --language python < module.py > module.folded.txt
 安装已发布版本：
 
 ```sh
-magpie plugin add npm:magpie-context-folding@0.5.0
+magpie plugin add npm:magpie-context-folding@0.5.1
 ```
 
 npm 版本通过 GitHub Actions Trusted Publishing 发布：完成 npm 与 GitHub Actions 的 Trusted Publisher 绑定后，推送匹配 `package.json` 版本的 `v*` GitHub Release 会先运行验证，再用 OIDC 发布并生成 provenance，无需长期 npm token 或本机 OTP。
@@ -60,7 +60,7 @@ Magpie 直接加载 TypeScript 源码，不依赖安装时执行构建脚本。�
 
 插件会自动向请求加入简短指导；也可以按宿主需要补充下面的提示词：
 
-> 主动用折叠标记管理上下文，不要等窗口紧张。每完成一段实质性工作，先在标记外写简明且可独立理解的当前摘要，再紧接着用 `<!-- @context-fold begin task-details -->` 和 `<!-- @context-fold end task-details -->` 包住较长的支撑过程。结论、约束、失败和下一步留在摘要里；摘要必须在细节折叠后仍能说明任务进展。不要一开始打开包住全部工作的总标记。小段和仍在进行的内容不必标记；未闭合的标记不能折叠。闭合后经过一个请求周期，符合净节省条件的内容会保存并折叠。源码使用相同标记和对应语言的注释语法。不要计算哈希；需要原文时，用系统给出的 scope 和短哈希通过 shell 调用本地 CLI。
+> 主动用折叠标记管理上下文，不要等窗口紧张。每完成一段实质性工作，先在标记外写简明且可独立理解的当前摘要，再紧接着用 `<!-- @context-fold begin task-details -->` 和 `<!-- @context-fold end task-details -->` 包住该阶段已完成的较长支撑过程。结论、约束、失败和下一步留在摘要里；摘要必须在细节折叠后仍能说明任务进展。不要一开始打开包住全部工作的总标记。小段和仍在进行的内容不必标记；未闭合的标记不能折叠。默认设置下，完整标记首次出现在下一请求时，符合净节省条件的内容会保存并折叠。源码使用相同标记和对应语言的注释语法。不要计算哈希；需要原文时，用系统给出的 scope 和短哈希通过 shell 调用本地 CLI。
 
 `LABEL` 是简短名称，例如 `route-analysis`。它帮助 Agent 识别内容，不是唯一编号，不要求手工维护哈希。
 
@@ -110,7 +110,7 @@ magpie-context-folding read --scope 'CURRENT_SCOPE' --id 'ACTUAL_SHORT_HASH' --r
 | `grep` / `meta` | 搜索归档内容或查看节点元数据。 |
 | `paste` | 将选定视图写到宿主上的新文件，拒绝覆盖现有文件。 |
 | `status` | 检查当前会话归档与最近处理情况。 |
-| `stats` | 查看累计折叠和恢复统计；token 数是估算。 |
+| `stats` | 查看折叠估算，以及含折叠、不含折叠和只观测基线的回复 usage 分组；分组不是自动配对对照，也不等于账单或节省金额。 |
 | `forget` | 清理已经恢复、没有仍在使用的折叠引用的会话归档。 |
 
 根插件的分页偏移按 JavaScript UTF-16 单元计数，直接使用 `nextOffset`。Python 核心使用 Unicode 码点偏移，二者不能混用。scope 是会话恢复能力值，不应转交其他会话。旧归档的原文、历史层和分组清单仍可读取；0.5.0 不再创建旧式摘要层或通过 `mark` 建组。
@@ -128,7 +128,8 @@ version = 1
 
 [folding]
 enabled = true
-delay_requests = 1
+observe_only = false
+delay_requests = 0
 max_session_bytes = 67108864
 min_savings_tokens = 256
 
@@ -138,7 +139,7 @@ min_savings_tokens = 256
 # gateway_timeout_ms = 3000
 ```
 
-插件 options 使用对应 camelCase：`delayRequests`、`maxSessionBytes`、`minSavingsTokens`、`shellToolName`、`recoveryCommand`、`gatewayTimeoutMs`。`delay_requests = 0` 表示在首次完整观察到闭合标记的请求中折叠；默认值 1 留出一次完整观察机会。`min_savings_tokens` 是估算节省门槛，默认 256。
+插件 options 使用对应 camelCase：`observeOnly`、`delayRequests`、`maxSessionBytes`、`minSavingsTokens`、`shellToolName`、`recoveryCommand`、`gatewayTimeoutMs`。`observe_only = true` 会让请求原样通过，不折叠内容，也不加恢复提示，但仍记录匹配成功回复的 usage，供基线观察；这类数据会单独显示。要比较成本，请用同一任务和模型，尽量固定其他条件，分别运行基线与折叠版本并检查输出质量；两组累计数字本身不构成因果证明。默认 `delay_requests = 0`，在首次完整观察到闭合标记的请求中折叠；设为 1 可多保留一次完整观察机会。同一请求重试不推进延迟。`min_savings_tokens` 是估算节省门槛，默认 256。
 
 `max_session_bytes` 是归档容量上限，不是折叠阈值。存档失败、容量不足、并发状态冲突或无法确认恢复入口时，保留原文。默认状态目录为 `$XDG_DATA_HOME/magpie-context-folding` 或 `~/.local/share/magpie-context-folding`，可通过 `MAGPIE_CONTEXT_FOLDING_STATE_DIR` 指定。
 
@@ -183,6 +184,18 @@ npm run test:host:installed -- --package /absolute/path/to/magpie-context-foldin
 同一条已发生请求轨迹中，未折叠请求估算为 14,377，折叠请求估算为 2,624（按 JSON UTF-8 字节数除以 4，约减少 81.8%）。这是请求序列化大小估算，不是供应商 tokenizer 用量、反事实完整历史比较或账单节省。机器回执见 [`docs/benchmarks/host-smoke-npm-0.5.0-2026-10-28.json`](docs/benchmarks/host-smoke-npm-0.5.0-2026-10-28.json)。
 
 2026-10-29 发布并安装 npm `0.5.1` 后，在 Magpie `0.1.1948`、Bun `1.4.0` 上复跑：18 项检查及 18 次请求全部通过，hook 失败和未验证均为 0，46,278 字节原文精确恢复。已安装源码逐文件匹配 `v0.5.1`；这份验收使用已安装制品和本地合成上游，原始记录见 [`0.5.1 安装验收`](docs/benchmarks/host-smoke-npm-0.5.1-2026-10-29.json)。
+
+### 当前工作树的隔离 host 验收与 Provider A/B
+
+2026-10-30 在 `main` HEAD `f9d27c5` 的未发布工作树运行 `npm run test:host`：18 项检查、18 个本地合成请求均通过，成功 hook 为 18，失败和未验证均为 0；46,278 字节 Unicode/CRLF 源码精确恢复。这是当前工作树的临时隔离 host 验收，与上方已安装 `0.5.1` 的验收分开记录。
+
+同一工作树另做一组成对真实 Provider 调用，比较已读源码后的无关整数追问。`claude-sonnet-5` 回报输入从 12,235 降至 1,173 token，两边都答对 `391`；折叠组将 32,477 B 合成源码换成引用。它只覆盖一个合成任务，不代表账单节省、普遍质量或提速。缓存 token 未提供，也没有重载当前已安装插件。逐臂数据和源码指纹见[实测回执](docs/benchmarks/live-magpie-provider-host-ab-main-2026-10-30.json)，实现与复现入口见 [`scripts/live-magpie-provider-host-ab.py`](scripts/live-magpie-provider-host-ab.py)。
+
+复跑真实 A/B 需要当前 shell 已设置脚本支持的 Provider 环境变量，并会发出两次真实 Provider completion，可能产生费用：
+
+```sh
+python3 scripts/live-magpie-provider-host-ab.py --output /tmp/provider-host-ab.json
+```
 
 ### 归档树查询微基准
 
@@ -234,7 +247,7 @@ folding 模式在自身请求序列中少发送 30,416 字节（25.4%）；折�
 复现并保存原始记录：
 
 ```sh
-npm run bench:fold-strategies -- docs/benchmarks/fold-strategy-2026-10-29.json
+npm run bench:fold-strategies -- --delay-requests 1 docs/benchmarks/fold-strategy-2026-10-29.json
 ```
 
 本机 Bun 1.4.0、源码版本 `716c78e` 的结果：
@@ -251,3 +264,7 @@ npm run bench:fold-strategies -- docs/benchmarks/fold-strategy-2026-10-29.json
 “前缀失效”是相邻请求消息数组序列化后的 UTF-8 公共前缀代理，不等于供应商 cached tokens。该实验使用合成内容，不调用模型；结果适用于比较这四条固定轨迹，不能外推实际缓存命中率、质量或费用。完整逐请求数据、运行指纹见[基准 JSON](docs/benchmarks/fold-strategy-2026-10-29.json)，实现见 [`scripts/fold-strategy-benchmark.ts`](scripts/fold-strategy-benchmark.ts)。
 
 旧的微基准数字之前被描述成“优化前后”；请以本节新增的 commit、源码哈希和复现命令区分历史记录与当前可重跑结果。
+
+### 对话起止标记
+
+通用协议及 Magpie、独立 `ctxf` 实现支持用独占一行的 `>> 开始缘由 <<` 打开区域，用 `<< 结束结果 >>` 关闭区域。两端文案可以不同，折叠时原样保留；中间正文归档后替换为 `line`、`hash`、`tokens`（估算）、`path`（规范绝对路径）及恢复引用。原文以 `archive/<完整 SHA-256>.txt` 保存，可由任何软件直接读取。完整格式与边界规则见[协议](docs/annotation-protocol.md#对话过程标记与-agent-软件无关)。

@@ -210,7 +210,7 @@ function readSource(name: unknown, value: unknown): Source | undefined {
   }
   if (!isRecord(value)) return;
   const args = value;
-  const paths = ["path", "file_path", "filePath", "absolute_path"].filter((key) => key in args).map((key) => args[key]);
+  const paths = ["path", "file_path", "filePath", "absolute_path", "absolutePath"].filter((key) => key in args).map((key) => args[key]);
   const path = paths[0];
   if (typeof path !== "string" || !path.trim() || paths.some((entry) => entry !== path)) return;
   const controls = [
@@ -534,6 +534,65 @@ export function replaceExtractedSpans(
   for (const span of spans) {
     const replacement = replacements.get(span.id);
     if (replacement !== undefined && !span.protectedReason) setText(result, span.path, replacement);
+  }
+  return result;
+}
+
+/**
+ * Request-hook projection path: copy only containers on replaced paths and
+ * share the rest of the immutable JSON request. Public replacement helpers
+ * keep their deep-copy behavior.
+ */
+export function projectExtractedSpans(
+  body: Record<string, unknown>,
+  replacements: ReadonlyMap<string, string>,
+  protocol: Protocol,
+  spans: readonly Span[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...body };
+  if (protectionReason(body, protocol)) return result;
+
+  const copies = new WeakMap<object, object>();
+  copies.set(body, result);
+  const assign = (target: unknown, key: string | number, value: unknown): boolean => {
+    if (Array.isArray(target) && typeof key === "number" && Object.hasOwn(target, key)) {
+      target[key] = value;
+      return true;
+    }
+    if (isRecord(target) && typeof key === "string" && Object.hasOwn(target, key)) {
+      Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true });
+      return true;
+    }
+    return false;
+  };
+
+  for (const span of spans) {
+    const replacement = replacements.get(span.id);
+    if (replacement === undefined || span.protectedReason || !span.path.length) continue;
+    let source: unknown = body;
+    let target: unknown = result;
+    for (const [index, key] of span.path.entries()) {
+      let value: unknown;
+      if (Array.isArray(source) && typeof key === "number" && Object.hasOwn(source, key)) value = source[key];
+      else if (isRecord(source) && typeof key === "string" && Object.hasOwn(source, key)) value = source[key];
+      else break;
+
+      if (index === span.path.length - 1) {
+        if (typeof value === "string") assign(target, key, replacement);
+        break;
+      }
+      if (typeof value !== "object" || value === null) break;
+      let copy = copies.get(value);
+      if (!copy) {
+        if (Array.isArray(value)) copy = value.slice();
+        else if (isRecord(value)) copy = { ...value };
+        else break;
+        copies.set(value, copy);
+      }
+      if (!assign(target, key, copy)) break;
+      source = value;
+      target = copy;
+    }
   }
   return result;
 }
