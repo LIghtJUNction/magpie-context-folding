@@ -23,7 +23,7 @@
 在已安装 Magpie 的环境中执行：
 
 ```bash
-magpie plugin add npm:magpie-context-folding
+magpie plugin add npm:magpie-context-folding@0.6.0
 ```
 
 确保 Agent 的模型请求经过已加载此插件的 Magpie，并且可以调用 shell 工具执行恢复命令；插件会跳过无法通过 shell 恢复的请求。保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。开发版安装见[安装](#安装)。
@@ -67,6 +67,10 @@ $context-folding 请审查这个项目的代码，按阶段折叠已完成的排
 闭合且达到净节省门槛后，插件先按哈希文件名保存完整原文，再把可折叠部分显示为 `...`；箭头保留区原样留在中间。折叠元数据提供真实 `path` 和 `hash`，可直接读文件。保留区内的示例标记不再被解释为折叠指令；保留区可嵌套。普通工具结果不会因为位于标记之间就一并折叠。
 
 仅看到起止标记不代表已经折叠；未闭合、过短、无净收益或归档失败时保留原文。新语法和目录 CLI 属于当前 Magpie 插件；独立 Python `ctxf` 的接口另见下文。
+
+## 0.6.0：局部保留与极简目录 CLI
+
+折叠块里可以用箭头保留当前仍需要的部分，其他正文显示为 `...`。完整原文以哈希文件名保存，CLI 仅负责归档目录的统计、排序列出、搜索、读取与清理。旧 CLI 的 scope、层级、恢复状态、状态栏及报告命令已移除；迁移说明和验收命令见 [0.6.0 发布说明](docs/release-0.6.0.md)。
 
 ## 一分钟理解
 
@@ -143,7 +147,7 @@ Agent 写出阶段结论
 ### Magpie 插件
 
 ```bash
-magpie plugin add npm:magpie-context-folding
+magpie plugin add npm:magpie-context-folding@0.6.0
 ```
 
 保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。
@@ -296,4 +300,4 @@ Python 核心在 `context-folding/` 中独立测试。历史基准和旧费用�
 
 ### 对话起止标记
 
-通用协议及 Magpie、独立 `ctxf` 实现支持用独占一行的 `>> 开始缘由 <<` 打开区域，用 `<< 结束结果 >>` 关闭区域。两端文案可以不同，折叠时原样保留；中间正文归档后替换为 `line`、`hash`、`tokens`（估算）、`path`（规范绝对路径）及恢复引用。原文以 `archive/<完整 SHA-256>.txt` 保存，可由任何软件直接读取。完整格式与边界规则见[协议](docs/annotation-protocol.md#对话过程标记与-agent-软件无关)。
+通用协议及 Magpie、独立 `ctxf` 实现支持用独占一行的 `>> 开始缘由 <<` 打开区域，用 `<< 结束结果 >>` 关闭区域。两端文案可以不同，折叠时原样保留；中间正文归档后替换为 `line`、`hash`、`tokens`（估算）、`path`（规范绝对路径）及 `...`。原文以 `archive/<完整 SHA-256>.txt` 保存，可由任何软件直接读取。完整格式与边界规则见[协议](docs/annotation-protocol.md#折叠与局部保留)。

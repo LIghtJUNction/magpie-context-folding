@@ -1,6 +1,6 @@
 {
   "name": "magpie-context-folding",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "Reversible Magpie text folding with literal keep regions and a minimal archive-folder CLI",
   "type": "module",
   "main": "./src/index.ts",

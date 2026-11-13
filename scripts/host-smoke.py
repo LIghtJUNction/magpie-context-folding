@@ -33,11 +33,6 @@ from urllib.request import ProxyHandler, Request, build_opener
 PROJECT = Path(__file__).resolve().parents[1]
 HTTP = build_opener(ProxyHandler({}))
 GUIDANCE = re.compile(r"^<context-folding>.*</context-folding>$", re.DOTALL)
-BUDGET = re.compile(
-    r"^<context-budget used_estimate=(\d+) capacity=(\d+|unknown) "
-    r"output_reserved=(\d+) available_estimate=(\d+|unknown) "
-    r"basis=json-utf8-bytes/4(?: scope=([a-f0-9]{64}))?\s*/>$"
-)
 
 
 def serialized(value: object) -> str:
@@ -46,10 +41,6 @@ def serialized(value: object) -> str:
 
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def utf16_length(text: str) -> int:
-    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 class Fixture:
@@ -118,40 +109,6 @@ def free_port() -> int:
 def write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(serialized(value), encoding="utf-8")
-
-
-def verify_request(
-    outgoing: dict, sent: dict, expect_guidance: bool | None = None,
-) -> tuple[dict, str | None, dict]:
-    """Check the wire request, including adaptive low-noise guidance."""
-    clean = copy.deepcopy(outgoing)
-    hints = [item for item in clean["messages"] if item.get("role") == "system"
-             and isinstance(item.get("content"), str) and GUIDANCE.fullmatch(item["content"])]
-    assert len(hints) <= 1, f"expected at most one system guidance, found {len(hints)}"
-    if expect_guidance is not None:
-        assert bool(hints) is expect_guidance, (
-            f"guidance presence was {bool(hints)}, expected {expect_guidance}"
-        )
-    assert not any(item.get("role") == "system" and isinstance(item.get("content"), str)
-                   and BUDGET.fullmatch(item["content"]) for item in clean["messages"]), "removed context budget was injected"
-    scope_match = (
-        re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"])
-        if hints else None
-    )
-    scope = scope_match[1] if scope_match else None
-    assert outgoing["model"] == "m1", f"unexpected routed model: {outgoing['model']}"
-    # Magpie changes fake/m1 to m1 after the hook. Count the same model name to
-    # compare full hook payloads, including guidance and all client declarations.
-    estimated = {**outgoing, "model": sent["model"]}
-    used = (len(serialized(estimated).encode("utf-8")) + 3) // 4
-    if hints:
-        clean["messages"].remove(hints[0])
-    clean["model"] = sent["model"]
-    assert clean["tools"] == sent["tools"], "client tool declarations changed"
-    return clean, scope, {
-        "usedEstimate": used, "basis": "json-utf8-bytes/4",
-        "guidanceInjected": bool(hints),
-    }
 
 
 def advance(body: dict, message: str) -> dict:
@@ -228,309 +185,75 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                         raise AssertionError("isolated Magpie did not start within 30 seconds")
                     time.sleep(0.1)
 
-            def call(arguments: dict, expect_error: bool = False) -> dict:
-                # Use the package CLI against the same isolated archive as the
-                # live host. No MCP transport, server or tool discovery is used.
-                argv = [str(bun), str(project / "src" / "cli.ts"), arguments["action"], "--json"]
-                for key, value in arguments.items():
-                    if key == "action" or value is False:
-                        continue
-                    argv.append("--" + key)
-                    if value is not True:
-                        argv.append(str(value))
-                completed = subprocess.run(argv, env=environment, cwd=directory,
-                                           capture_output=True, text=True, timeout=20)
-                assert (completed.returncode != 0) == expect_error, f"unexpected CLI result: {completed.stderr}"
-                return {"error": completed.stderr} if expect_error else json.loads(completed.stdout)
+            archive = directory / "folder-state" / "archive"
 
-            def completions(metrics: dict) -> int:
-                return sum(metrics.get(key, 0) for key in (
-                    "successfulHookRequests", "failedHookRequests", "unverifiedHookRequests"))
+            def cli(*arguments: str) -> str:
+                completed = subprocess.run(
+                    [str(bun), str(project / "dist" / "cli.js"), *arguments, "--dir", str(archive)],
+                    env=environment, cwd=directory, check=False, capture_output=True,
+                )
+                assert completed.returncode == 0, completed.stderr
+                return completed.stdout.decode("utf-8")
 
-            def send(
-                body: dict, session: str = "host-smoke",
-                expect_guidance: bool | None = None,
-            ) -> tuple[dict, str | None, dict]:
-                before = call({"action": "stats"})["metrics"]
+            def send(body: dict, session: str = "host-smoke") -> dict:
                 count = len(fixture.upstream)
                 reply = request_json(gateway + "/v1/chat/completions", body, session)
-                assert "synthetic reply" in serialized(reply), f"unexpected gateway reply: {reply}"
-                assert len(fixture.upstream) == count + 1, "request did not reach synthetic upstream exactly once"
-                output = verify_request(fixture.upstream[-1], body, expect_guidance)
-                # Response hooks can finish after HTTP completion. Wait for their
-                # write before the next archive mutation; do not mistake an
-                # unverified host response for verified usage.
-                deadline = time.monotonic() + 5
-                while True:
-                    after = call({"action": "stats"})["metrics"]
-                    if completions(after) == completions(before) + 1:
-                        assert after["failedHookRequests"] == before["failedHookRequests"], "host recorded a failed request"
-                        break
-                    assert time.monotonic() < deadline, f"response hook did not finish: {after}"
-                    time.sleep(0.05)
-                return output
+                assert "synthetic reply" in serialized(reply), reply
+                assert len(fixture.upstream) == count + 1
+                outgoing = copy.deepcopy(fixture.upstream[-1])
+                hints = [item for item in outgoing["messages"] if item.get("role") == "system"
+                         and GUIDANCE.fullmatch(str(item.get("content", "")))]
+                assert len(hints) == 1, "expected exactly one folding guide"
+                assert "→ 不折叠开始" in hints[0]["content"], "missing literal-example guide"
+                assert "--scope" not in hints[0]["content"], "obsolete CLI guidance"
+                outgoing["messages"].remove(hints[0])
+                outgoing["model"] = body["model"]
+                assert outgoing["tools"] == body["tools"]
+                return outgoing
 
-            def read_all(scope: str, original: str) -> None:
-                expected_hash = sha256(original)
-                parts: list[str] = []
-                offset = 0
-                while True:
-                    page = call({"scope": scope, "action": "read", "peek": True, "layer": "original",
-                                 "id": expected_hash[:12], "offset": offset, "limit": 5000})
-                    assert page["id"] == expected_hash and page["sha256"] == expected_hash, "content hash changed"
-                    assert page["offset"] == offset and page["totalChars"] == utf16_length(original), "read pagination metadata changed"
-                    assert page["kept"] is False, "peek changed persistent expansion"
-                    parts.append(page["text"])
-                    following = page.get("nextOffset")
-                    if following is None:
-                        assert offset + utf16_length(page["text"]) == utf16_length(original)
-                        break
-                    assert following == offset + utf16_length(page["text"]) and following > offset, "read pagination did not progress"
-                    offset = following
-                # A UTF-16 page boundary may split a surrogate pair; concatenate
-                # units before decoding so exact Unicode text is still verified.
-                restored = "".join(parts).encode("utf-16-le", errors="surrogatepass").decode("utf-16-le")
-                assert restored.encode("utf-8") == original.encode("utf-8"), "read did not restore exact archived bytes"
-
-            declarations = [
-                {"type": "function", "function": {"name": "exec_command", "description": "Execute a shell command", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}},
-                {"type": "function", "function": {"name": "exec", "description": "Synthetic history only", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}}}},
-                {"type": "function", "function": {"name": "Read", "description": "Synthetic Read history only", "parameters": {"type": "object", "properties": {"absolutePath": {"type": "string"}}}}},
-            ]
-            first_part = "Beginning of completed research.\r\n" + "".join(
-                f"middle-evidence-{i:04d}: punctuation and CRLF; 原文必须可逆恢复。😀\r\n"
-                for i in range(600)
-            )
-            last_part = "Final result: three synthetic checks passed."
-            original = first_part + last_part
-            prefix = "Visible planning note.\n@context-fold begin research\n"
-            suffix = "\n@context-fold end research\nVisible conclusion."
-            generic_result = "@context-fold begin tool-data\n" + "Generic tool bytes remain visible.\n" * 100 + "@context-fold end tool-data"
-            opening = {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
-                {"role": "system", "content": "Synthetic system instruction; preserve exactly."},
-                {"role": "user", "content": "Opening request.\n@context-fold begin user-data\nUser instructions remain visible.\n@context-fold end user-data"},
-                {"role": "assistant", "content": "Large unmarked assistant text remains visible.\n" * 100},
-                {"role": "assistant", "content": prefix + first_part, "tool_calls": [{
-                    "id": "exec-1", "type": "function", "function": {
-                        "name": "exec", "arguments": serialized({"code": "@context-fold begin argument\nliteral argument\n@context-fold end argument"}),
-                    },
-                }]},
-                {"role": "tool", "tool_call_id": "exec-1", "content": generic_result},
-            ]}
-            open_output, opening_scope, _ = send(opening, expect_guidance=True)
-            assert open_output == opening, "an unfinished annotation changed the request"
-            closed = copy.deepcopy(opening)
-            closed["messages"].extend([
-                {"role": "assistant", "content": last_part + suffix},
-                {"role": "user", "content": "The annotation is now closed."},
-            ])
-            first, first_scope, first_request = send(closed, expect_guidance=True)
-            assert first_scope is None and opening_scope is None and first == closed, "first closed observation did not keep its grace period"
-            retry, retry_scope, _ = send(closed)
-            assert retry_scope is None and retry == closed, "an identical retry consumed the grace period"
-            advanced = advance(closed, "A distinct request after the completed work.")
-            folded, scope, folded_request = send(advanced)
-            assert scope is not None, "folded text has no CLI recovery scope"
-            reference = f"[[cf:v2:{sha256(original)[:12]}]]"
-            expected = copy.deepcopy(advanced)
-            expected["messages"][3]["content"] = prefix + reference
-            expected["messages"][5]["content"] = reference + suffix
-            assert folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
-            assert folded_request["usedEstimate"] < first_request["usedEstimate"], "fold did not reduce the outgoing estimate"
-            repeated, _, _ = send(advanced, expect_guidance=True)
-            assert repeated == expected, "a repeated request changed the projection"
-            projected = copy.deepcopy(fixture.upstream[-1])
-            projected["model"] = "fake/m1"
-            replayed, _, _ = send(projected, expect_guidance=True)
-            assert replayed == expected, "replaying a projected request duplicated guidance or re-folded a reference"
-            guidance_schedule = []
-            guidance_payload = "Large unmarked history for the adaptive guidance probe.\n" * 500
-            for cycle in range(6):
-                probe = {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
-                    {"role": "assistant", "content": guidance_payload},
-                    {"role": "user", "content": f"Distinct guidance cycle {cycle}."},
-                ]}
-                _, _, observed = send(
-                    probe, "host-smoke-guidance", expect_guidance=True,
-                )
-                guidance_schedule.append(observed["guidanceInjected"])
-            assert guidance_schedule == [True] * 6, (
-                f"persistent rule disappeared: {guidance_schedule}"
-            )
-            status = call({"scope": scope, "action": "status"})
-            scope_metrics = call({"scope": scope, "action": "stats"})["metrics"]
-            assert status["entries"] == 1 and scope_metrics["itemsFolded"] == 1, "retry created duplicate archives or folds"
-            read_all(scope, original)
-            call({"scope": "0" * 64, "action": "read", "peek": True, "id": sha256(original)[:12]}, expect_error=True)
-            exported = directory / "original.txt"
-            pasted = call({"scope": scope, "action": "paste", "peek": True, "id": sha256(original)[:12], "path": str(exported)})
-            assert exported.read_bytes() == original.encode("utf-8"), "paste changed original bytes"
-            assert pasted["sha256"] == sha256(original) and "text" not in pasted, "paste metadata changed"
-            call({"scope": scope, "action": "paste", "peek": True, "id": sha256(original)[:12], "path": str(exported)}, expect_error=True)
-            assert exported.read_bytes() == original.encode("utf-8"), "paste overwrote an existing file"
-            kept = call({"scope": scope, "action": "read", "id": sha256(original)[:12], "restore": True})
-            assert kept["kept"] is True, "explicit --restore did not persist expansion"
-            assert kept["text"].encode("utf-8") == original.encode("utf-8"), "explicit --restore did not return the complete original"
-            assert send(advanced)[0] == advanced, "read did not expand all slices of the original"
-            later = advance(advanced, "Another request must keep recovered text visible.")
-            assert send(later)[0] == later, "recovered text folded again on a later request"
-            other, other_scope, _ = send(closed, "host-smoke-other")
-            assert other_scope is None and other == closed, "new-session grace failed"
-            other_folded, other_scope, _ = send(advanced, "host-smoke-other")
-            assert other_scope is not None and other_scope != scope, "session isolation failed"
-            assert other_folded == expected, "persistent expansion leaked across sessions"
-
-            source_path = directory / "worker.ts"
-            source_payload = "\r\n".join(f'  perform("中文😀", {index});' for index in range(100))
-            source_text = "// @context-fold begin worker\r\n" + source_payload + "\r\n// @context-fold end worker\r\n"
-            source_path.write_bytes(source_text.encode("utf-8"))
-
-            def source_body(text: str, call_id: str) -> dict:
-                return {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
-                    {"role": "user", "content": "Inspect the synthetic source view."},
-                    {"role": "assistant", "content": "Reading source.", "tool_calls": [{
-                        "id": call_id, "type": "function", "function": {"name": "Read", "arguments": serialized({"absolutePath": str(source_path)})},
-                    }]},
-                    {"role": "tool", "tool_call_id": call_id, "content": text},
-                    {"role": "user", "content": "Continue."},
-                ]}
-
-            def completed_source_body(text: str, call_id: str, followup: str) -> dict:
-                body = source_body(text, call_id)
-                body["messages"][-1] = {"role": "assistant", "content": "Read completed."}
-                body["messages"].append({"role": "user", "content": followup})
-                return body
-
-            source_input = source_body(source_text, "read-1")
-            source_first, _, _ = send(source_input, "host-smoke-source")
-            assert source_first == source_input
-            assert send(source_input, "host-smoke-source")[0] == source_input, "Read retry consumed the grace period"
-            source_next = advance(source_input, "Review the annotated source next.")
-            source_expected = copy.deepcopy(source_next)
-            source_expected["messages"][2]["content"] = source_text.replace(source_payload, f"[[cf:v2:{sha256(source_payload)[:12]}]]")
-            source_folded, source_scope, _ = send(source_next, "host-smoke-source")
-            assert source_scope is not None
-            assert source_folded == source_expected, "source comments did not use the same hash and delay contract"
-            assert source_path.read_bytes() == source_text.encode("utf-8"), "folding changed the source file"
-            fresh = source_body(source_text, "read-2")
-            assert send(fresh, "host-smoke-source")[0] == fresh, "old hash hid a fresh Read occurrence immediately"
-            changed_payload = source_payload.replace("perform", "changed_perform", 1)
-            changed_text = source_text.replace(source_payload, changed_payload)
-            source_path.write_bytes(changed_text.encode("utf-8"))
-            changed = source_body(changed_text, "read-3")
-            assert send(changed, "host-smoke-source")[0] == changed
-            changed_next = advance(changed, "Review the changed source next.")
-            changed_expected = copy.deepcopy(changed_next)
-            changed_expected["messages"][2]["content"] = changed_text.replace(changed_payload, f"[[cf:v2:{sha256(changed_payload)[:12]}]]")
-            assert send(changed_next, "host-smoke-source")[0] == changed_expected, "source update did not receive a new content hash"
-            assert source_path.read_bytes() == changed_text.encode("utf-8"), "folding changed updated source bytes"
-            read_all(source_scope, source_payload)
-            read_all(source_scope, changed_payload)
-            unmarked = source_body(changed_payload, "read-4")
-            assert send(unmarked, "host-smoke-source")[0] == unmarked
-            unmarked_next = advance(unmarked, "Unmarked source must remain complete.")
-            assert send(unmarked_next, "host-smoke-source")[0] == unmarked_next, "unmarked source was selected automatically"
-
-            unrelated_numeric_source = "\r\n".join(
-                f"export function entry{index}() {{ return 8341; }}" for index in range(90)
-            )
-            source_path.write_bytes(unrelated_numeric_source.encode("utf-8"))
-            unrelated_numeric_first = completed_source_body(
-                unrelated_numeric_source, "read-numeric-unrelated",
-                "Was the 8341 election result certified?",
-            )
-            unrelated_first_output, unrelated_first_scope, _ = send(unrelated_numeric_first, "host-smoke-numeric")
-            assert unrelated_first_scope is None and unrelated_first_output == unrelated_numeric_first, (
-                "the configured source-read grace request was not preserved"
-            )
-            unrelated_numeric = advance(
-                unrelated_numeric_first, "Did the 8341 election result pass the review?",
-            )
-            unrelated_numeric_expected = copy.deepcopy(unrelated_numeric)
-            unrelated_numeric_expected["messages"][2]["content"] = f"[[cf:v2:{sha256(unrelated_numeric_source)[:12]}]]"
-            unrelated_folded, unrelated_scope, _ = send(unrelated_numeric, "host-smoke-numeric")
-            assert unrelated_scope is not None and unrelated_folded == unrelated_numeric_expected, (
-                "a shared number in an unrelated question kept the completed source after its grace request"
-            )
-            read_all(unrelated_scope, unrelated_numeric_source)
-
-            identifier_source = "\r\n".join(
-                f"export function operation{index}() {{ return {100000 + index}; }}" for index in range(360)
-            )
-            source_path.write_bytes(identifier_source.encode("utf-8"))
-            identifier_followup = completed_source_body(
-                identifier_source, "read-numeric-identifier",
-                "What does operation238() return?",
-            )
-            identifier_first, _, _ = send(identifier_followup, "host-smoke-numeric")
-            assert identifier_first == identifier_followup, "an explicit source identifier was folded on its first request"
-            identifier_grace = advance(identifier_followup, "Will it rain tomorrow?")
-            identifier_grace_output, _, _ = send(identifier_grace, "host-smoke-numeric")
-            assert identifier_grace_output == identifier_grace, "the first unrelated request did not honor the configured grace"
-            identifier_next = advance(identifier_grace, "Is that train delayed?")
-            identifier_expected = copy.deepcopy(identifier_next)
-            identifier_expected["messages"][2]["content"] = f"[[cf:v2:{sha256(identifier_source)[:12]}]]"
-            identifier_output, identifier_scope, _ = send(identifier_next, "host-smoke-numeric")
-            assert identifier_scope is not None and identifier_output == identifier_expected, (
-                "an answered source-identifier turn did not fold after the unrelated grace request"
-            )
-            assert "--scope " + identifier_scope in serialized(fixture.upstream[-1]) and "grep" in serialized(fixture.upstream[-1]), (
-                "folded source did not include its scoped search command"
-            )
-            matches = call({"action": "grep", "scope": identifier_scope,
-                            "id": sha256(identifier_source)[:12], "query": "operation238()"})["matches"]
-            assert any("operation238()" in match["text"] for match in matches), "the exact source symbol was not searchable"
-            read_all(identifier_scope, identifier_source)
-            assert source_path.read_bytes() == identifier_source.encode("utf-8"), "automatic folding changed the source file"
-            process_start = ">> Code review started: changes against 'main' <<\r\n"
-            process_end = "\r\n<< Code review finished >>"
-            process_body = {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
-                {"role": "user", "content": "Review this change."},
-                {"role": "assistant", "content": process_start + original + process_end},
-                {"role": "user", "content": "Continue after the review."},
-            ]}
-            process_first, _, _ = send(process_body, "host-smoke-process")
-            assert process_first == process_body, "process markers ignored the configured grace period"
-            process_next = advance(process_body, "A distinct request after the review.")
-            process_folded, _, _ = send(process_next, "host-smoke-process")
-            process_visible = process_folded["messages"][1]["content"]
-            assert process_visible.startswith(process_start + "line:") and process_visible.endswith(process_end), (
-                "process reason or result was not preserved verbatim"
-            )
-            assert "hash:" + sha256(original) in process_visible, "process metadata lost the full content hash"
-            process_path = Path(re.search(r"(?:^|[\r\n])path:([^\r\n]+)", process_visible)[1])
-            assert process_path.is_absolute() and process_path == process_path.resolve(), "archive path is not canonical"
-            assert process_path.name == sha256(original) + ".txt", "archive file is not named by full SHA-256"
-            assert process_path.read_bytes() == original.encode("utf-8"), "portable archive file differs from the original"
-            process_replay = copy.deepcopy(fixture.upstream[-1])
-            process_replay["model"] = "fake/m1"
-            process_replayed, _, _ = send(process_replay, "host-smoke-process")
-            assert process_replayed == process_folded, "process metadata was folded again on replay"
-            final_metrics = call({"action": "stats"})["metrics"]
-            assert final_metrics["guidanceSuppressedRequests"] == 0, "persistent rules were unexpectedly suppressed"
+            island = "→ 不折叠开始\n>> Literal example <<\nKeep request_id=42.\n<< Literal result >>\n← 不折叠结束\n"
+            original = "before evidence 中文🙂\r\n" * 500 + island + "after evidence 中文🙂\r\n" * 500
+            marked = ">> Investigating <<\n" + original + "\n<< Verified >>"
+            body = {"model": "fake/m1", "stream": False,
+                    "tools": [{"type": "function", "function": {"name": "exec_command", "parameters": {"type": "object"}}}],
+                    "messages": [{"role": "user", "content": "Review the evidence."},
+                                 {"role": "assistant", "content": marked},
+                                 {"role": "user", "content": "Continue."}]}
+            before = copy.deepcopy(body)
+            assert send(body) == body, "first observation must retain the grace request"
+            assert send(body) == body, "identical retry consumed the grace request"
+            advanced = advance(body, "A distinct next question.")
+            output = send(advanced)
+            text = output["messages"][1]["content"]
+            assert island in text, "keep island changed"
+            assert "before evidence" not in text and "after evidence" not in text
+            assert text.endswith("...\n<< Verified >>"), "folded body must use dots"
+            path = Path(re.search(r"^path:(.+)$", text, re.MULTILINE)[1].rstrip("\r"))
+            assert path == archive / (sha256(original) + ".txt")
+            assert path.read_bytes() == original.encode("utf-8"), "complete original differs"
+            assert cli("read", sha256(original)[:12]).encode("utf-8") == original.encode("utf-8")
+            stats = json.loads(cli("stats"))
+            assert stats["files"] == 1 and stats["bytes"] == len(original.encode("utf-8"))
+            listing = json.loads(cli("list", "--sort", "size"))
+            assert listing[0]["hash"] == sha256(original)
+            assert ":" in cli("search", "request_id=42")
+            assert send(output) == output, "projection replay changed the wire history"
+            literal = copy.deepcopy(body)
+            literal["messages"][1]["content"] = "→ 不折叠开始\n" + marked + "\n← 不折叠结束"
+            assert send(literal, "literal-example") == literal
+            assert send(advance(literal, "Another turn."), "literal-example") == advance(literal, "Another turn.")
+            assert body == before, "caller history mutated"
+            preview = json.loads(cli("clean", sha256(original)))
+            assert not preview["applied"] and path.exists()
+            removed = json.loads(cli("clean", sha256(original), "--apply"))
+            assert removed["applied"] and not path.exists()
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun via bubblewrap",
                 "provider": "local synthetic HTTP fixture; no external model was called",
-                "checks": [
-                    "local CLI recovery without MCP", "open annotations stay visible", "first closed observation and identical retries stay visible",
-                    "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
-                    "persistent proactive guidance on every recoverable request; no context budgets",
-                    "projection replay does not duplicate guidance or archives",
-                    "process reason/result markers survive folding and replay",
-                    "canonical full-hash UTF-8 archive files are directly readable",
-                    "host keeps one proactive rule across all six request cycles",
-                    "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
-                    "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
-                    "fresh Read occurrence gets its own grace period", "changed source gets a new hash while old snapshots recover",
-                    "source files remain unchanged by folding", "unmarked source stays visible",
-                    "unrelated numeric coincidence folds completed source", "source identifier stays visible until answered, then grace precedes later fold",
-                ],
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
-                "firstRequestEstimate": first_request, "foldedRequestEstimate": folded_request,
-                "persistentGuidanceSchedule": guidance_schedule,
-                "responseHooks": {key: final_metrics[key] for key in (
-                    "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests",
-                    "guideOnlyRequests", "guidanceSuppressedRequests")},
+                "checks": ["grace and identical retry", "dots projection", "literal islands",
+                           "full original SHA-256 file", "built CLI read/stats/list/search/clean",
+                           "projection replay", "protected examples", "caller history unchanged"],
             }))
     except BaseException:
         if log_path.exists():
