@@ -96,15 +96,14 @@ test('disabled, cancelled, oversized or ambiguous requests retain the exact inpu
   });
 });
 
-test('without a callable shell the request is unchanged and emits no metadata', async () => {
+test('without tools folding still archives evidence and exposes recovery metadata', async () => {
   await fixture(async ({ context, store }) => {
     const input = { ...bodyFor('chat'), tools: [] };
     const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-    assert.deepEqual(withoutMetadata(output, 'chat'), input);
-    assert.equal(folded(output), false);
-    assert.equal((await store.readStats()).storage.activeSessions, 0);
-    assert.deepEqual(output, input);
-    assert.doesNotMatch(JSON.stringify(output), /<context-budget|<context-folding>/);
+    assert.equal(folded(output), true);
+    assert.equal((await store.readStats()).storage.activeSessions, 1);
+    assert.deepEqual(output.tools, []);
+    assert.match(JSON.stringify(output), /--dir/);
   });
 });
 

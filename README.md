@@ -23,10 +23,10 @@
 在已安装 Magpie 的环境中执行：
 
 ```bash
-magpie plugin add npm:magpie-context-folding@0.6.0
+magpie plugin add npm:magpie-context-folding@0.6.1
 ```
 
-确保 Agent 的模型请求经过已加载此插件的 Magpie，并且可以调用 shell 工具执行恢复命令；插件会跳过无法通过 shell 恢复的请求。保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。开发版安装见[安装](#安装)。
+确保 Agent 的模型请求经过已加载此插件的 Magpie。折叠不依赖工具名、命名空间或 shell 声明；原文先保存到归档，再提供绝对路径和 CLI 恢复信息。当前请求没有读取工具时，可稍后通过宿主文件工具或本地 CLI 恢复。保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。开发版安装见[安装](#安装)。
 
 ### 2. 安装 context-folding 技能
 
@@ -147,7 +147,7 @@ Agent 写出阶段结论
 ### Magpie 插件
 
 ```bash
-magpie plugin add npm:magpie-context-folding@0.6.0
+magpie plugin add npm:magpie-context-folding@0.6.1
 ```
 
 保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。
@@ -247,7 +247,7 @@ max_session_bytes = 67108864
 min_savings_tokens = 256
 
 [magpie]
-# shell_tool_name = "shell"
+# shell_tool_name 已兼容保留，不再作为折叠前置条件
 # recovery_command = "/path/to/magpie-context-folding"
 # gateway_timeout_ms = 3000
 ```

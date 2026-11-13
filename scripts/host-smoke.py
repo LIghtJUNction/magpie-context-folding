@@ -215,7 +215,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             original = "before evidence 中文🙂\r\n" * 500 + island + "after evidence 中文🙂\r\n" * 500
             marked = ">> Investigating <<\n" + original + "\n<< Verified >>"
             body = {"model": "fake/m1", "stream": False,
-                    "tools": [{"type": "function", "function": {"name": "exec_command", "parameters": {"type": "object"}}}],
+                    "tools": [{"type": "function", "function": {"name": "arbitrary_host_wrapper", "parameters": {"type": "object"}}}],
                     "messages": [{"role": "user", "content": "Review the evidence."},
                                  {"role": "assistant", "content": marked},
                                  {"role": "user", "content": "Continue."}]}
@@ -251,7 +251,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 "result": "passed", "host": "real Magpie and Bun via bubblewrap",
                 "provider": "local synthetic HTTP fixture; no external model was called",
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
-                "checks": ["grace and identical retry", "dots projection", "literal islands",
+                "checks": ["folding independent of shell tool names", "grace and identical retry", "dots projection", "literal islands",
                            "full original SHA-256 file", "built CLI read/stats/list/search/clean",
                            "projection replay", "protected examples", "caller history unchanged"],
             }))

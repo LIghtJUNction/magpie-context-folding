@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { onRequest } from '../src/context.hooks.js';
-import { extractSpans, recoveryShellName, type Protocol } from '../src/protocol.js';
+import { extractSpans, type Protocol } from '../src/protocol.js';
 
 type Body = Record<string, unknown>;
 const original = '@context-fold begin evidence\n' + 'Verified earlier evidence: keep the exact identifier available for recovery.\n'.repeat(200) + '@context-fold end evidence';
 const canonical = 'exec_command';
-const alternate = 'bash';
 const protocols: Protocol[] = ['chat', 'responses', 'anthropic', 'gemini'];
 
 function declaration(protocol: Protocol, name: string, extra: Body = {}): Body {
@@ -75,112 +74,47 @@ async function fixture(run: (directory: string, invoke: (protocol: Protocol, bod
   }
 }
 
-function assertOriginal(body: Body, protocol: Protocol): void {
-  assert.equal(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text, original);
-  assert.ok(!JSON.stringify(body).includes('--scope '));
-}
-
 function assertFolded(body: Body, protocol: Protocol, _name: string): void {
   assert.match(extractSpans(body, protocol).find(span => span.role === 'assistant')?.text ?? '', /\[\[cf:v2:[a-f0-9]{12,64}\]\]/);
   assert.match(JSON.stringify(body), /--dir/);
 }
 
 for (const protocol of protocols) {
-  test(`${protocol}: mentions and similar tool names do not advertise recovery`, async () => {
+  test(`${protocol}: folding and replay do not depend on tool names or availability`, async () => {
     await fixture(async (directory, invoke) => {
-      for (const body of [
-        request(protocol, 'other', { description: 'Use exec_command only if installed.' }),
-        request(protocol, 'other', { [protocol === 'anthropic' ? 'input_schema' : 'parameters']:
-          { type: 'object', properties: { exec_command: { type: 'string' } } } }),
-        request(protocol, 'not_exec_command'), request(protocol, 'exec_command_extra'),
-        request(protocol, 'context_folding'), request(protocol, 'mcp__magpie__magpie_context_folding_context_folding'),
+      for (const changes of [
+        { tools: [] }, { tools: undefined },
+        { tools: [declaration(protocol, 'arbitrary_host_wrapper')] },
+        disabled(protocol), ...restricted(protocol, 'other'),
       ]) {
-        assertOriginal(await invoke(protocol, body), protocol);
-        assert.deepEqual(await readdir(directory), [], 'unavailable recovery must not create an archive');
-      }
-    });
-  });
-
-  test(`${protocol}: disabled or excluded recovery leaves the original visible`, async () => {
-    await fixture(async (directory, invoke) => {
-      for (const choice of [disabled(protocol), ...restricted(protocol, 'other')]) {
-        assertOriginal(await invoke(protocol, { ...request(protocol), ...choice }), protocol);
-        assert.deepEqual(await readdir(directory), []);
-      }
-    });
-  });
-
-  test(`${protocol}: real declarations and allowed choices keep recovery usable`, async () => {
-    await fixture(async (_directory, invoke) => {
-      for (const name of [canonical, alternate]) {
-        for (const choice of [{}, ...restricted(protocol, name)]) {
-          const body = { ...request(protocol, name), ...choice };
-          const unchanged = structuredClone(body);
-          assertFolded(await invoke(protocol, body), protocol, name);
-          assert.deepEqual(body, unchanged);
-        }
-      }
-    });
-  });
-
-  test(`${protocol}: disabling recovery also suspends replay and re-enabling restores it`, async () => {
-    await fixture(async (_directory, invoke) => {
-      const body = request(protocol);
-      const first = await invoke(protocol, body);
-      assertFolded(first, protocol, canonical);
-      assertOriginal(await invoke(protocol, { ...body, ...disabled(protocol) }), protocol);
-      assert.deepEqual(await invoke(protocol, body), first);
-    });
-  });
-
-  test(`${protocol}: explicit shell wrappers must be declared and allowed`, async () => {
-    await fixture(async (directory, invoke) => {
-      const body = request(protocol, 'exec');
-      assertOriginal(await invoke(protocol, body, 'not_declared'), protocol);
-      assertOriginal(await invoke(protocol, { ...body, ...disabled(protocol) }, 'exec'), protocol);
-      for (const choice of restricted(protocol, 'other')) {
-        assertOriginal(await invoke(protocol, { ...body, ...choice }, 'exec'), protocol);
-      }
-      assert.deepEqual(await readdir(directory), []);
-      for (const choice of [{}, ...restricted(protocol, 'exec')]) {
-        assertFolded(await invoke(protocol, { ...body, ...choice }, 'exec'), protocol, 'exec');
+        const body = { ...request(protocol), ...changes };
+        const unchanged = structuredClone(body);
+        const output = await invoke(protocol, body);
+        assertFolded(output, protocol, '');
+        assert.deepEqual(body, unchanged);
+        assert.deepEqual(output.tools, body.tools);
+        assert.deepEqual(output.tool_choice, body.tool_choice);
+        assert.deepEqual(await invoke(protocol, body), output);
+        const archives = await readdir(join(directory, 'archive'));
+        assert.ok(archives.length > 0);
+        assert.ok((await Promise.all(archives.map(file => readFile(join(directory, 'archive', file), 'utf8'))))
+          .some(text => text.includes('Verified earlier evidence:')));
       }
     });
   });
 }
 
-test('Gemini SDK config uses actual function declarations and calling restrictions', async () => {
-  await fixture(async (directory, invoke) => {
-    const body = request('gemini');
-    const { tools, ...contents } = body;
-    const config = { tools, toolConfig: { functionCallingConfig: { mode: 'NONE' } } };
-    assertOriginal(await invoke('gemini', { ...contents, config }), 'gemini');
-    assert.deepEqual(await readdir(directory), []);
-    assertFolded(await invoke('gemini', { ...contents, config: { tools } }), 'gemini', canonical);
-  });
-});
-
-test('shell discovery supports known names and native Anthropic bash without schema inspection', () => {
-  for (const protocol of protocols) {
-    for (const name of ['exec_command', 'shell_command', 'bash', 'Bash', 'shell', 'run_shell_command',
-      'functions.exec_command', 'functions.shell_command']) {
-      assert.equal(recoveryShellName(request(protocol, name), protocol), name);
+test('Responses code mode and arbitrary namespaces fold without executor name whitelists', async () => {
+  await fixture(async (_directory, invoke) => {
+    for (const tools of [
+      [{ type: 'custom', name: 'exec' }],
+      [{ type: 'custom', name: 'functions.exec' }],
+      [{ type: 'namespace', name: 'arbitrary', tools: [{ type: 'custom', name: 'run' }] }],
+    ]) {
+      const body = { ...request('responses'), tools };
+      const output = await invoke('responses', body);
+      assertFolded(output, 'responses', '');
+      assert.deepEqual(output.tools, tools);
     }
-    assert.equal(recoveryShellName(request(protocol, 'exec'), protocol), undefined);
-    assert.equal(recoveryShellName(request(protocol, 'exec'), protocol, 'exec'), 'exec');
-    assert.equal(recoveryShellName(request(protocol, 'exec'), protocol, 'unknown'), undefined);
-  }
-  assert.equal(recoveryShellName({ tools: [{ name: 'bash', type: 'bash_20250124' }] }, 'anthropic'), 'bash');
-  assert.equal(recoveryShellName({ tools: [{ name: 'bash', type: 'web_search_20250305' }] }, 'anthropic'), undefined);
-});
-
-test('Responses custom shell declarations respect forced and allowed tool choices', () => {
-  const body = { tools: [{ type: 'custom', name: 'shell' }, { type: 'custom', name: 'exec' }] };
-  assert.equal(recoveryShellName(body, 'responses'), 'shell');
-  assert.equal(recoveryShellName(body, 'responses', 'exec'), 'exec');
-  assert.equal(recoveryShellName({ ...body, tool_choice: { type: 'custom', name: 'exec' } }, 'responses'), undefined);
-  assert.equal(recoveryShellName({ ...body, tool_choice: { type: 'custom', name: 'exec' } }, 'responses', 'exec'), 'exec');
-  const choice = { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'custom', name: 'exec' }] };
-  assert.equal(recoveryShellName({ ...body, tool_choice: choice }, 'responses'), undefined);
-  assert.equal(recoveryShellName({ ...body, tool_choice: choice }, 'responses', 'exec'), 'exec');
+  });
 });
