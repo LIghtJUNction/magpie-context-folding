@@ -1,0 +1,77 @@
+{
+  "result": "passed",
+  "host": "real Magpie and Bun via bubblewrap",
+  "provider": "local synthetic HTTP fixture; no external model was called",
+  "checks": [
+    "local CLI recovery without MCP",
+    "open annotations stay visible",
+    "first closed observation and identical retries stay visible",
+    "distinct requests fold explicit annotations",
+    "short SHA-256 references retain marker lines",
+    "system/user/unmarked text and tool calls/results remain intact",
+    "adaptive guidance backoff and reinjection after folds; no context budgets",
+    "projection replay does not duplicate guidance or archives",
+    "process reason/result markers survive folding and replay",
+    "canonical full-hash UTF-8 archive files are directly readable",
+    "host guidance schedule is inject, inject, suppress three, inject",
+    "paginated byte-for-byte Unicode/CRLF recovery",
+    "exclusive paste without text echo",
+    "unknown scope refused",
+    "explicit --restore persistently expands all slices",
+    "session isolation",
+    "source comments share the protocol",
+    "fresh Read occurrence gets its own grace period",
+    "changed source gets a new hash while old snapshots recover",
+    "source files remain unchanged by folding",
+    "unmarked source stays visible",
+    "unrelated numeric coincidence folds completed source",
+    "source identifier stays visible until answered, then grace precedes later fold"
+  ],
+  "upstreamRequests": 32,
+  "originalUtf8Bytes": 46278,
+  "firstRequestEstimate": {
+    "usedEstimate": 14405,
+    "basis": "json-utf8-bytes/4",
+    "guidanceInjected": true
+  },
+  "foldedRequestEstimate": {
+    "usedEstimate": 2689,
+    "basis": "json-utf8-bytes/4",
+    "guidanceInjected": true
+  },
+  "guidanceBackoffSchedule": [
+    true,
+    true,
+    false,
+    false,
+    false,
+    true
+  ],
+  "responseHooks": {
+    "successfulHookRequests": 32,
+    "unverifiedHookRequests": 0,
+    "failedHookRequests": 0,
+    "guideOnlyRequests": 18,
+    "guidanceSuppressedRequests": 4
+  },
+  "package": {
+    "name": "magpie-context-folding",
+    "version": "0.5.3",
+    "integrity": "sha512-VR+Q3fSYF4PX7VO4Ed5+LdgiQezjS9IdbbqGqG02P4VYyfOF4WwaKYcSrnBrsrBmEYaCcCwXyplLq+n70Raqxw==",
+    "installedFilesVerified": 123,
+    "pluginEnabled": false
+  },
+  "publication": {
+    "release": "https://github.com/LIghtJUNction/magpie-context-folding/releases/tag/v0.5.3",
+    "workflow": "https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/43463886031",
+    "conclusion": "success"
+  },
+  "independentCli": {
+    "version": "0.1.1",
+    "source": "GitHub Release wheel",
+    "exactUtf8File": true,
+    "canonicalHashPath": true,
+    "preservedMarkers": true,
+    "idempotentReplay": true
+  }
+}

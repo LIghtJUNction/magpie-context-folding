@@ -39,3 +39,7 @@ uv run --project context-folding --extra javascript python -m unittest discover 
 npm run test:host
 npm run test:host:installed -- --expected-version 0.5.3
 ```
+
+## 正式发布与安装验收
+
+GitHub Release 已发布，npm Trusted Publishing [工作流](https://github.com/LIghtJUNction/magpie-context-folding/actions/runs/43463886031) 成功。已从正式包安装 Magpie `0.5.3`，123 个安装文件逐一核对官方 npm 归档；已安装包的隔离宿主验证通过 23 项检查、32 次请求。独立 `ctxf 0.1.1` 从 Release wheel 安装，精确文件恢复、规范绝对路径、起止文案和重复投影验证通过。安装保留本机原有插件关闭状态，恢复原镜像配置。原始[安装验收回执](benchmarks/portable-process-marker-installed-0.5.3.json)包含包完整性和发布定位。
