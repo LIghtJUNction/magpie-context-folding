@@ -82,6 +82,22 @@ test('short and full content hashes resolve exact text and return the actual arc
   });
 });
 
+test('grep can recover a short exact excerpt from a folded source archive', async () => {
+  await fixture(async (store, scope) => {
+    const lines = Array.from({ length: 80 }, (_, index) =>
+      `export function operation${index}() { return ${index * 7919 + 104729}; }\n`);
+    const source = lines.join('');
+    await store.transaction(scope, true, 64 * 1024 * 1024, state => {
+      state.entries[0]!.text = source;
+      state.entries[0]!.annotation = { ...state.entries[0]!.annotation!, sha256: digest(source) };
+    });
+    const result = await call({ action: 'grep', scope, id: 'a', query: 'operation41()', recursive: false });
+    assert.equal(result.total, 1);
+    assert.equal(result.matches[0].text, lines[41]!.trimEnd());
+    assert.ok(result.matches[0].text.length < source.length);
+  });
+});
+
 test('ambiguous hash prefixes are rejected atomically and exact legacy IDs take precedence', async () => {
   await fixture(async (store, scope) => {
     const hash = (await load(store, scope)).entries[0]!.annotation!.sha256;

@@ -1,0 +1,565 @@
+{
+  "benchmark": "synthetic-multi-milestone-request-prefix-replay",
+  "completedAt": "2026-10-29T01:36:43.846Z",
+  "runtime": "Bun 1.4.0",
+  "sourceRevision": "f9d27c5",
+  "sourceFilesSha256": {
+    "src/source.ts": "675d651c5dfc40443f16679d1e80d3c78bf57b1397540592b8cc24d9f44158b5",
+    "src/statistics.ts": "9a682a1c82cbd1754aba55d1b634ef75d3c5393b244a9157292a6f778292cc8e",
+    "src/protocol.ts": "5880bbc91a67c2e104d0015925465876830f9da09e4114d7f78bc20bfceca05d",
+    "src/visibility.ts": "7a730e58eeb6c6bbddbe5cabeed9b7bf773b39a9e57b4ca8c5be17c6a6c80924",
+    "src/activity.ts": "a2deb2792c2956b2803094778d9ec165202ff97349e20e13f831c4c40b972f6e",
+    "src/annotations.ts": "cd78759388a110d9a5b228ae3d4784e1b95b584c86a94233e96e61fbf3a66402",
+    "src/config.ts": "1be8487b56d8abb494eedb2d237524bfe3432a6aeac77da5738bb8f985a47a50",
+    "src/guidance.ts": "d04810d1c837ce7a16497b520dd530a94f83320163d7a5f94bef783fd762126e",
+    "src/index.ts": "878313dd4b816ed991a688a378f30e42f2aa4b00fc6ca997f246ffbbca6f1653",
+    "src/metrics.ts": "4a95870629fd310deef8d78a428bde37dcfcb8c6b6bf5f3b3cb9f92aac81899c",
+    "src/recovery.ts": "ca36b33e1de5c9667e688141061854ce14eb593cceb8778554ff1eba998f98b7",
+    "src/report-html.ts": "363eba830bba43368012cc4aa07ac71eb12ce66167978981a9f02c79e9f67c02",
+    "src/report.ts": "6c2321ff28ed67dacf94a42c3d34b4a290da46d2e18d76531d46e50b32bc4d1d",
+    "src/tool.ts": "d016ed4f0b980eef3b0a8004d9cd655f916b439db23d60edd3a732d2a7bc7c81",
+    "src/store.ts": "645b133936eda0e7c83f4cf8245fad8042548604a33526cc4b379d308f364493",
+    "src/cli.ts": "21f40193acc2468f182ac303386c3c849e2c6cab4b4e107839fec88d21d12665",
+    "src/context.hooks.ts": "2c501db7ef86276dd68bbb0042eb57abba9714242a936ca557cf5f9ca54eb681",
+    "src/tree.ts": "cb3e30f87db1111d5a35b18f819811aab4f314746fb300f3b6b8da528e865cb3",
+    "scripts/fold-strategy-benchmark.ts": "096de34c3a3621e73b173522cb08b9fdf4a61a66a3b46ae19a1354d2b0ca7f6c"
+  },
+  "delayRequests": 1,
+  "minSavingsTokens": 256,
+  "requestPrefixMetric": "common UTF-8 byte prefix between consecutive projected message arrays; a cache proxy, not provider cached tokens",
+  "promptCacheCostProxy": {
+    "basis": "sum of projected prompt-message UTF-8 bytes; common consecutive prefix is priced at the selected cache-read ratio and the remainder at 1",
+    "cacheReadPriceRatios": [
+      0,
+      0.1,
+      0.25,
+      0.5,
+      1
+    ],
+    "breakEvenMeaning": "A folding strategy is cheaper than no-fold when the cache-read price ratio is above its break-even value, within this proxy.",
+    "caveat": "Synthetic byte-prefix sensitivity only; excludes provider tokenization, cache block/minimum rules, cache writes, tool/system billing differences, output, and actual prices."
+  },
+  "note": "Uses the production onRequest hook and synthetic history; no model or provider cache is called. Byte-equivalents are not tokens or dollars.",
+  "results": [
+    {
+      "strategy": "no-fold",
+      "milestones": 4,
+      "requestCount": 7,
+      "sentBytes": 715234,
+      "cumulativeInvalidatedPreviousWireBytes": 12,
+      "meanWirePrefixReuseRatio": 0.9997,
+      "cumulativeInvalidatedPreviousPromptMessageBytes": 6,
+      "meanPromptMessagePrefixReuseRatio": 0.9998,
+      "turns": [
+        {
+          "label": "task-open",
+          "requestBytes": 992,
+          "promptMessageBytes": 770,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": null,
+          "invalidatedPreviousWireBytes": null,
+          "wirePrefixReuseRatio": null,
+          "commonPromptMessagePrefixBytes": null,
+          "invalidatedPreviousPromptMessageBytes": null,
+          "promptMessagePrefixReuseRatio": null,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-1",
+          "requestBytes": 40327,
+          "promptMessageBytes": 40105,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 990,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 0.998,
+          "commonPromptMessagePrefixBytes": 769,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 0.9987,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-2",
+          "requestBytes": 79662,
+          "promptMessageBytes": 79440,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 40325,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 40104,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-3",
+          "requestBytes": 118997,
+          "promptMessageBytes": 118775,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 79660,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 79439,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-4",
+          "requestBytes": 158332,
+          "promptMessageBytes": 158110,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 118995,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 118774,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": false
+        },
+        {
+          "label": "task-conclusion",
+          "requestBytes": 158437,
+          "promptMessageBytes": 158215,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 158330,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 158109,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": true
+        },
+        {
+          "label": "next-round",
+          "requestBytes": 158487,
+          "promptMessageBytes": 158265,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 158435,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 158214,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": true
+        }
+      ],
+      "promptCacheCostProxy": {
+        "cachedPrefixBytes": 555409,
+        "uncachedPromptBytes": 158271,
+        "breakEvenCacheReadPriceRatioVsNoFold": null,
+        "scenarios": [
+          {
+            "cacheReadPriceRatio": 0,
+            "inputChargeByteEquivalents": 158271
+          },
+          {
+            "cacheReadPriceRatio": 0.1,
+            "inputChargeByteEquivalents": 213811.9
+          },
+          {
+            "cacheReadPriceRatio": 0.25,
+            "inputChargeByteEquivalents": 297123.25
+          },
+          {
+            "cacheReadPriceRatio": 0.5,
+            "inputChargeByteEquivalents": 435975.5
+          },
+          {
+            "cacheReadPriceRatio": 1,
+            "inputChargeByteEquivalents": 713680
+          }
+        ]
+      }
+    },
+    {
+      "strategy": "milestone-only",
+      "milestones": 4,
+      "requestCount": 7,
+      "sentBytes": 169496,
+      "cumulativeInvalidatedPreviousWireBytes": 157549,
+      "meanWirePrefixReuseRatio": 0.3587,
+      "cumulativeInvalidatedPreviousPromptMessageBytes": 157543,
+      "meanPromptMessagePrefixReuseRatio": 0.3554,
+      "turns": [
+        {
+          "label": "task-open",
+          "requestBytes": 992,
+          "promptMessageBytes": 770,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": null,
+          "invalidatedPreviousWireBytes": null,
+          "wirePrefixReuseRatio": null,
+          "commonPromptMessagePrefixBytes": null,
+          "invalidatedPreviousPromptMessageBytes": null,
+          "promptMessagePrefixReuseRatio": null,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-1",
+          "requestBytes": 40425,
+          "promptMessageBytes": 40203,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 990,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 0.998,
+          "commonPromptMessagePrefixBytes": 769,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 0.9987,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-2",
+          "requestBytes": 40950,
+          "promptMessageBytes": 40728,
+          "foldedReferences": 1,
+          "commonWirePrefixBytes": 756,
+          "invalidatedPreviousWireBytes": 39669,
+          "wirePrefixReuseRatio": 0.0187,
+          "commonPromptMessagePrefixBytes": 535,
+          "invalidatedPreviousPromptMessageBytes": 39668,
+          "promptMessagePrefixReuseRatio": 0.0133,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-3",
+          "requestBytes": 41165,
+          "promptMessageBytes": 40943,
+          "foldedReferences": 2,
+          "commonWirePrefixBytes": 1658,
+          "invalidatedPreviousWireBytes": 39292,
+          "wirePrefixReuseRatio": 0.0405,
+          "commonPromptMessagePrefixBytes": 1437,
+          "invalidatedPreviousPromptMessageBytes": 39291,
+          "promptMessagePrefixReuseRatio": 0.0353,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-4",
+          "requestBytes": 41380,
+          "promptMessageBytes": 41158,
+          "foldedReferences": 3,
+          "commonWirePrefixBytes": 1873,
+          "invalidatedPreviousWireBytes": 39292,
+          "wirePrefixReuseRatio": 0.0455,
+          "commonPromptMessagePrefixBytes": 1652,
+          "invalidatedPreviousPromptMessageBytes": 39291,
+          "promptMessagePrefixReuseRatio": 0.0403,
+          "conclusionVisible": false
+        },
+        {
+          "label": "task-conclusion",
+          "requestBytes": 2267,
+          "promptMessageBytes": 2045,
+          "foldedReferences": 4,
+          "commonWirePrefixBytes": 2088,
+          "invalidatedPreviousWireBytes": 39292,
+          "wirePrefixReuseRatio": 0.0505,
+          "commonPromptMessagePrefixBytes": 1867,
+          "invalidatedPreviousPromptMessageBytes": 39291,
+          "promptMessagePrefixReuseRatio": 0.0454,
+          "conclusionVisible": true
+        },
+        {
+          "label": "next-round",
+          "requestBytes": 2317,
+          "promptMessageBytes": 2095,
+          "foldedReferences": 4,
+          "commonWirePrefixBytes": 2265,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 0.9991,
+          "commonPromptMessagePrefixBytes": 2044,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 0.9995,
+          "conclusionVisible": true
+        }
+      ],
+      "promptCacheCostProxy": {
+        "cachedPrefixBytes": 8304,
+        "uncachedPromptBytes": 159638,
+        "breakEvenCacheReadPriceRatioVsNoFold": 0.002499,
+        "scenarios": [
+          {
+            "cacheReadPriceRatio": 0,
+            "inputChargeByteEquivalents": 159638
+          },
+          {
+            "cacheReadPriceRatio": 0.1,
+            "inputChargeByteEquivalents": 160468.4
+          },
+          {
+            "cacheReadPriceRatio": 0.25,
+            "inputChargeByteEquivalents": 161714
+          },
+          {
+            "cacheReadPriceRatio": 0.5,
+            "inputChargeByteEquivalents": 163790
+          },
+          {
+            "cacheReadPriceRatio": 1,
+            "inputChargeByteEquivalents": 167942
+          }
+        ]
+      }
+    },
+    {
+      "strategy": "one-shot-total",
+      "milestones": 4,
+      "requestCount": 7,
+      "sentBytes": 558859,
+      "cumulativeInvalidatedPreviousWireBytes": 157803,
+      "meanWirePrefixReuseRatio": 0.8338,
+      "cumulativeInvalidatedPreviousPromptMessageBytes": 157797,
+      "meanPromptMessagePrefixReuseRatio": 0.8337,
+      "turns": [
+        {
+          "label": "task-open",
+          "requestBytes": 1033,
+          "promptMessageBytes": 811,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": null,
+          "invalidatedPreviousWireBytes": null,
+          "wirePrefixReuseRatio": null,
+          "commonPromptMessagePrefixBytes": null,
+          "invalidatedPreviousPromptMessageBytes": null,
+          "promptMessagePrefixReuseRatio": null,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-1",
+          "requestBytes": 40368,
+          "promptMessageBytes": 40146,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 1031,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 0.9981,
+          "commonPromptMessagePrefixBytes": 810,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 0.9988,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-2",
+          "requestBytes": 79703,
+          "promptMessageBytes": 79481,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 40366,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 40145,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-3",
+          "requestBytes": 119038,
+          "promptMessageBytes": 118816,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 79701,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 79480,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-4",
+          "requestBytes": 158373,
+          "promptMessageBytes": 158151,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 119036,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 118815,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": false
+        },
+        {
+          "label": "task-conclusion",
+          "requestBytes": 158549,
+          "promptMessageBytes": 158327,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 158371,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 1,
+          "commonPromptMessagePrefixBytes": 158150,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 1,
+          "conclusionVisible": true
+        },
+        {
+          "label": "next-round",
+          "requestBytes": 1795,
+          "promptMessageBytes": 1573,
+          "foldedReferences": 4,
+          "commonWirePrefixBytes": 756,
+          "invalidatedPreviousWireBytes": 157793,
+          "wirePrefixReuseRatio": 0.0048,
+          "commonPromptMessagePrefixBytes": 535,
+          "invalidatedPreviousPromptMessageBytes": 157792,
+          "promptMessagePrefixReuseRatio": 0.0034,
+          "conclusionVisible": true
+        }
+      ],
+      "promptCacheCostProxy": {
+        "cachedPrefixBytes": 397935,
+        "uncachedPromptBytes": 159370,
+        "breakEvenCacheReadPriceRatioVsNoFold": 0.006979,
+        "scenarios": [
+          {
+            "cacheReadPriceRatio": 0,
+            "inputChargeByteEquivalents": 159370
+          },
+          {
+            "cacheReadPriceRatio": 0.1,
+            "inputChargeByteEquivalents": 199163.5
+          },
+          {
+            "cacheReadPriceRatio": 0.25,
+            "inputChargeByteEquivalents": 258853.75
+          },
+          {
+            "cacheReadPriceRatio": 0.5,
+            "inputChargeByteEquivalents": 358337.5
+          },
+          {
+            "cacheReadPriceRatio": 1,
+            "inputChargeByteEquivalents": 557305
+          }
+        ]
+      }
+    },
+    {
+      "strategy": "hierarchical",
+      "milestones": 4,
+      "requestCount": 7,
+      "sentBytes": 169289,
+      "cumulativeInvalidatedPreviousWireBytes": 158594,
+      "meanWirePrefixReuseRatio": 0.2888,
+      "cumulativeInvalidatedPreviousPromptMessageBytes": 158588,
+      "meanPromptMessagePrefixReuseRatio": 0.2784,
+      "turns": [
+        {
+          "label": "task-open",
+          "requestBytes": 1033,
+          "promptMessageBytes": 811,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": null,
+          "invalidatedPreviousWireBytes": null,
+          "wirePrefixReuseRatio": null,
+          "commonPromptMessagePrefixBytes": null,
+          "invalidatedPreviousPromptMessageBytes": null,
+          "promptMessagePrefixReuseRatio": null,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-1",
+          "requestBytes": 40466,
+          "promptMessageBytes": 40244,
+          "foldedReferences": 0,
+          "commonWirePrefixBytes": 1031,
+          "invalidatedPreviousWireBytes": 2,
+          "wirePrefixReuseRatio": 0.9981,
+          "commonPromptMessagePrefixBytes": 810,
+          "invalidatedPreviousPromptMessageBytes": 1,
+          "promptMessagePrefixReuseRatio": 0.9988,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-2",
+          "requestBytes": 40991,
+          "promptMessageBytes": 40769,
+          "foldedReferences": 1,
+          "commonWirePrefixBytes": 756,
+          "invalidatedPreviousWireBytes": 39710,
+          "wirePrefixReuseRatio": 0.0187,
+          "commonPromptMessagePrefixBytes": 535,
+          "invalidatedPreviousPromptMessageBytes": 39709,
+          "promptMessagePrefixReuseRatio": 0.0133,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-3",
+          "requestBytes": 41206,
+          "promptMessageBytes": 40984,
+          "foldedReferences": 2,
+          "commonWirePrefixBytes": 1699,
+          "invalidatedPreviousWireBytes": 39292,
+          "wirePrefixReuseRatio": 0.0414,
+          "commonPromptMessagePrefixBytes": 1478,
+          "invalidatedPreviousPromptMessageBytes": 39291,
+          "promptMessagePrefixReuseRatio": 0.0363,
+          "conclusionVisible": false
+        },
+        {
+          "label": "milestone-4",
+          "requestBytes": 41421,
+          "promptMessageBytes": 41199,
+          "foldedReferences": 3,
+          "commonWirePrefixBytes": 1914,
+          "invalidatedPreviousWireBytes": 39292,
+          "wirePrefixReuseRatio": 0.0464,
+          "commonPromptMessagePrefixBytes": 1693,
+          "invalidatedPreviousPromptMessageBytes": 39291,
+          "promptMessagePrefixReuseRatio": 0.0413,
+          "conclusionVisible": false
+        },
+        {
+          "label": "task-conclusion",
+          "requestBytes": 2379,
+          "promptMessageBytes": 2157,
+          "foldedReferences": 4,
+          "commonWirePrefixBytes": 2129,
+          "invalidatedPreviousWireBytes": 39292,
+          "wirePrefixReuseRatio": 0.0514,
+          "commonPromptMessagePrefixBytes": 1908,
+          "invalidatedPreviousPromptMessageBytes": 39291,
+          "promptMessagePrefixReuseRatio": 0.0463,
+          "conclusionVisible": true
+        },
+        {
+          "label": "next-round",
+          "requestBytes": 1793,
+          "promptMessageBytes": 1571,
+          "foldedReferences": 4,
+          "commonWirePrefixBytes": 1373,
+          "invalidatedPreviousWireBytes": 1006,
+          "wirePrefixReuseRatio": 0.5771,
+          "commonPromptMessagePrefixBytes": 1152,
+          "invalidatedPreviousPromptMessageBytes": 1005,
+          "promptMessagePrefixReuseRatio": 0.5341,
+          "conclusionVisible": true
+        }
+      ],
+      "promptCacheCostProxy": {
+        "cachedPrefixBytes": 7576,
+        "uncachedPromptBytes": 160159,
+        "breakEvenCacheReadPriceRatioVsNoFold": 0.003446,
+        "scenarios": [
+          {
+            "cacheReadPriceRatio": 0,
+            "inputChargeByteEquivalents": 160159
+          },
+          {
+            "cacheReadPriceRatio": 0.1,
+            "inputChargeByteEquivalents": 160916.6
+          },
+          {
+            "cacheReadPriceRatio": 0.25,
+            "inputChargeByteEquivalents": 162053
+          },
+          {
+            "cacheReadPriceRatio": 0.5,
+            "inputChargeByteEquivalents": 163947
+          },
+          {
+            "cacheReadPriceRatio": 1,
+            "inputChargeByteEquivalents": 167735
+          }
+        ]
+      }
+    }
+  ]
+}

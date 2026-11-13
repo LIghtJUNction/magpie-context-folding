@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "benchmark": "isolated-magpie-host-provider-unrelated-followup",
+  "generated_at": "2026-10-29T20:27:01.419223+00:00",
+  "model_requested": "claude-sonnet-5",
+  "route": "real provider forwarded by local fixture through isolated Magpie/Bun hosts",
+  "provider_address_recorded": false,
+  "claim_under_test": "Compare provider-reported input usage for the same completed-Read history and unrelated follow-up with observe-only versus source folding through Magpie/Bun host dispatch.",
+  "design": {
+    "pair_count": 1,
+    "real_provider_completions": 2,
+    "synthetic_seed_completions": 4,
+    "source_payload_utf8_bytes": 32477,
+    "source_marked_utf8_bytes": 32541,
+    "read_tool_shape": "Read.absolutePath",
+    "task": "unrelated integer follow-up after a completed source answer",
+    "historical_tool_result": "synthetic source fixture; no external Read tool was run",
+    "temporary_home_and_xdg": true,
+    "bubblewrap_isolation": true
+  },
+  "baseline": {
+    "mode": "baseline",
+    "answer": "391",
+    "answer_correct": true,
+    "hook_confirmed": true,
+    "fold_confirmed": false,
+    "synthetic_seed_completions": 2,
+    "measured_provider_completions": true,
+    "provider_usage": {
+      "input_tokens": 12235,
+      "output_tokens": 2,
+      "total_tokens": 12237,
+      "cached_input_tokens": null,
+      "cache_write_input_tokens": null
+    },
+    "provider_wire": {
+      "request_json_bytes": 34064,
+      "full_source_payload_present": true,
+      "fold_reference_present": false
+    },
+    "hook_metrics": {
+      "observeOnlySuccessfulRequests": 3,
+      "successfulHookRequests": 0,
+      "successfulFoldedRequests": 0,
+      "foldBatchesApproved": 0,
+      "itemsFolded": 0,
+      "guidanceSuppressedRequests": 0,
+      "unverifiedHookRequests": 0,
+      "failedHookRequests": 0
+    },
+    "provider_error": null
+  },
+  "folding": {
+    "mode": "folding",
+    "answer": "391",
+    "answer_correct": true,
+    "hook_confirmed": true,
+    "fold_confirmed": true,
+    "synthetic_seed_completions": 2,
+    "measured_provider_completions": true,
+    "provider_usage": {
+      "input_tokens": 1173,
+      "output_tokens": 2,
+      "total_tokens": 1175,
+      "cached_input_tokens": null,
+      "cache_write_input_tokens": null
+    },
+    "provider_wire": {
+      "request_json_bytes": 2202,
+      "full_source_payload_present": false,
+      "fold_reference_present": true
+    },
+    "hook_metrics": {
+      "observeOnlySuccessfulRequests": 0,
+      "successfulHookRequests": 3,
+      "successfulFoldedRequests": 1,
+      "foldBatchesApproved": 1,
+      "itemsFolded": 1,
+      "guidanceSuppressedRequests": 0,
+      "unverifiedHookRequests": 0,
+      "failedHookRequests": 0
+    },
+    "provider_error": null
+  },
+  "valid": true,
+  "provider_input_tokens_saved": 11062,
+  "limitations": [
+    "One exploratory pair cannot establish typical savings or speedup.",
+    "Provider token usage is not a bill amount; cached token accounting may differ.",
+    "The source and prior read/answer are synthetic fixtures, and the test does not reload the live plugin."
+  ],
+  "source_provenance": {
+    "git_head": "f9d27c5cece8183420ae405bf2bbcdd0b7e3d566",
+    "plugin_worktree_modified": true,
+    "files_sha256": {
+      "dist/activity.js": "dd8a4c857248d6f8f3054b4cefc7216b5cf0f9a87442359b3436df7e9eddd155",
+      "dist/annotations.js": "07c636b517cc3df4a795ffa6b8ae75b29b9307626309e5c2d37308553285785c",
+      "dist/cli.js": "0ded63701f1ccba607eb946a7f66ae6219fd28fbb6bbe688cb871bbd8803fe01",
+      "dist/config.js": "ae2297d48fd590c2d6a7c7d33e82e7dc7e1e3b8bbc28f6c385b3495c75fda99b",
+      "dist/context.hooks.js": "276006ea239ca3f97b3357944189b1c2fde737dc9bac151c98df9120756ea42b",
+      "dist/guidance.js": "221de86b211b206c6b807919aabd1992cec2a331c25e33819d723c3b1db141bc",
+      "dist/index.js": "3f3a6736aedbdd8f629e11164a941d39576489814193108e1cfbeadf9e6d1e48",
+      "dist/metrics.js": "00ddcc8d00e40e23e7bb68e22f7286a3d4751ed34d5dc11c0ae488b1b789267b",
+      "dist/protocol.js": "bdd88237d84f9c585affd9e99d1a00175c91257b6f2d3686f0faa4dae9a39df1",
+      "dist/recovery.js": "c11cb7d9c1ba698f192eda4cd5b6fb769c6f636ac43482ad57167075418f980f",
+      "dist/report-html.js": "a1185c33ed8d629606d7a3e240229994e8f5c716bce25a1d2b4d9d848223d32a",
+      "dist/report.js": "6be44f0cabf3350045c845be82f2d70690e8eb5df880909d7defad7335ff8cbd",
+      "dist/request-clean.js": "e1cd7f6ba6800e8e8bb92f3b1bef3f650cac597b702ec8397cef7d2175c0c37a",
+      "dist/source.js": "720ae719e07427fc71828964238ee5b73364477ab1afbdd9ddf1ac9a4826a6c8",
+      "dist/statistics.js": "a98e6367bd7e8e37297aecbb065d17276d8a148aa0986666f985ea34e2dc4977",
+      "dist/store.js": "8091071204a83b8292e48d24466f91a693e21028eb150580837e644574225ca2",
+      "dist/tool.js": "4a35ddfa7dae7e684da29e4e0bd1f56a498840ab48bc60b612bde3ce941c97c9",
+      "dist/tree.js": "94c8c51fe491d19767ba8e923237d0877edd4fe6a300aad1cb5aed8a12c874ed",
+      "dist/visibility.js": "847137b94f5c66e92226b0f24d6d9fbe5bc487aeb11c53450ab0415c41cae12f",
+      "package.json": "aefa6b58fd24faf749392087e8c4015cc0f2f0ae87118e24be4dc56bbb9b7b6e",
+      "src/activity.ts": "a2deb2792c2956b2803094778d9ec165202ff97349e20e13f831c4c40b972f6e",
+      "src/annotations.ts": "cd78759388a110d9a5b228ae3d4784e1b95b584c86a94233e96e61fbf3a66402",
+      "src/cli.ts": "2c8c73f69df2b7ca39b8d3f27297809dcfb8a00594f4fd0894a355bfad044a3f",
+      "src/config.ts": "83e5220f6720d386598ceb2ed557293c58f96ddbb65dca7b9425d70ada89bd4b",
+      "src/context.hooks.ts": "074c3b24b790ae0bd4316dae8cc06ecd45e54e3ea3450c68052a269211563623",
+      "src/guidance.ts": "d4a3bbd33beedecbb165112ad05a932d5927ae41ce63ae5788c4e44fd0adebff",
+      "src/index.ts": "878313dd4b816ed991a688a378f30e42f2aa4b00fc6ca997f246ffbbca6f1653",
+      "src/metrics.ts": "918fd01a63a064aafe3890ebaaac3783cd1b55667f2df0b29e51975b128ce9eb",
+      "src/protocol.ts": "82d77d0179fbb880b365ed8739b89d7476d7df15a403f0727369b17a6f43aac4",
+      "src/recovery.ts": "5dcc249be3f5e1eb33a00f88a920086121eeec6e4d9ae1f9b0bdf8a76d8d1291",
+      "src/report-html.ts": "1ac77ee9491e1cf34bac78eece2ea21fafd63fbc705a94278461dfa11865256a",
+      "src/report.ts": "6e31df672ced89f68727724384768b7b9cddc36fade3ad7e5ecca76d8bb7d720",
+      "src/request-clean.ts": "1cffcdc66130b1a3a80be8af0911d1b0a32ec37944f63f28b174a131b9d2dc8c",
+      "src/source.ts": "675d651c5dfc40443f16679d1e80d3c78bf57b1397540592b8cc24d9f44158b5",
+      "src/statistics.ts": "3545a3a26ecaf1b299eab0967490e2a49d0d38e4b3081ac0cf85bd62abfd9fc8",
+      "src/store.ts": "4264b8bfec0b59608cd20dba7054a171c00615b8553cb902ef886169b6bb44d8",
+      "src/tool.ts": "d016ed4f0b980eef3b0a8004d9cd655f916b439db23d60edd3a732d2a7bc7c81",
+      "src/tree.ts": "cb3e30f87db1111d5a35b18f819811aab4f314746fb300f3b6b8da528e865cb3",
+      "src/visibility.ts": "7a730e58eeb6c6bbddbe5cabeed9b7bf773b39a9e57b4ca8c5be17c6a6c80924"
+    },
+    "aggregate_sha256": "92426e77dae6a2fcac55405d540facf5b51396dd9b6b8233d2eefa2a2cadcd1c"
+  },
+  "source_provenance_captured_at": "2026-10-29T20:30:43.810318+00:00"
+}

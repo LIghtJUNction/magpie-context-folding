@@ -1,6 +1,8 @@
 """Local reversible archive. Offsets count Unicode code points."""
 from __future__ import annotations
 
+from .archive_file import region_reference, reference_body, save_archive_file
+
 import math
 import hashlib
 from fnmatch import fnmatchcase
@@ -145,6 +147,7 @@ class Client:
         fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         os.close(fd)
         os.chmod(path, 0o600)
+        self._archive_directory = path.resolve().parent
         self._db = sqlite3.connect(path, timeout=10, check_same_thread=False)
         self._db.execute("PRAGMA secure_delete=ON")
         self._db.execute("CREATE TABLE IF NOT EXISTS scopes (scope TEXT PRIMARY KEY, data TEXT NOT NULL)")
@@ -209,6 +212,9 @@ class Client:
                 total = self._db.execute("SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) FROM scopes WHERE scope<>?", (scope,)).fetchone()[0]
                 if total + len(encoded.encode()) > MAX_STATE * 4:
                     raise FoldingError("quota", "Archive quota exceeded")
+                for entry in snapshot["entries"]:
+                    if entry.get("archiveFile"):
+                        save_archive_file(self._archive_directory, entry["text"])
                 self._db.execute("INSERT INTO scopes VALUES (?,?) ON CONFLICT(scope) DO UPDATE SET data=excluded.data", (scope, encoded))
                 self._db.commit()
                 return result
@@ -334,7 +340,8 @@ class Client:
             node["annotation"] = annotation
             node["foldChildren"] = self._region_children(annotation["regions"], None, 0)
         for region in annotation["regions"]:
-            region["reference"] = f"[[cf:v2:{_short_hash(snapshot, region['sha256'])}]]"
+            region["reference"] = region_reference(self._archive_directory, region, text[region["start"]:region["end"]],
+                                                   f"[[cf:v2:{_short_hash(snapshot, region['sha256'])}]]")
         keep = select_regions(annotation["regions"], request.get("keep", []))
         keep |= select_regions(annotation["regions"], request.get("expand", []))
         for region in annotation["regions"]:
@@ -446,7 +453,7 @@ class Client:
             if "[[cf:" not in payload:
                 accepted.add(start)
                 continue
-            literal = REFERENCE.fullmatch(payload.strip(" \t"))
+            literal = REFERENCE.fullmatch((reference_body(payload) if region.get("conversationMarker") else payload).strip(" \t"))
             if literal:
                 version, identifier = literal.groups()
                 if version == "v1" and len(identifier) != 24:
@@ -484,7 +491,8 @@ class Client:
         catalog = {"entries": [*snapshot["entries"], *({"text": text[r["start"]:r["end"]]}
                     for r in regions if not r.get("alreadyFolded"))]}
         for region in regions:
-            region["reference"] = f"[[cf:v2:{_short_hash(catalog, region['sha256'])}]]"
+            region["reference"] = region_reference(self._archive_directory, region, text[region["start"]:region["end"]],
+                                                   f"[[cf:v2:{_short_hash(catalog, region['sha256'])}]]")
         annotation = {**annotation, "regions": regions}
         if not source:
             projection = compact_source(text, annotation, allow_reference_literals=True)
@@ -506,6 +514,8 @@ class Client:
                 archived = self._put(snapshot, {"scope": scope, "text": text[region["start"]:region["end"]]}, now)
                 region["archiveId"] = archived["id"]
             node = _entry(snapshot, region["archiveId"])
+            if region.get("conversationMarker"):
+                node["archiveFile"] = True
             node.setdefault("label", region["name"])
             if not source:
                 # Published child views may outlive a host's current roots list.

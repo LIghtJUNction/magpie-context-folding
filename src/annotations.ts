@@ -16,11 +16,18 @@ export interface Region {
   /** Existing references require scope validation before they can form a parent. */
   hasReferences: boolean;
   referenceHash?: string;
+  conversationMarker?: boolean;
 }
 
-function marker(line: string): { kind: 'begin' | 'end'; label: string; style: string } | 'invalid' | undefined {
+function marker(line: string, conversationMarkers: boolean): { kind: 'begin' | 'end'; label: string; style: string } | 'invalid' | undefined {
   // @context-fold begin marker-68a6064dd3
   const value = line.trim();
+  if (conversationMarkers) {
+    const begin = /^>>[\t ]+(.+?)[\t ]+<<$/.exec(value);
+    if (begin?.[1]?.trim()) return { kind: 'begin', label: begin[1].trim(), style: 'conversation' };
+    const end = /^<<[\t ]+(.+?)[\t ]+>>$/.exec(value);
+    if (end?.[1]?.trim()) return { kind: 'end', label: end[1].trim(), style: 'conversation' };
+  }
   for (const [start, end] of styles) {
     if (!value.startsWith(start) || (end && !value.endsWith(end))) continue;
     const inner = value.slice(start.length, end ? -end.length : undefined).trim();
@@ -33,7 +40,7 @@ function marker(line: string): { kind: 'begin' | 'end'; label: string; style: st
 }
 
 /** Scan editable text only. User/trust boundaries are split by the caller. */
-export function parseRegions(parts: readonly TextPart[]): Region[] {
+export function parseRegions(parts: readonly TextPart[], conversationMarkers = true): Region[] {
   interface Frame {
     label: string; style: string; slices: Slice[]; invalid: boolean;
     origin: Region['origin']; order: number; children: Region[]; ordinals: Map<string, number>;
@@ -72,9 +79,11 @@ export function parseRegions(parts: readonly TextPart[]): Region[] {
       return start && end ? [{ region, start: start.offset + first.start - start.start,
         end: end.offset + last.end - end.start }] : [];
     });
-    const referenceHash = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(text.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
+    const referenceText = frame.style === 'conversation'
+      ? text.replace(/^line:\d+(?:\r\n|\r|\n)hash:[a-f0-9]{64}(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)/, '') : text;
+    const referenceHash = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(referenceText.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
     const region: Region = { label: frame.label, text, sha256: createHash('sha256').update(text, 'utf8').digest('hex'),
-      slices, origin: frame.origin, children, hasReferences: /\[\[cf:/.test(text),
+      slices, origin: frame.origin, children, ...(frame.style === 'conversation' ? { conversationMarker: true } : {}), hasReferences: /\[\[cf:/.test(text),
       ...(referenceHash ? { referenceHash } : {}) };
     regions.push(region);
     orders.set(region, frame.order);
@@ -84,7 +93,7 @@ export function parseRegions(parts: readonly TextPart[]): Region[] {
     let offset = 0;
     for (const line of part.text.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) ?? []) {
       if (!line) continue;
-      const directive = part.markerOffsets && !part.markerOffsets.has(offset) ? undefined : marker(line);
+      const directive = part.markerOffsets && !part.markerOffsets.has(offset) ? undefined : marker(line, conversationMarkers);
       if (!directive || directive === 'invalid') {
         if (directive === 'invalid') for (const frame of stack) frame.invalid = true;
         append(stack, part, offset, line);
@@ -100,7 +109,7 @@ export function parseRegions(parts: readonly TextPart[]): Region[] {
           order: order++, children: [], ordinals: new Map() });
       } else {
         let matching = stack.length - 1;
-        while (matching >= 0 && (stack[matching]!.label !== directive.label || stack[matching]!.style !== directive.style)) matching--;
+        while (matching >= 0 && ((directive.style !== 'conversation' && stack[matching]!.label !== directive.label) || stack[matching]!.style !== directive.style)) matching--;
         if (matching < 0) {
           for (const frame of stack) frame.invalid = true;
           append(stack, part, offset, line);
@@ -164,4 +173,14 @@ export function replaceRegions(parts: readonly TextPart[], selected: readonly { 
   }
   return replacements;
   // @context-fold end replaceRegions-0085c09ff4
+}
+
+/** Preserve the visible reason/result while exposing recoverable body metadata. */
+export function regionReference(region: Region, hash: string, path?: string): string {
+  const ref = reference(hash);
+  if (!region.conversationMarker || region.referenceHash) return ref;
+  const newline = /\r\n|\r|\n/.exec(region.text)?.[0] ?? '\n';
+  return [`line:${region.text.split(/\r\n|\r|\n/).length}`, `hash:${region.sha256}`,
+    `tokens:${Math.ceil(Buffer.byteLength(region.text, 'utf8') / 4)}`,
+    'tokens_method:utf8-bytes/4-ceil', ...(path ? [`path:${path}`] : []), ref].join(newline);
 }

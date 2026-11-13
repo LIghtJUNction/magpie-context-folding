@@ -39,6 +39,19 @@ class FoldTests(unittest.TestCase):
         self.client = Client(self.state, project_dir=self.directory)
         self.addCleanup(self.client.close)
 
+    def test_process_markers_publish_agent_independent_files(self):
+        for newline in ("\n", "\r\n", "\r"):
+            source = newline.join((">> Review started: main <<", BODY, "<< Review finished >>"))
+            result = self.client.fold("s", source)
+            visible = result["text"]
+            self.assertTrue(visible.startswith(">> Review started: main <<" + newline + "line:"))
+            self.assertTrue(visible.endswith(newline + "<< Review finished >>"))
+            path = Path(re.search(r"path:([^\r\n]+)", visible)[1])
+            self.assertTrue(path.is_absolute())
+            self.assertEqual(path.name, digest(BODY) + ".txt")
+            self.assertEqual(path.read_bytes(), BODY.encode("utf-8"))
+            self.assertEqual(self.client.fold("s", visible)["text"], visible)
+
     def snapshot(self):
         row = self.client._db.execute("SELECT data FROM scopes WHERE scope='s'").fetchone()
         return json.loads(row[0]) if row else None

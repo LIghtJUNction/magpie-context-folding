@@ -146,14 +146,25 @@ async function main(): Promise<void> {
     if (values.json) console.log(JSON.stringify(data));
     else {
       const m = data.metrics;
+      const usageLine = (label: string, usage: typeof data.responseUsageByFoldState.withFoldedContent) =>
+        `${label}：${usage.requests} 次 · 输入 ${formatTokenCount(usage.inputTokens)} · 输出 ${formatTokenCount(usage.outputTokens)} · 缓存读 ${formatTokenCount(usage.cacheReadTokens)}（${usage.cacheReadUsageRequests} 次有字段）· 写 ${formatTokenCount(usage.cacheWriteTokens)}（${usage.cacheWriteUsageRequests} 次有字段）`;
+      const usageGroups = data.responseUsageByFoldState;
       console.log([
         `统计范围：${data.scope === 'global-lifetime' ? '全局累计' : '当前会话'}`,
         `折叠次数：${data.summary.foldCount}`,
         `查看详情次数：${data.summary.detailViewCount}`,
         `累计折叠 token（估算）：${data.summary.foldedTokensDisplay}`,
         `累计净减少 token（成功请求估算）：${formatTokenCount(m.estimatedTokenDelta)}`,
-        `存档：${data.storage.activeSessions} 个会话，${data.storage.blobs} 个内容，数据库 ${data.storage.databaseBytes} B`,
-        'token 为估算值，不代表实际账单节省。',
+        '净收益状态：未验证（实际账单和耗时未测）',
+        usageLine('回复 usage · 含折叠内容', usageGroups.withFoldedContent),
+        usageLine('回复 usage · 不含折叠内容', usageGroups.withoutFoldedContent),
+        ...(usageGroups.observeOnly.requests > 0 || usageGroups.observeOnly.unavailableRequests > 0
+          ? [usageLine('回复 usage · 只观测基线', usageGroups.observeOnly)] : []),
+        ...(usageGroups.unclassified.requests > 0 ? [usageLine('回复 usage · 历史未分类', usageGroups.unclassified)] : []),
+        `只观测回调（成功 / 失败 / 未核实）：${m.observeOnlySuccessfulRequests} / ${m.observeOnlyFailedRequests} / ${m.observeOnlyUnverifiedRequests}`,
+        `成功回复缺完整 usage：含折叠 ${usageGroups.withFoldedContent.unavailableRequests} 次 · 不含折叠 ${usageGroups.withoutFoldedContent.unavailableRequests} 次 · 只观测 ${usageGroups.observeOnly.unavailableRequests} 次${usageGroups.unclassified.unavailableRequests > 0 ? ` · 未分类 ${usageGroups.unclassified.unavailableRequests} 次` : ''}`,
+        `状态库：${data.storage.activeSessions} 个状态会话，${data.storage.blobs} 个内容，数据库 ${data.storage.databaseBytes} B`,
+        '字节推算 token 是估算；回复 usage 是协议回传值，不代表账单或折叠节省。只观测模式可收集未折叠基线 usage；使用相同任务和模型、尽量固定其他条件，并检查输出质量后再比较。缓存字段不可在输入总数上重复相加。',
       ].join('\n'));
     }
     return;

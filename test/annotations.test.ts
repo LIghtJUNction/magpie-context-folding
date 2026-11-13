@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { parseRegions, shortHash, replaceRegions, reference } from '../src/annotations.js';
+import { parseRegions, shortHash, replaceRegions, reference, regionReference } from '../src/annotations.js';
 import { digest } from '../src/store.js';
 
 test('source and conversation markers share content hashes and preserve physical newlines', () => {
@@ -62,4 +62,28 @@ test('shared TypeScript/Python fixtures have identical region payloads and hashe
     assert.deepEqual(regions.map(region => region.text), fixture.payloads, fixture.name);
     assert.deepEqual(regions.map(region => region.sha256), fixture.payloads.map(digest), fixture.name);
   }
+});
+
+
+test('process markers preserve different reasons/results, physical newlines and nested boundaries', () => {
+  for (const newline of ['\n', '\r\n', '\r']) {
+    const text = ['>> Code review started: main <<', '', 'xxx', 'yyy', '', '<< Code review finished >>'].join(newline);
+    const parts = [{ id: 'a', text }];
+    const [region] = parseRegions(parts);
+    assert.ok(region?.conversationMarker);
+    assert.equal(region.text, ['', 'xxx', 'yyy', ''].join(newline));
+    const ref = regionReference(region, region.sha256.slice(0, 12), '/absolute/archive/' + region.sha256 + '.txt');
+    assert.match(ref, /^line:4/);
+    const output = replaceRegions(parts, [{ region, reference: ref }]).get('a')!;
+    assert.equal(output.replace(ref, region.text), text);
+    assert.deepEqual(parseRegions([{ id: 'a', text: output }]), [], 'metadata is never archived again');
+  }
+  const text = '>> Outer reason <<\n>> Inner reason <<\ndetails\n<< Inner result >>\n<< Outer result >>';
+  const regions = parseRegions([{ id: 'a', text }]);
+  assert.equal(regions.length, 2);
+  assert.equal(regions[0]!.children.length, 1);
+  for (const text of ['>> unfinished <<\nbody', '<< isolated >>', 'inline >> reason <<', '>> <<\nbody\n<< >>']) {
+    assert.deepEqual(parseRegions([{ id: 'a', text }]), []);
+  }
+  assert.deepEqual(parseRegions([{ id: 'a', text }], false), [], 'source parsing can disable process markers');
 });

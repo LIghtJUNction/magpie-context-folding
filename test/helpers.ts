@@ -20,7 +20,8 @@ export async function fixture(run: (f: {
   process.env.XDG_CONFIG_HOME = join(directory, 'config');
   await mkdir(join(directory, '.git'));
   const store = new Store();
-  const context = { protocol, model: 'fixture', session: 'annotations', cwd: directory, state: {} };
+  // Feature fixtures pin the grace period; default-timing coverage passes options: {} explicitly.
+  const context = { protocol, model: 'fixture', session: 'annotations', cwd: directory, options: { delayRequests: 1 }, state: {} };
   const scope = await store.scopeFor(JSON.stringify([context.session, '', '', directory]));
   try { await run({ directory, store, scope, context }); }
   finally {

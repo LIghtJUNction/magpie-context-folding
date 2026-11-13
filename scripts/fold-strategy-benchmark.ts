@@ -9,6 +9,18 @@ import { onRequest } from '../src/context.hooks.js';
 type Strategy = 'no-fold' | 'milestone-only' | 'one-shot-total' | 'hierarchical';
 const MILESTONES = 4;
 const CONCLUSION = 'Task conclusion: all four milestones are verified; begin the next task.';
+const CACHE_READ_PRICE_RATIOS = [0, 0.1, 0.25, 0.5, 1] as const;
+const args = process.argv.slice(2);
+let delayRequests = 0;
+const delayIndex = args.indexOf('--delay-requests');
+if (delayIndex >= 0) {
+  const raw = args[delayIndex + 1];
+  if (raw !== '0' && raw !== '1') throw new Error('--delay-requests must be 0 or 1');
+  delayRequests = Number(raw);
+  args.splice(delayIndex, 2);
+}
+if (args.length > 1) throw new Error('Pass at most one output JSON path');
+const outputPath = args[0] ? resolve(args[0]) : undefined;
 const DETAIL = (milestone: number) =>
   (`里程碑 ${milestone} 已完成的证据和推导，可供之后精确回查。编号 ${milestone}；` + 'recorded-result-1234567890.\n').repeat(360);
 
@@ -19,7 +31,23 @@ function commonPrefixBytes(left: Buffer, right: Buffer): number {
   return i;
 }
 
-async function runStrategy(strategy: Strategy) {
+function promptCacheCostProxy(turns: Record<string, unknown>[]) {
+  let cachedPrefixBytes = 0;
+  let uncachedPromptBytes = 0;
+  for (let index = 0; index < turns.length; index++) {
+    const promptBytes = Number(turns[index]!.promptMessageBytes);
+    const commonPrefixBytes = index === 0 ? 0 : Number(turns[index]!.commonPromptMessagePrefixBytes ?? 0);
+    if (!Number.isSafeInteger(promptBytes) || promptBytes < 0
+      || !Number.isSafeInteger(commonPrefixBytes) || commonPrefixBytes < 0 || commonPrefixBytes > promptBytes) {
+      throw new Error('Invalid prompt prefix measurement');
+    }
+    cachedPrefixBytes += commonPrefixBytes;
+    uncachedPromptBytes += promptBytes - commonPrefixBytes;
+  }
+  return { cachedPrefixBytes, uncachedPromptBytes };
+}
+
+async function runStrategy(strategy: Strategy, delayRequests: number) {
   const directory = await mkdtemp(join(tmpdir(), 'magpie-fold-strategy-'));
   const previousState = process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
   const previousConfig = process.env.XDG_CONFIG_HOME;
@@ -30,7 +58,7 @@ async function runStrategy(strategy: Strategy) {
   const context = {
     protocol: 'chat', model: 'fold-strategy-benchmark', session: 'same-task',
     origin: 'local-benchmark', agent: 'scripted', cwd: directory, state: {},
-    options: { delayRequests: 1, minSavingsTokens: 256 },
+    options: { delayRequests, minSavingsTokens: 256 },
   };
   const messages: Record<string, unknown>[] = [
     { role: 'system', content: 'Preserve the task conclusion and current status.' },
@@ -58,6 +86,7 @@ async function runStrategy(strategy: Strategy) {
       const assistantText = projectedMessages.filter(message => message.role === 'assistant')
         .map(message => typeof message.content === 'string' ? message.content : '').join('\n');
       const folds = assistantText.match(/\[\[cf:v2:[a-f0-9]+\]\]/g)?.length ?? 0;
+      const milestoneNumber = /^milestone-(\d+)$/.exec(label)?.[1];
       turns.push({
         label,
         requestBytes: wire.length,
@@ -71,6 +100,8 @@ async function runStrategy(strategy: Strategy) {
           ? previousMessages.length - priorMessagePrefix : null,
         promptMessagePrefixReuseRatio: previousMessages && priorMessagePrefix !== null
           ? Number((priorMessagePrefix / previousMessages.length).toFixed(4)) : null,
+        milestoneSummaryVisible: milestoneNumber === undefined ? null
+          : assistantText.includes(`Milestone ${milestoneNumber}: verified checkpoint; next step is milestone ${Number(milestoneNumber) + 1}.`),
         conclusionVisible: assistantText.includes(CONCLUSION),
       });
       previous = wire;
@@ -97,19 +128,26 @@ async function runStrategy(strategy: Strategy) {
     await project('next-round');
 
     const turn = (label: string) => turns.find(item => item.label === label)!;
+    for (let milestone = 1; milestone <= MILESTONES; milestone++) {
+      assert.equal(turn(`milestone-${milestone}`).milestoneSummaryVisible, true,
+        `milestone ${milestone} summary must remain outside every folded region`);
+    }
     assert.ok(turn('task-conclusion').conclusionVisible && turn('next-round').conclusionVisible,
       `${strategy} must retain the task conclusion outside every folded region`);
     if (strategy === 'no-fold') {
       assert.ok(turns.every(item => item.foldedReferences === 0), 'no-fold control unexpectedly folded text');
     } else if (strategy === 'milestone-only') {
-      assert.equal(turn('milestone-2').foldedReferences, 1, 'milestones should fold after the delay');
+      assert.equal(turn(delayRequests === 0 ? 'milestone-1' : 'milestone-2').foldedReferences, 1,
+        'the first completed milestone should fold at the configured observation boundary');
       assert.equal(turn('task-conclusion').foldedReferences, MILESTONES);
     } else if (strategy === 'one-shot-total') {
-      assert.equal(turn('task-conclusion').foldedReferences, 0, 'total block must wait one request cycle');
+      assert.equal(Number(turn('task-conclusion').foldedReferences) > 0, delayRequests === 0,
+        'total block folding must match the configured observation delay');
       assert.ok(Number(turn('next-round').foldedReferences) > 0, 'closed total block did not fold');
     } else {
-      assert.equal(turn('milestone-2').foldedReferences, 1, 'first child region did not fold while parent remained open');
-      assert.equal(turn('milestone-4').foldedReferences, MILESTONES - 1);
+      assert.equal(turn(delayRequests === 0 ? 'milestone-1' : 'milestone-2').foldedReferences, 1,
+        'first child region did not fold while parent remained open');
+      assert.equal(turn('milestone-4').foldedReferences, MILESTONES - delayRequests);
       assert.ok(Number(turn('next-round').foldedReferences) > 0, 'closed parent region did not fold');
     }
 
@@ -145,8 +183,29 @@ async function runStrategy(strategy: Strategy) {
 
 const results = [];
 for (const strategy of ['no-fold', 'milestone-only', 'one-shot-total', 'hierarchical'] as const) {
-  results.push(await runStrategy(strategy));
+  results.push(await runStrategy(strategy, delayRequests));
 }
+const baselineCache = promptCacheCostProxy(results.find(result => result.strategy === 'no-fold')!.turns);
+const resultsWithCacheProxy = results.map(result => {
+  const cache = promptCacheCostProxy(result.turns);
+  const lostCachedBytesVsBaseline = baselineCache.cachedPrefixBytes - cache.cachedPrefixBytes;
+  const breakEvenCacheReadPriceRatio = result.strategy === 'no-fold' || lostCachedBytesVsBaseline <= 0
+    ? null : (cache.uncachedPromptBytes - baselineCache.uncachedPromptBytes) / lostCachedBytesVsBaseline;
+  return {
+    ...result,
+    promptCacheCostProxy: {
+      cachedPrefixBytes: cache.cachedPrefixBytes,
+      uncachedPromptBytes: cache.uncachedPromptBytes,
+      breakEvenCacheReadPriceRatioVsNoFold: breakEvenCacheReadPriceRatio === null
+        ? null : Number(breakEvenCacheReadPriceRatio.toFixed(6)),
+      scenarios: CACHE_READ_PRICE_RATIOS.map(cacheReadPriceRatio => ({
+        cacheReadPriceRatio,
+        inputChargeByteEquivalents: Number((cache.uncachedPromptBytes
+          + cache.cachedPrefixBytes * cacheReadPriceRatio).toFixed(2)),
+      })),
+    },
+  };
+});
 const report = {
   benchmark: 'synthetic-multi-milestone-request-prefix-replay',
   completedAt: new Date().toISOString(),
@@ -156,12 +215,17 @@ const report = {
     ...(await readdir('src')).filter(path => path.endsWith('.ts')).map(path => `src/${path}`),
     'scripts/fold-strategy-benchmark.ts',
   ].map(async path => [path, createHash('sha256').update(await readFile(path)).digest('hex')]))),
-  delayRequests: 1,
+  delayRequests,
   minSavingsTokens: 256,
   requestPrefixMetric: 'common UTF-8 byte prefix between consecutive projected message arrays; a cache proxy, not provider cached tokens',
-  note: 'Uses the production onRequest hook and synthetic history; no model or provider cache is called.',
-  results,
+  promptCacheCostProxy: {
+    basis: 'sum of projected prompt-message UTF-8 bytes; common consecutive prefix is priced at the selected cache-read ratio and the remainder at 1',
+    cacheReadPriceRatios: CACHE_READ_PRICE_RATIOS,
+    breakEvenMeaning: 'A folding strategy is cheaper than no-fold when the cache-read price ratio is above its break-even value, within this proxy.',
+    caveat: 'Synthetic byte-prefix sensitivity only; excludes provider tokenization, cache block/minimum rules, cache writes, tool/system billing differences, output, and actual prices.',
+  },
+  note: 'Uses the production onRequest hook and synthetic history; no model or provider cache is called. Byte-equivalents are not tokens or dollars. Default delayRequests is 0; pass --delay-requests 1 for the one-request grace-period comparison.',
+  results: resultsWithCacheProxy,
 };
-const outputPath = process.argv[2] ? resolve(process.argv[2]) : undefined;
 if (outputPath) await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

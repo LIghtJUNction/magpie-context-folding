@@ -216,3 +216,7 @@ uv run --project context-folding python -m unittest discover -s context-folding/
 ```
 
 Bridge tests exercise ordered transport, errors, Unicode, process lifecycle and actual core integration when enabled. They do not use paid model inference or prove that a real host's default compaction has been replaced. Historical counts and benchmark results from previous versions remain historical evidence.
+
+## 通用过程折叠标记
+
+独占一行的 `>> 开始缘由 <<` 与 `<< 结束结果 >>` 配对，两端文案不必一致，支持嵌套。`ctxf fold` 保留两端，只替换正文为 `line`、`hash`、`tokens`、`tokens_method`、`path` 和恢复引用。`path` 为规范绝对路径，指向存储目录下 `archive/<完整 SHA-256>.txt`，内容为精确原文，任何 Agent 都能直接读取。token 数使用 UTF-8 字节数 / 4 向上取整。未闭合或无净收益区域保持原文。详见[公共协议](../docs/annotation-protocol.md)。
