@@ -1,3 +1,4 @@
+import { annotationReferenceHash } from './annotations.js';
 import { saveArchiveFile } from './archive-file.js';
 import { Database } from 'bun:sqlite';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
@@ -181,8 +182,7 @@ function validateLayers(snapshot: Snapshot): void {
         throw new Error('Invalid annotation child range');
       }
       const body = frame.entry.text.slice(edge.start, edge.end);
-      const ref = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(body.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1]
-        ?? /^line:\d+(?:\r\n|\r|\n)hash:([a-f0-9]{64})(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)\.\.\./.exec(body)?.[1];
+      const ref = annotationReferenceHash(body);
       if (body !== child.text && (!ref || !child.annotation.sha256.startsWith(ref)
         || snapshot.entries.some(other => other.annotation?.sha256.startsWith(ref)
           && other.annotation.sha256 !== child.annotation!.sha256))) {
