@@ -11,8 +11,62 @@
   [![npm](https://img.shields.io/npm/v/magpie-context-folding?style=flat-square&logo=npm)](https://www.npmjs.com/package/magpie-context-folding)
   [![License](https://img.shields.io/github/license/LIghtJUNction/magpie-context-folding?style=flat-square)](LICENSE)
 
-  [安装](#安装) · [一分钟理解](#一分钟理解) · [恢复](#恢复原文) · [独立核心](#独立文本核心-ctxf) · [协议](docs/annotation-protocol.md)
+  [插件与技能快速开始](#插件与技能快速开始) · [安装](#安装) · [一分钟理解](#一分钟理解) · [恢复](#恢复原文) · [独立核心](#独立文本核心-ctxf) · [协议](docs/annotation-protocol.md)
 </div>
+
+## 插件与技能快速开始
+
+> **必须先安装并启用 `magpie-context-folding` 插件，下面的技能才会在 Magpie 请求中产生实际折叠。** 技能只指导 Agent 编写标记；真正保存原文、替换正文和提供恢复信息的是插件。只安装技能、只写标记，不会自动归档或节省上下文。
+
+### 1. 安装 Magpie 插件
+
+在已安装 Magpie 的环境中执行：
+
+```bash
+magpie plugin add npm:magpie-context-folding
+```
+
+确保 Agent 的模型请求经过已加载此插件的 Magpie，并且可以调用 shell 工具执行恢复命令；插件会跳过无法通过 shell 恢复的请求。保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。开发版安装见[安装](#安装)。
+
+### 2. 安装 context-folding 技能
+
+以 Codex 为例，将本仓库的 [SKILL.md](.agents/skills/context-folding/SKILL.md) 保存到 `~/.codex/skills/context-folding/SKILL.md`。已经克隆仓库时，在仓库根目录执行：
+
+```bash
+mkdir -p ~/.codex/skills/context-folding
+cp .agents/skills/context-folding/SKILL.md ~/.codex/skills/context-folding/SKILL.md
+```
+
+如果该路径已有自定义技能，请先比较内容再更新。安装后新开 Codex 会话，确认技能列表中出现 `context-folding`。其他支持 `SKILL.md` 的 Agent 可将同一技能放入其技能目录；实际折叠仍要求请求经过上述 Magpie 插件。
+
+### 3. 在任务中使用技能
+
+在 Codex 中明确调用，例如：
+
+```text
+$context-folding 请审查这个项目的代码，按阶段折叠已完成的排查细节，并把发现与下一步留在标记外。
+```
+
+只有实际需要输出较长证据、比较或解释时才标记；不把进度播报和工具调用套进空框。下面是缩短示例，外围箭头保护教程本身，内部箭头演示局部保留：
+
+→ 不折叠开始
+```text
+发现：重试可能重复记账。
+>> 检查重复扣款的证据 <<
+两次请求使用同一 request_id。第一次扣款已提交，随后连接中断。
+重试再次调用 debit()，没有检查请求是否完成，又写入一笔扣款。
+→ 不折叠开始
+保留：request_id=42；回归测试尚未通过。
+← 不折叠结束
+这里继续写实际需要呈现的详细证据。
+<< 同一请求产生两笔扣款 >>
+下一步：添加去重并验证。
+```
+← 不折叠结束
+
+闭合且达到净节省门槛后，插件先按哈希文件名保存完整原文，再把可折叠部分显示为 `...`；箭头保留区原样留在中间。折叠元数据提供真实 `path` 和 `hash`，可直接读文件。保留区内的示例标记不再被解释为折叠指令；保留区可嵌套。普通工具结果不会因为位于标记之间就一并折叠。
+
+仅看到起止标记不代表已经折叠；未闭合、过短、无净收益或归档失败时保留原文。新语法和目录 CLI 属于当前 Magpie 插件；独立 Python `ctxf` 的接口另见下文。
 
 ## 一分钟理解
 
@@ -27,9 +81,9 @@ Agent 写出阶段结论
       ↓
 闭合并达到净节省门槛
       ↓
-把正文替换成 [[cf:v2:<短哈希>]]
+把正文替换成 ...，箭头保留区保持原样
       ↓
-需要时按 scope + 哈希精确读回
+需要时直接读取 path 指向的哈希文件
 ```
 
 示例：
@@ -62,7 +116,7 @@ Agent 写出阶段结论
 
 ## 0.5.4：持续注入主动折叠规则
 
-从首个短任务起，每次可恢复请求都带一份主动管理规则，不再因连续无折叠而撤掉。长评审、长报告和详细解释使用起止标记；短回答与用户明确要求的 JSON、纯代码、精确输出保持原格式。插件计算收益并生成元数据，模型不编造 hash/path。
+从首个短任务起，每次可恢复请求都带一份主动管理规则，不再因连续无折叠而撤掉。长评审、长报告中值得回查的长正文使用起止标记；短回答与用户明确要求的 JSON、纯代码、精确输出保持原格式。插件计算收益并生成元数据，模型不编造 hash/path。
 
 真实模型单任务试验中，用户没有提及折叠，模型主动生成完整标记，下一轮正文从 9,555 B 变为 1,121 B，文件原文校验通过；“只输出 OK”仍得到 `OK`。方法、初次未遵循的结果和验证范围见[发布说明](docs/release-0.5.4.md)及[原始回执](docs/benchmarks/proactive-guidance-live-0.5.4.json)。
 
@@ -89,7 +143,7 @@ Agent 写出阶段结论
 ### Magpie 插件
 
 ```bash
-magpie plugin add npm:magpie-context-folding@0.5.4
+magpie plugin add npm:magpie-context-folding
 ```
 
 保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。
@@ -110,7 +164,7 @@ Magpie 直接加载 TypeScript 源码，不依赖安装时构建脚本。发布�
 
 插件在可恢复的每次请求中持续注入一份规则，首次短任务也能收到，不需要等上下文变长或用户提醒：
 
-> 主动管理上下文，长评审、长报告和详细解释必须遵守标记协议，不等用户要求压缩。长阶段开始时，独占一行写 `>> 具体起因 <<`，把较长的证据、日志、比较细节放在其中；完成时独占一行写 `<< 已验证结果 >>`，在下一用户回合前闭合。当前结论、约束、失败和下一步保持在外面。不要为了折叠增加冗余内容，不标记短回答、精确格式输出或用户原话。由插件保存原文并生成 hash、path 等字段，不要自行计算或编造。需要旧细节时按实际 path 读取。
+> 主动管理上下文，有值得回查的长正文时使用标记协议，不等用户要求压缩。开始输出长正文时，独占一行写 `>> 具体起因 <<`，把较长的证据、日志、比较细节放在其中；完成时独占一行写 `<< 已验证结果 >>`，在下一用户回合前闭合。当前结论、约束、失败和下一步保持在外面。不要为了折叠增加冗余内容，不标记短回答、精确格式输出或用户原话。由插件保存原文并生成 hash、path 等字段，不要自行计算或编造。需要旧细节时按实际 path 读取。
 
 开始和结束描述可以不同，应表达该阶段的真实起因与结果。源码继续使用下面的注释语法。
 
@@ -136,31 +190,22 @@ validate_options(options)
 
 完整语法、嵌套、跨消息配对和失败行为见 [注释协议](docs/annotation-protocol.md)。
 
-## 恢复原文
+## 恢复原文与目录管理
 
-从引用中取出实际短哈希，并使用请求提示中的 scope：
+直接读取折叠元数据中的绝对 `path` 即可。CLI 只管理包含 `<SHA-256>.txt` 的目录，不需要 scope、会话、层级或数据库：
 
 ```bash
-magpie-context-folding read \
-  --scope 'CURRENT_SCOPE' \
-  --id 'ACTUAL_SHORT_HASH' \
-  --restore
+magpie-context-folding stats --dir /实际归档目录
+magpie-context-folding list --dir /实际归档目录 --sort size --order desc
+magpie-context-folding search '要找的文字' --dir /实际归档目录
+magpie-context-folding read 实际哈希 --dir /实际归档目录
+magpie-context-folding clean --older-than 30 --dir /实际归档目录
+magpie-context-folding clean --older-than 30 --dir /实际归档目录 --apply
 ```
 
-主要命令：
+`read` 原样输出完整文件，也可以用 `cat /实际/path.txt`。哈希支持至少 12 位的无歧义前缀。`list` 可按 `name`、`size`、`time` 排序；`stats` 只统计文件数与字节数。`search` 按字面文本匹配，输出路径、行号和文本。`clean` 默认预览，加 `--apply` 才删除，也可直接指定一个哈希；清理会删除对应原文，请只清理不再需要的文件。
 
-| 命令 | 作用 |
-| --- | --- |
-| `read` | 读取折叠视图、完整原文或分页结果 |
-| `list` | 找回忘记的引用和历史归档 |
-| `grep` | 在归档中搜索定义、字符串或证据 |
-| `meta` | 查看节点、父子关系和哈希元数据 |
-| `paste` | 将选定内容写入新文件，拒绝覆盖已有文件 |
-| `status` | 查看当前会话和最近处理状态 |
-| `stats` | 查看字节和估算 token 统计 |
-| `forget` | 清理已无活动引用的会话归档 |
-
-`scope` 是会话恢复能力值，不应交给其他会话。恢复得到的是历史资料，不会自动执行其中的旧命令。
+省略 `--dir` 时使用 `MAGPIE_CONTEXT_FOLDING_STATE_DIR/archive`，否则使用 XDG 数据目录下的 `magpie-context-folding/archive`。只管理普通哈希 `.txt` 文件，忽略其他文件和符号链接。读取不改变后续折叠状态。原文文件独立于插件内部会话数据库保留；CLI 不再提供 `scope`、`restore`、`meta`、`paste`、状态栏或 HTML 报告命令。
 
 ## 独立文本核心 `ctxf`
 

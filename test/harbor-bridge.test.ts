@@ -101,17 +101,15 @@ test('Harbor bridge drives delayed projection, a real CLI recovery process and c
     assert.equal(status.result.metrics.itemsFolded, 1);
     const recovered = await cli(call, ['read', '--id', hash!, '--limit', '24000', '--json']);
     assert.equal(recovered.result.text, payload);
-    assert.equal(recovered.result.kept, false);
-    assert.equal(recovered.result.nextOffset, null);
+
 
     const kept = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
     assert.equal(assistantText(kept.result.body), compact);
     await call({ op: 'response', success: true });
-    const restored = await cli(call, ['read', '--id', hash!, '--restore', '--json']);
-    assert.equal(restored.result.kept, true);
-    assert.equal(restored.result.text, payload);
-    const expanded = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
-    assert.equal(assistantText(expanded.result.body), marked());
+    const reread = await cli(call, ['read', '--id', hash!]);
+    assert.equal(reread.result.text, payload);
+    const stillFolded = await call({ op: 'project', mode: 'folding', body: progress(nextBody, 'chat') });
+    assert.equal(assistantText(stillFolded.result.body), compact, 'file reads do not change fold state');
     await call({ op: 'response', success: true });
   });
 });

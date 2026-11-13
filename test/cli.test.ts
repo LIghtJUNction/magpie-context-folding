@@ -1,177 +1,84 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { digest, Store } from '../src/store.js';
+import { saveArchiveFile } from '../src/archive-file.js';
 
-const cli = join(dirname(import.meta.dir), 'src', 'cli.ts');
-async function fixture(run: (scope: string, directory: string, invoke: (args: string[], input?: string) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
-  const directory = await mkdtemp(join(tmpdir(), 'folding-cli-'));
-  try {
-    const stateDirectory = join(directory, 'state');
-    const store = new Store(stateDirectory);
-    const scope = await store.scopeFor('cli-roundtrip');
-    await store.transaction(scope, true, 64 * 1024 * 1024, state => {
-      state.entries = [{ id: 'a', role: 'assistant', text: '原文🙂\n```ts\nexact();\n```\n',
-        annotation: { sha256: digest('原文🙂\n```ts\nexact();\n```\n'), label: 'exact' },
-        mark: { disposition: 'foldable', summary: 'short' }, folded: 'short', layers: [{ id: 'layer', previousId: 'original', text: 'short' }] }];
-    });
-    const invoke = async (args: string[], input?: string) => {
-      const child = Bun.spawn([process.execPath, cli, ...args], { cwd: directory,
-        env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: stateDirectory, XDG_CONFIG_HOME: join(directory, 'config') },
-        stdin: input === undefined ? 'ignore' : new TextEncoder().encode(input), stdout: 'pipe', stderr: 'pipe' });
-      const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-      return { code, out, err };
-    };
-    await run(scope, directory, invoke);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+const cli = new URL('../src/cli.ts', import.meta.url).pathname;
+const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+async function fixture(run: (root: string, directory: string, invoke: (args: string[]) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
+  const root = await mkdtemp(join(tmpdir(), 'archive-cli-'));
+  const directory = join(root, 'archive');
+  await mkdir(directory);
+  const invoke = async (args: string[]) => {
+    const child = Bun.spawn([process.execPath, cli, ...args], { env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: root }, stdout: 'pipe', stderr: 'pipe' });
+    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { code, out, err };
+  };
+  try { await run(root, directory, invoke); }
+  finally { await rm(root, { recursive: true, force: true }); }
 }
 
-test('actual CLI roundtrip handles short hashes, raw text, paste, JSON navigation and forget', async () => {
-  await fixture(async (scope, directory, invoke) => {
-    const read = await invoke(['read', '--scope', scope, '--id', 'a']);
-    assert.equal(read.code, 0, read.err);
-    assert.equal(read.err, '');
-    assert.equal(read.out, '原文🙂\n```ts\nexact();\n```\n');
-    const list = await invoke(['list', '--scope', scope, '--json']);
-    assert.equal(JSON.parse(list.out).entries[0].disposition, 'foldable');
-    const hashed = await invoke(['read', '--scope', scope, '--id', digest(read.out).slice(0, 12), '--json']);
-    assert.equal(hashed.code, 0);
-    assert.equal(JSON.parse(hashed.out).id, 'a');
-    assert.equal(JSON.parse(hashed.out).text, read.out);
-    assert.equal(JSON.parse(hashed.out).kept, false, 'default reads leave folding intact');
-    const output = join(directory, 'paste.txt');
-    const paste = await invoke(['paste', '--scope', scope, '--id', 'a', '--path', output]);
-    assert.equal(paste.code, 0);
-    assert.equal(await readFile(output, 'utf8'), read.out);
-    assert.equal((await stat(output)).mode & 0o777, 0o600);
-    assert.equal(JSON.parse(paste.out).text, undefined);
-    const layer = await invoke(['read', '--scope', scope, '--id', 'a', '--layer', 'layer', '--peek', '--json']);
-    assert.equal(layer.code, 0);
-    assert.equal(JSON.parse(layer.out).text, 'short');
-    assert.equal(JSON.parse(layer.out).layer, 'layer');
-    const status = await invoke(['status', '--scope', scope]);
-    assert.equal(JSON.parse(status.out).folded, 1);
-    const stats = await invoke(['stats', '--scope', scope, '--json']);
-    assert.equal(stats.code, 0);
-    assert.equal(JSON.parse(stats.out).metrics.originalReadCalls, 2);
-    assert.equal((await invoke(['stats'])).code, 0);
-    assert.equal(JSON.parse((await invoke(['forget', '--scope', scope, '--force'])).out).forgotten, true);
-    assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 1);
-  });
-});
-
-test('CLI keeps recovery available with disabled, legacy or broken config and explains migration', async () => {
-  await fixture(async (scope, directory, invoke) => {
-    const config = join(directory, '.context-folding.toml');
-    await writeFile(config, '[folding]\nenabled = false\n');
-    const effective = await invoke(['config', '--project-dir', directory, '--json']);
-    assert.equal(effective.code, 0);
-    assert.equal(JSON.parse(effective.out).config.folding.enabled, false);
-    assert.deepEqual(JSON.parse(effective.out).config.folding, {
-      enabled: false, observe_only: false, max_session_bytes: 67_108_864, delay_requests: 0, min_savings_tokens: 256,
-    });
-    assert.ok(!effective.out.includes('secret'));
-    assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
-    await writeFile(config, '[folding]\nenabled = "private-secret"\n');
-    const broken = await invoke(['config']);
-    assert.equal(broken.code, 1);
-    assert.equal(broken.out, '');
-    assert.ok(!broken.err.includes('private-secret'));
-    assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
-    await writeFile(config, '[folding]\nmode = "private-secret"\n');
-    const legacy = await invoke(['config']);
-    assert.equal(legacy.code, 1);
-    assert.match(legacy.err, /removed.*@context-fold/);
-    assert.ok(!legacy.err.includes('private-secret'));
-    assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
-    for (const key of ['context_window_tokens', 'reserve_output_tokens', 'budget_hints']) {
-      await writeFile(config, `[folding]\n${key} = 32000\n`);
-      const retired = await invoke(['config']);
-      assert.equal(retired.code, 1);
-      assert.equal(retired.out, '');
-      assert.match(retired.err, /removed/);
-      assert.ok(retired.err.includes(key));
-      assert.equal((await invoke(['read', '--scope', scope, '--id', 'a'])).code, 0);
-    }
-  });
-});
-
-test('stats shows folding, detail views and compact token totals with exact JSON values', async () => {
-  await fixture(async (scope, directory, invoke) => {
-    await new Store(join(directory, 'state')).recordMetrics(scope, {
-      foldBatchesApproved: 7, originalReadCalls: 2, layerReadCalls: 3,
-      foldedTokensEstimated: '1250000000',
-    });
-    const result = await invoke(['stats', '--scope', scope]);
+test('directory CLI reads exact Unicode originals without a database and searches literal lines', async () => {
+  await fixture(async (root, directory, invoke) => {
+    const text = '原文🙂\r\nfunction exact() {}\n'.repeat(2000);
+    const id = hash(text);
+    const path = saveArchiveFile(root, id, text);
+    const result = await invoke(['read', id.slice(0, 12)]);
     assert.equal(result.code, 0, result.err);
-    assert.ok(result.out.startsWith('统计范围：'));
-    assert.ok(result.out.includes('净收益状态：未验证（实际账单和耗时未测）'));
-    assert.ok(!result.out.includes('USD 0.000000000'));
-    assert.ok(result.out.includes('折叠次数：7'));
-    assert.ok(result.out.includes('查看详情次数：5'));
-    assert.ok(result.out.includes('累计折叠 token（估算）：1.25B'));
-    const json = await invoke(['stats', '--scope', scope, '--json']);
-    assert.equal(json.code, 0, json.err);
-    assert.deepEqual(JSON.parse(json.out).summary, {
-      foldCount: 7, detailViewCount: 5,
-      foldedTokensEstimated: '1250000000', foldedTokensDisplay: '1.25B',
-    });
-
+    assert.equal(result.out, text);
+    const found = await invoke(['search', '--dir', directory, 'function exact()']);
+    assert.equal(found.code, 0, found.err);
+    assert.ok(found.out.startsWith(`${path}:2:function exact() {}`));
+    assert.equal((await invoke(['search', 'absent'])).out, '');
+    const stats = JSON.parse((await invoke(['stats'])).out);
+    assert.equal(stats.files, 1);
+    assert.equal(stats.bytes, Buffer.byteLength(text));
+    assert.deepEqual(await readdir(root), ['archive']);
   });
 });
 
-test('CLI invalid commands and arguments use stderr, exit 1 and never leak supplied secrets', async () => {
-  await fixture(async (scope, _directory, invoke) => {
-    for (const args of [ ['unknown-private-secret'], ['read'], ['read', '--scope', scope, '--id', 'a', '--offset', '1.5'],
-      ['read', '--scope', scope, '--id', 'a', '--offset', '-1'], ['stats', '--scope', 'private-secret'],
-      ['mark', '--scope', scope, '--marks', '{private-secret'], ['mode', '--scope', scope, '--mode', 'private-secret'],
-      ['read', '--scope', scope, '--id', 'a', '--keep-folded'], ['read', '--scope', scope, '--id', 'a', '--limit', '24001'],
-      ['read', '--scope', scope, '--id', 'a', '--all', '--limit', '10'],
-      ['read', '--scope', scope, '--id', 'a', '--full', '--limit', '10'],
-      ['read', '--scope', scope, '--id', 'a', '--full', '--all'],
-      ['read', '--scope', scope, '--id', 'a', '--full', '--start-line', '1'],
-      ['read', '--scope', scope, '--id', 'a', '--start-line', '1.5'],
-      ['read', '--scope', scope, '--id', 'a', '--end-line', '-1'],
-      ['read', '--scope', scope, '--id', 'a', '--restore', '--layer', 'view'],
-      ['read', '--scope', scope, '--id', 'a', '--restore', '--offset', '0'],
-      ['read', '--scope', scope, '--id', 'a', '--restore', '--peek'] ]) {
+test('listing sorts by size/time/name; cleanup previews then deletes only selected hash files', async () => {
+  await fixture(async (root, directory, invoke) => {
+    const old = hash('old'); const recent = hash('new and longer');
+    const oldPath = saveArchiveFile(root, old, 'old');
+    const recentPath = saveArchiveFile(root, recent, 'new and longer');
+    await utimes(oldPath, new Date(0), new Date(0));
+    await writeFile(join(directory, 'notes.txt'), 'preserve');
+    await mkdir(join(directory, `${'f'.repeat(64)}.txt`));
+    const link = join(directory, `${'e'.repeat(64)}.txt`);
+    await symlink(recentPath, link);
+    assert.deepEqual(JSON.parse((await invoke(['list', '--sort', 'size', '--order', 'asc'])).out).map((f: { hash: string }) => f.hash), [old, recent]);
+    assert.equal(JSON.parse((await invoke(['list', '--sort', 'time'])).out)[0].hash, recent);
+    const preview = JSON.parse((await invoke(['clean', '--older-than', '1'])).out);
+    assert.equal(preview.applied, false);
+    assert.deepEqual(preview.files.map((f: { hash: string }) => f.hash), [old]);
+    assert.equal(await readFile(oldPath, 'utf8'), 'old');
+    const cleaned = await invoke(['clean', '--older-than', '1', '--apply']);
+    assert.equal(cleaned.code, 0, cleaned.err);
+    await assert.rejects(readFile(oldPath), { code: 'ENOENT' });
+    assert.equal(await readFile(recentPath, 'utf8'), 'new and longer');
+    assert.equal(await readFile(join(directory, 'notes.txt'), 'utf8'), 'preserve');
+    assert.equal((await invoke(['read', 'e'.repeat(12)])).code, 1);
+    assert.equal((await invoke(['clean', recent.slice(0, 12), '--apply'])).code, 0);
+    assert.equal(JSON.parse((await invoke(['stats'])).out).files, 0);
+  });
+});
+
+test('invalid selectors and ambiguous prefixes fail without touching files', async () => {
+  await fixture(async (_root, directory, invoke) => {
+    for (const id of ['a'.repeat(64), 'a'.repeat(63) + 'b']) await writeFile(join(directory, `${id}.txt`), 'keep');
+    for (const args of [['read', 'a'.repeat(12)], ['read', '../notes'], ['clean', '--apply'], ['clean', '--older-than', '-1', '--apply'],
+      ['clean', 'a'.repeat(64), '--older-than', '2', '--apply'], ['list', '--sort', 'invalid'], ['search'], ['read', '--scope', 'old']]) {
       const result = await invoke(args);
       assert.equal(result.code, 1, JSON.stringify(args));
       assert.equal(result.out, '');
-      assert.ok(result.err.length > 0);
-      assert.ok(!result.err.includes('private-secret'));
-      assert.ok(!result.err.includes(scope));
     }
-    const help = await invoke(['--help']);
-    assert.equal(help.code, 0);
-    assert.ok(!/^mark\s|^mode\s/m.test(help.out));
-    assert.match((await invoke(['mode'])).err, /removed/);
-    assert.equal((await invoke(['read', '--help'])).code, 0);
-  });
-});
-
-test('CLI grep/list/meta use short content keys and read accepts bounded view lines', async () => {
-  await fixture(async (scope, _directory, invoke) => {
-    const hash = digest('原文🙂\n```ts\nexact();\n```\n').slice(0, 12);
-    const list = await invoke(['list', '--scope', scope]);
-    assert.equal(list.code, 0);
-    const listed = JSON.parse(list.out);
-    assert.equal(listed.entries[0].key, hash);
-    assert.ok(!list.out.includes('exact();'));
-    const grep = await invoke(['grep', '--scope', scope, '--query', 'exact()']);
-    assert.equal(grep.code, 0, grep.err);
-    assert.equal(grep.out, hash + ':3:exact();\n');
-    const meta = await invoke(['meta', '--scope', scope, '--id', hash, '--json']);
-    assert.equal(meta.code, 0, meta.err);
-    const information = JSON.parse(meta.out);
-    assert.equal(information.key, hash);
-    assert.equal(information.text, undefined);
-    const line = await invoke(['read', '--scope', scope, '--id', hash, '--start-line', '3', '--end-line', '3']);
-    assert.equal(line.out, 'exact();\n');
-    const conflicting = await invoke(['read', '--scope', scope, '--id', hash, '--start-line', '3', '--offset', '0']);
-    assert.equal(conflicting.code, 1);
-    assert.equal(conflicting.out, '');
+    assert.equal((await readdir(directory)).length, 2);
+    const missing = join(directory, 'absent');
+    assert.equal(JSON.parse((await invoke(['stats', '--dir', missing])).out).files, 0);
+    await assert.rejects(readdir(missing), { code: 'ENOENT' });
   });
 });

@@ -87,3 +87,33 @@ test('process markers preserve different reasons/results, physical newlines and 
   }
   assert.deepEqual(parseRegions([{ id: 'a', text }], false), [], 'source parsing can disable process markers');
 });
+
+test('arrow keep blocks preserve literal examples and islands inside an outer fold', () => {
+  const kept = '→ 不折叠开始\n>> Literal example <<\nnever fold this\n<< Literal end >>\n← 不折叠结束\n';
+  const body = 'before '.repeat(400) + '\n' + kept + 'after '.repeat(400);
+  const text = '>> Investigation <<\n' + body + '\n<< Finished >>';
+  const parts = [{ id: 'a', text }];
+  const regions = parseRegions(parts);
+  assert.equal(regions.length, 1);
+  assert.equal(regions[0]!.text, body, 'archive contains complete original including the kept island');
+  const replacement = regionReference(regions[0]!, regions[0]!.sha256.slice(0, 12), '/archive/' + regions[0]!.sha256 + '.txt');
+  const projected = replaceRegions(parts, [{ region: regions[0]!, reference: replacement }]).get('a')!;
+  assert.ok(projected.includes(kept));
+  assert.ok(!projected.includes('before before'));
+  assert.ok(!projected.includes('after after'));
+  assert.ok(projected.endsWith('...\n<< Finished >>'));
+  assert.deepEqual(parseRegions([{ id: 'a', text: projected }]), [], 'replay leaves metadata and literal examples unchanged');
+  assert.deepEqual(parseRegions([{ id: 'a', text: kept }]), []);
+});
+
+test('keep islands span text parts, nest, and fail open when unclosed', () => {
+  const parts = [{ id: 'a', text: '>> Outer <<\nlong details\n→ 不折叠开始\n' },
+    { id: 'b', text: '→ 不折叠开始\n>> Example <<\nx\n<< Example end >>\n← 不折叠结束\n' },
+    { id: 'c', text: 'still kept\n← 不折叠结束\nmore details\n<< Done >>' }];
+  const regions = parseRegions(parts);
+  assert.equal(regions.length, 1);
+  const output = replaceRegions(parts, [{ region: regions[0]!, reference: '...' }]);
+  assert.equal(output.get('b'), undefined, 'a fully protected part receives no edits');
+  assert.ok(output.get('c')!.includes('still kept'));
+  assert.deepEqual(parseRegions([{ id: 'a', text: '>> Outer <<\n→ 不折叠开始\n<< Done >>' }]), []);
+});

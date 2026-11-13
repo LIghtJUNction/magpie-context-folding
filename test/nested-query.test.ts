@@ -243,42 +243,17 @@ test('restoring a shared child protects every enclosing annotation and legacy gr
   });
 });
 
-test('CLI complete views, original exports and restoration preserve nested Unicode originals', async () => {
-  await fixture(async ({ context, scope, store, directory }) => {
-    const leaf = 'exact 中文🙂\r\n'.repeat(2500);
-    const heading = 'parent context '.repeat(140);
-    const parent = heading + '\n' + block('child', leaf) + '\nparent ending';
+test('file CLI reads nested originals without modifying fold state', async () => {
+  await fixture(async ({ context, scope, store }) => {
+    const parent = block('child', 'exact 中文🙂\r\n'.repeat(2500));
     await onRequest(bodyFor('chat', block('parent', parent)), { ...context, options: { delayRequests: 0 } });
     const before = await store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
-    const view = heading + '\n' + block('child', '[[cf:v2:' + digest(leaf).slice(0, 12) + ']]') + '\nparent ending';
-    const invoke = (...args: string[]) => spawnSync(process.execPath, [new URL('../src/cli.ts', import.meta.url).pathname,
-      'read', '--state-dir', store.directory, '--scope', scope, '--id', digest(parent), ...args], { encoding: 'utf8' });
-    const complete = invoke();
-    assert.equal(complete.status, 0, complete.stderr);
-    assert.equal(complete.stdout, view, 'ordinary CLI reads return the complete view');
-    const bounded = invoke('--limit', '1200');
-    assert.equal(bounded.status, 0, bounded.stderr);
-    assert.equal(bounded.stdout, view.slice(0, 1200));
-    for (const [flags, expected] of [[['--full'], view], [['--all'], parent], [['--all', '--layer', 'view'], view],
-      [['--full', '--offset', '1400'], view.slice(1400)]] as [string[], string][]) {
-      const exported = invoke(...flags);
-      assert.equal(exported.status, 0, exported.stderr);
-      assert.equal(exported.stdout, expected);
-    }
-    const path = join(directory, 'nested-view');
-    await call({ action: 'paste', scope, id: digest(parent), path });
-    assert.equal(await readFile(path, 'utf8'), view);
-    for (const flags of [['--restore', '--limit', '1'], ['--restore', '--offset', '1'], ['--restore', '--layer', 'view']]) {
-      assert.equal(invoke(...flags).status, 1, 'restore cannot silently return a partial or derived view');
-    }
-    const queried = await store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
-    assert.deepEqual(queried.entries, before.entries);
-    assert.equal(queried.metrics.itemsRestored, 0);
-    const restored = invoke('--restore');
-    assert.equal(restored.status, 0, restored.stderr);
-    assert.equal(restored.stdout, parent, 'restoration pages the complete exact original, including child bodies and CRLF');
+    const result = spawnSync(process.execPath, [new URL('../src/cli.ts', import.meta.url).pathname,
+      'read', digest(parent), '--dir', join(store.directory, 'archive')], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, parent);
     const after = await store.transaction(scope, false, 64 * 1024 * 1024, state => structuredClone(state));
-    assert.ok(after.entries.every(entry => entry.mark.disposition === 'keep' && entry.folded === undefined));
+    assert.deepEqual(after, before);
   });
 });
 

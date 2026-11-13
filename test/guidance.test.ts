@@ -27,25 +27,24 @@ function appendUserTurn(body: Record<string, unknown>, protocol: Protocol, text:
 
 test('guidance preserves useful context and avoids folding details still in use', () => {
   const text = guidanceText(options);
-  assert.match(text, /Mandatory context-management protocol/);
-  assert.match(text, /Long reviews and reports MUST use this format/);
-  assert.match(text, /close completed stages before the next user turn/);
-  assert.match(text, /Use task-specific descriptions/);
-  assert.match(text, /Keep current constraints, failures, and active essentials outside/);
-  assert.match(text, /Keep next steps outside/);
-  assert.match(text, /Skip markers for short replies or explicitly required JSON\/code-only\/exact answers; never mark user text/);
-  assert.match(text, /never invent metadata or count tokens/);
+  assert.match(text, /Never wrap progress or tool-only work/);
+  assert.match(text, /tools are not folded/);
+  assert.match(text, /No empty blocks/);
+  assert.match(text, /keeping conclusions, constraints, failures and next steps outside/);
+  assert.match(text, /no Markdown prefixes/);
+  assert.match(text, /Skip short\/exact-format answers/);
   assert.match(text, /Read actual path only when needed/);
-  assert.deepEqual(parseRegions([{ id: 'guidance', text }]).map(region => region.text), ['...']);
+  assert.deepEqual(parseRegions([{ id: 'guidance', text }]), [], 'literal examples must not become fold candidates');
   assert.doesNotMatch(text, /--scope|grep/i, 'unscoped rules have no unavailable archive command');
-  assert.ok(Buffer.byteLength(text) <= 1200, 'persistent guidance has a bounded fixed overhead');
+  assert.ok(Buffer.byteLength(text) <= 1700, 'persistent guidance has a bounded fixed overhead');
 });
 
 test('scoped recovery guidance searches archived text before reading pages', () => {
   const scope = 'a'.repeat(64);
   const text = guidanceText({ ...options, scope, stateDirectory: '/tmp/archive state' });
-  assert.ok(text.includes(`grep --state-dir '/tmp/archive state' --scope ${scope} --id HASH --query 'TEXT'`));
-  assert.ok(text.includes(`read --state-dir '/tmp/archive state' --scope ${scope} --id HASH only if needed`));
+  assert.ok(text.includes(`search --dir '/tmp/archive state/archive' 'TEXT'`));
+  assert.ok(text.includes(`read --dir '/tmp/archive state/archive' HASH`));
+  assert.doesNotMatch(text, /--scope|--state-dir|--restore/);
 });
 
 for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
@@ -157,7 +156,7 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       request = appendUserTurn(request, protocol, 'What does operation341() return?');
       output = await onRequest(request, fastContext) as Record<string, unknown>;
       assert.equal(countGuides(output), 1, 'a source-specific follow-up receives recovery instructions on demand');
-      assert.match(JSON.stringify(output), new RegExp(`--scope ${scope}`));
+      assert.match(JSON.stringify(output), /--dir/);
       assert.doesNotMatch(JSON.stringify(output), /export function operation341\(\)/,
         'the archived source stays folded while its recovery path is exposed');
     }, protocol);
@@ -215,8 +214,8 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       assert.equal(folded(output, protocol), true);
       assert.ok(estimateTokens(large) - estimateTokens(output) >= 256);
       assert.equal(countGuides(output), 1);
-      assert.match(JSON.stringify(output), new RegExp(`--scope ${scope}`));
-      assert.match(JSON.stringify(output), /--state-dir/);
+      assert.match(JSON.stringify(output), /--dir/);
+      assert.match(JSON.stringify(output), /--dir/);
       assert.deepEqual(output.tools, large.tools);
       await onResponse({}, { ...largeContext, success: true, request: output });
       assert.equal((await store.readStats(scope)).metrics.estimatedTokenDelta,

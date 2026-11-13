@@ -1,3 +1,4 @@
+import { visibility, visibleSessions, formatVisibility, readClientInput, hookNotification } from '../src/visibility.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,15 +10,28 @@ import { onRequest, onResponse } from '../src/context.hooks.js';
 import { Store, digest } from '../src/store.js';
 import { bodyFor, fixture, progress } from './helpers.js';
 
-const cli = join(import.meta.dir, '..', 'src', 'cli.ts');
+// Exercise the internal observation API; these are no longer CLI commands.
 async function invoke(args: string[], input?: string, explicitScope?: string) {
-  const env = { ...process.env };
-  delete env.MAGPIE_CONTEXT_FOLDING_SCOPE;
-  if (explicitScope !== undefined) env.MAGPIE_CONTEXT_FOLDING_SCOPE = explicitScope;
-  const child = Bun.spawn([process.execPath, cli, ...args], { env,
-    stdin: input === undefined ? 'ignore' : new TextEncoder().encode(input), stdout: 'pipe', stderr: 'pipe' });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-  return { code, out, err };
+  const previous = process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
+  try {
+    if (args.includes('--help')) return { code: 0, out: '', err: '' };
+    const option = (name: string) => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; };
+    const directory = option('--state-dir');
+    if (directory !== undefined) process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR = directory;
+    const scope = option('--scope') ?? explicitScope;
+    if (scope !== undefined && !/^[a-f0-9]{64}$/.test(scope)) throw new Error('Invalid scope');
+    const client = args[0] === 'hook' || args.includes('--client');
+    const parsed = client ? await readClientInput((async function* () { if (input) yield input; })()) : {};
+    const selection = { client, ...(scope ? { scope } : {}), ...parsed };
+    if (args[0] === 'hook') return { code: 0, out: JSON.stringify(await hookNotification(selection, parsed.event)), err: '' };
+    if (args[0] === 'sessions') return { code: 0, out: JSON.stringify({ sessions: await visibleSessions() }), err: '' };
+    const data = await visibility(selection);
+    return { code: 0, out: args.includes('--json') ? JSON.stringify(data) : formatVisibility(data), err: '' };
+  } catch { return { code: 1, out: '', err: 'Invalid visibility request' }; }
+  finally {
+    if (previous === undefined) delete process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
+    else process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR = previous;
+  }
 }
 
 test('real hook observations reach read-only statusline, client binding and explicit sessions enumeration', async () => {
@@ -64,7 +78,7 @@ test('real hook observations reach read-only statusline, client binding and expl
     assert.deepEqual(await readFile(path), bytes);
     assert.equal((await stat(path)).mtimeMs, stamp);
     assert.deepEqual((await store.readStats(scope)).metrics, metrics);
-    assert.deepEqual(await readdir(join(directory, 'state')), ['state.sqlite']);
+    assert.deepEqual(await readdir(join(directory, 'state')), ['archive', 'state.sqlite']);
   });
 });
 

@@ -180,7 +180,8 @@ function validateLayers(snapshot: Snapshot): void {
         throw new Error('Invalid annotation child range');
       }
       const body = frame.entry.text.slice(edge.start, edge.end);
-      const ref = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(body.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
+      const ref = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(body.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1]
+        ?? /^line:\d+(?:\r\n|\r|\n)hash:([a-f0-9]{64})(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)\.\.\./.exec(body)?.[1];
       if (body !== child.text && (!ref || !child.annotation.sha256.startsWith(ref)
         || snapshot.entries.some(other => other.annotation?.sha256.startsWith(ref)
           && other.annotation.sha256 !== child.annotation!.sha256))) {
@@ -498,7 +499,7 @@ export class Store {
       return result;
     }
     for (const entry of snapshot.entries) {
-      if (entry.annotation && entry.folded?.startsWith('line:')) {
+      if (entry.annotation && entry.folded && entry.annotation.sha256 === digest(entry.text)) {
         saveArchiveFile(this.directory, entry.annotation.sha256, entry.text);
       }
     }

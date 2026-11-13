@@ -1,7 +1,7 @@
 {
   "name": "magpie-context-folding",
   "version": "0.5.4",
-  "description": "Automatic system guidance and CLI-only recovery for reversible Magpie context folding",
+  "description": "Reversible Magpie text folding with literal keep regions and a minimal archive-folder CLI",
   "type": "module",
   "main": "./src/index.ts",
   "exports": {
@@ -19,7 +19,8 @@
     "dist",
     "README.md",
     "docs",
-    "LICENSE"
+    "LICENSE",
+    ".agents/skills/context-folding"
   ],
   "repository": {
     "type": "git",

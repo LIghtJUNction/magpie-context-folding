@@ -1,3 +1,4 @@
+import { execute } from '../../src/tool.js';
 /** One isolated Harbor trial -> the real Magpie hooks, over JSON Lines.
  *
  * The Python agent owns the original transcript and sandbox tools. This process
@@ -158,24 +159,23 @@ export class FoldingBridge {
           'scope_mismatch', 'Recovery is restricted to this trial archive directory');
         } else confined.push(argument);
       }
-      // This is the installed CLI contract over the existing shell tool, not a
-      // model-visible recovery tool. Never pass model text to a host shell.
+      // Benchmark bookkeeping is internal; the public CLI only manages files.
+      if (argv[0] === 'status') {
+        if (confined.length !== 1) return { exit_code: 1, stdout: '', stderr: 'Invalid command options' };
+        const status = JSON.parse(await execute({ action: 'status', scope: this.scope }));
+        return { exit_code: 0, stdout: JSON.stringify({ ...status, metrics: (await statistics(this.scope)).metrics }), stderr: '' };
+      }
+      requireCondition(argv[0] === 'read', 'unsupported_action', 'Use read for benchmark recovery');
+      const idIndex = confined.indexOf('--id');
+      const id = idIndex >= 0 ? confined[idIndex + 1] : undefined;
+      requireCondition(typeof id === 'string' && /^[a-f0-9]{12,64}$/.test(id), 'invalid_request', 'Expected a content hash');
       const child = Bun.spawn([process.execPath, fileURLToPath(new URL('../../src/cli.ts', import.meta.url)),
-        ...confined, '--scope', this.scope], { cwd: this.cwd, env: process.env,
-        stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+        'read', id, '--dir', resolve(process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR!, 'archive')], {
+        cwd: this.cwd, env: process.env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
       ]);
-      let output = stdout;
-      if (argv[0] === 'status' && exitCode === 0) {
-        // Agent status is compact; benchmark validation still needs the actual
-        // completion counters. Enrich only this private CLI bridge response.
-        let status: unknown;
-        try { status = JSON.parse(stdout); } catch { /* --help remains ordinary text. */ }
-        if (record(status) && typeof status.entries === 'number' && !('error' in status)) {
-          output = JSON.stringify({ ...status, metrics: (await statistics(this.scope)).metrics }) + '\n';
-        }
-      }
+      const output = exitCode === 0 ? JSON.stringify({ text: stdout }) : stdout;
       return { exit_code: exitCode, stdout: output, stderr };
     }
     if (input.op === 'close') {
