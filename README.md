@@ -23,7 +23,7 @@
 在已安装 Magpie 的环境中执行：
 
 ```bash
-magpie plugin add npm:magpie-context-folding@0.6.1
+magpie plugin add npm:magpie-context-folding@0.6.2
 ```
 
 确保 Agent 的模型请求经过已加载此插件的 Magpie。折叠不依赖工具名、命名空间或 shell 声明；原文先保存到归档，再提供绝对路径和 CLI 恢复信息。当前请求没有读取工具时，可稍后通过宿主文件工具或本地 CLI 恢复。保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。开发版安装见[安装](#安装)。
@@ -64,9 +64,13 @@ $context-folding 请审查这个项目的代码，按阶段折叠已完成的排
 ```
 ← 不折叠结束
 
-闭合且达到净节省门槛后，插件先按哈希文件名保存完整原文，再把可折叠部分显示为 `...`；箭头保留区原样留在中间。折叠元数据提供真实 `path` 和 `hash`，可直接读文件。保留区内的示例标记不再被解释为折叠指令；保留区可嵌套。普通工具结果不会因为位于标记之间就一并折叠。
+标记闭合后，插件先按哈希文件名保存完整原文，再把可折叠部分显示为 `...`；箭头保留区原样留在中间。折叠元数据提供真实 `path` 和 `hash`，可直接读文件。保留区内的示例标记不再被解释为折叠指令；保留区可嵌套。普通工具结果不会因为位于标记之间就一并折叠。
 
-仅看到起止标记不代表已经折叠；未闭合、过短、无净收益或归档失败时保留原文。新语法和目录 CLI 属于当前 Magpie 插件；独立 Python `ctxf` 的接口另见下文。
+仅看到起止标记不代表已经折叠；未闭合、错配或归档失败时保留原文；已闭合的有效标记不受长度或净收益门槛限制。新语法和目录 CLI 属于当前 Magpie 插件；独立 Python `ctxf` 的接口另见下文。
+
+## 0.6.2：闭合标记直接折叠
+
+有效标记闭合并成功归档后直接折叠，取消单块 token 门槛与整批净收益检查。旧 `min_savings_tokens` / `minSavingsTokens` 配置兼容保留但不再影响折叠。已有归档复用时同步文件和目录；配额拒绝、版本冲突或提交失败不会发布未提交的原文。详见 [发布说明](docs/release-0.6.2.md)。
 
 ## 0.6.0：局部保留与极简目录 CLI
 
@@ -83,7 +87,7 @@ Agent 写出阶段结论
       ↓
 插件先把原文持久化
       ↓
-闭合并达到净节省门槛
+标记闭合，直接折叠
       ↓
 把正文替换成 ...，箭头保留区保持原样
       ↓
@@ -99,7 +103,7 @@ Agent 写出阶段结论
 <!-- @context-fold end route-analysis-details -->
 ```
 
-默认首次完整观察到闭合标记并达到净节省门槛时，正文即被折叠；可配置请求周期延迟。兼容的旧标记示例：
+默认首次完整观察到有效闭合标记时，正文即被折叠；可配置请求周期延迟。兼容的旧标记示例：
 
 ```text
 <!-- @context-fold begin route-analysis-details -->
@@ -107,7 +111,7 @@ Agent 写出阶段结论
 <!-- @context-fold end route-analysis-details -->
 ```
 
-插件不猜哪些内容“不重要”。未标记、未闭合、错配或节省量不足的内容保持原样。
+插件不猜哪些内容“不重要”。未标记、未闭合或错配的内容保持原样；已闭合的有效标记直接折叠。
 
 ## 它解决什么问题
 
@@ -128,7 +132,7 @@ Agent 写出阶段结论
 
 `>> 开始缘由 <<` 打开，`<< 结束结果 >>` 关闭；两端文案可以不同，折叠时原样保留。中间正文变为 `line`、`hash`、`tokens`（估算）、`tokens_method`、`path` 和恢复引用。`path` 为规范绝对路径，指向 `archive/<完整 SHA-256>.txt`，任何 Agent 或工具均可直接读取精确 UTF-8 原文。
 
-支持嵌套、跨 Assistant 文本、用户边界和重复投影；未闭合、过短或无净收益区域保持原文。先原子保存文件并校验内容，再发布折叠视图。Magpie 插件与独立 `ctxf` 使用同一约定，原有源码注释标记继续兼容。安装和验证见[发布说明](docs/release-0.5.3.md)。
+支持嵌套、跨 Assistant 文本、用户边界和重复投影；未闭合或错配区域保持原文；有效闭合标记不受净收益门槛限制。先原子保存文件并校验内容，再发布折叠视图。Magpie 插件与独立 `ctxf` 使用同一约定，原有源码注释标记继续兼容。安装和验证见[发布说明](docs/release-0.5.3.md)。
 
 ## 0.5.2 的可验证变化
 
@@ -147,7 +151,7 @@ Agent 写出阶段结论
 ### Magpie 插件
 
 ```bash
-magpie plugin add npm:magpie-context-folding@0.6.1
+magpie plugin add npm:magpie-context-folding@0.6.2
 ```
 
 保留已有归档，不要同时加载 npm 包和同一插件的本地源码副本。
@@ -244,7 +248,7 @@ enabled = true
 observe_only = false
 delay_requests = 0
 max_session_bytes = 67108864
-min_savings_tokens = 256
+# min_savings_tokens 已兼容保留，不再作为折叠条件
 
 [magpie]
 # shell_tool_name 已兼容保留，不再作为折叠前置条件
@@ -252,7 +256,7 @@ min_savings_tokens = 256
 # gateway_timeout_ms = 3000
 ```
 
-`delay_requests = 1` 表示留出一次完整观察机会；`min_savings_tokens` 是估算净节省门槛；`max_session_bytes` 是归档容量上限，不是自动折叠阈值。
+`delay_requests = 1` 表示留出一次完整观察机会；`min_savings_tokens` / `minSavingsTokens` 仅兼容旧配置，不再影响折叠；`max_session_bytes` 是归档容量上限，不是自动折叠阈值。
 
 任何存档失败、容量不足、并发冲突或恢复入口不明确的情况都应保留原文。
 

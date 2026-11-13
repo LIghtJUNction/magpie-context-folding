@@ -196,17 +196,17 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
     assert.deepEqual(appendGuidance(fast, protocol, options), fast);
   });
 
-  test(`${protocol}: short demo notes stay readable, long blocks repay all injected metadata`, async () => {
+  test(`${protocol}: short and long closed notes fold while size statistics remain accurate`, async () => {
     await fixture(async ({ context, store, scope }) => {
       const short = bodyFor(protocol, marked('临时体验笔记：保存过程，需要时再读回原文。'));
       const shortOutput = await onRequest(short, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-      assert.equal(folded(shortOutput, protocol), false);
+      assert.equal(folded(shortOutput, protocol), true);
       assert.equal(countGuides(shortOutput), 1, 'short requests still carry the proactive rule');
-      assert.deepEqual(withoutGuidance(shortOutput, protocol), short);
+      assert.notDeepEqual(withoutGuidance(shortOutput, protocol), short);
       assert.doesNotMatch(JSON.stringify(shortOutput), /<context-budget|--scope/);
       const snapshot = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
-      assert.equal(snapshot.entries.length, 0);
-      assert.equal(snapshot.metrics.itemsFolded, 0);
+      assert.equal(snapshot.entries.length, 1);
+      assert.equal(snapshot.metrics.itemsFolded, 1);
 
       const large = bodyFor(protocol, marked('Completed findings with exact evidence.\n'.repeat(500)));
       const largeContext = { ...context, options: { delayRequests: 0 }, state: {} };
@@ -281,17 +281,18 @@ test('unsafe command line shapes fail open; shell quoting preserves literal path
   });
 });
 
-test('a zero savings floor still rejects a batch that cannot cover its actual CLI guidance', async () => {
+test('recovery guidance overhead never vetoes a closed block', async () => {
   await fixture(async ({ context, scope, store }) => {
     const input = bodyFor('chat', marked('x'.repeat(1500)));
     const output = await onRequest(input, { ...context, options: { delayRequests: 0, minSavingsTokens: 0,
       recoveryCommand: 'command-' + 'x'.repeat(3000) } }) as Record<string, unknown>;
-    assert.deepEqual(withoutGuidance(output, 'chat'), input);
+    assert.ok(folded(output, 'chat'));
     const snapshot = await store.transaction(scope, false, 64 * 1024 * 1024, snapshot => snapshot);
-    assert.equal(snapshot.entries.length, 0);
-    assert.equal(snapshot.metrics.itemsFolded, 0);
-    assert.equal(snapshot.decision.reason, 'insufficient-net-savings');
-    assert.equal(snapshot.decision.foldedRegions, 0);
+    assert.equal(snapshot.entries.length, 1);
+    assert.equal(snapshot.entries[0]!.text, 'x'.repeat(1500));
+    assert.equal(snapshot.metrics.itemsFolded, 1);
+    assert.equal(snapshot.decision.reason, 'annotated-regions-folded');
+    assert.equal(snapshot.decision.foldedRegions, 1);
   });
 });
 

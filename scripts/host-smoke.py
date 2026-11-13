@@ -141,6 +141,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
     write_json(config / "magpie" / "plugins.json", {"plugins": [{
         "spec": str(project), "options": {
             "enabled": True, "delayRequests": 1, "maxSessionBytes": 64 * 1024 * 1024,
+            "minSavingsTokens": 9007199254740991,
         },
     }]})
     write_json(cache / "magpie" / "models.json", {"fake": {"id": "fake", "name": "Synthetic", "models": {
@@ -243,6 +244,16 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert send(literal, "literal-example") == literal
             assert send(advance(literal, "Another turn."), "literal-example") == advance(literal, "Another turn.")
             assert body == before, "caller history mutated"
+            tiny = copy.deepcopy(body)
+            tiny["messages"][1]["content"] = ">> Small closed note <<\nx\n<< Verified >>"
+            assert send(tiny, "tiny-closed-note") == tiny, "configured grace must still apply"
+            tiny_output = send(advance(tiny, "Next request."), "tiny-closed-note")
+            tiny_text = tiny_output["messages"][1]["content"]
+            assert "\n...\n<< Verified >>" in tiny_text, "tiny closed note was rejected by a size gate"
+            tiny_path = Path(re.search(r"^path:(.+)$", tiny_text, re.MULTILINE)[1])
+            assert tiny_path.read_text(encoding="utf-8") == "x"
+            assert cli("read", sha256("x")) == "x"
+            assert send(tiny_output, "tiny-closed-note") == tiny_output
             preview = json.loads(cli("clean", sha256(original)))
             assert not preview["applied"] and path.exists()
             removed = json.loads(cli("clean", sha256(original), "--apply"))
@@ -253,7 +264,8 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
                 "checks": ["folding independent of shell tool names", "grace and identical retry", "dots projection", "literal islands",
                            "full original SHA-256 file", "built CLI read/stats/list/search/clean",
-                           "projection replay", "protected examples", "caller history unchanged"],
+                           "projection replay", "protected examples", "caller history unchanged",
+                           "tiny closed note ignores legacy token threshold"],
             }))
     except BaseException:
         if log_path.exists():

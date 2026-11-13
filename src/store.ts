@@ -1,6 +1,7 @@
 import { saveArchiveFile } from './archive-file.js';
 import { Database } from 'bun:sqlite';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { unlinkSync } from 'node:fs';
 import { chmod, mkdir, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -498,11 +499,6 @@ export class Store {
       });
       return result;
     }
-    for (const entry of snapshot.entries) {
-      if (entry.annotation && entry.folded && entry.annotation.sha256 === digest(entry.text)) {
-        saveArchiveFile(this.directory, entry.annotation.sha256, entry.text);
-      }
-    }
     const { stored, blobs } = encode(snapshot);
     const serialized = serializeSnapshot({ ...stored, payloadBytes, sessionLimitBytes });
     const metricsDelta = metricsDifference(previousMetrics, snapshot.metrics);
@@ -511,6 +507,7 @@ export class Store {
     await this.database((database) => {
       signal?.throwIfAborted();
       database.exec('BEGIN IMMEDIATE');
+      const createdArchives = new Set<string>();
       try {
         const current: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
         const revision = current === null ? 0 : sessionRowSchema.parse(current).revision;
@@ -538,10 +535,21 @@ export class Store {
           + COALESCE((SELECT SUM(length(CAST(snapshot AS BLOB))) FROM sessions), 0)
           + COALESCE((SELECT SUM(length(CAST(value AS BLOB))) FROM meta), 0) AS value`).get()).value;
         if (total > this.maxTotalBytes) throw new Error('Global archive full; original request retained');
+        // Publish while holding the writer lock, after quota/conflict checks.
+        // A failed commit may remove only files this transaction created.
+        for (const entry of snapshot.entries) {
+          if (entry.annotation && entry.folded && entry.annotation.sha256 === digest(entry.text)) {
+            saveArchiveFile(this.directory, entry.annotation.sha256, entry.text, createdArchives);
+          }
+        }
         signal?.throwIfAborted();
         database.exec('COMMIT');
       } catch (error) {
-        if (database.inTransaction) database.exec('ROLLBACK');
+        try {
+          for (const path of createdArchives) unlinkSync(path);
+        } finally {
+          if (database.inTransaction) database.exec('ROLLBACK');
+        }
         throw error;
       }
     });

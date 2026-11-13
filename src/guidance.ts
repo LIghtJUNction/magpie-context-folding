@@ -114,17 +114,17 @@ export function guidanceText(options: GuidanceOptions): string {
     || (options.scope !== undefined && !/^[a-f0-9]{64}$/.test(options.scope))) {
     throw new Error('Unsupported CLI recovery path');
   }
-  const rule = `Fold long assistant evidence/explanations, keeping conclusions, constraints, failures and next steps outside. Never wrap progress or tool-only work: tools are not folded. No empty blocks, copied logs or filler. Use exact whole-line delimiters, no Markdown prefixes. Close when the text ends. Skip short/exact-format answers; never expose private reasoning. Plugin generates metadata; markers alone prove no saving. Read actual path only when needed. Arrow keep blocks stay literal inside outer folds. Example (shortened):
+  const rule = `Fold long evidence, keeping conclusions, constraints, failures and next steps outside. Closed markers fold directly without a savings threshold. Never wrap progress or tool-only work: tools are not folded. No empty blocks, logs or filler. Use whole-line delimiters, no Markdown prefixes or split > >. Keep evidence open across related tool calls until verified; never close short preambles or reopen per call. Skip short/exact-format answers; never expose private reasoning. Markers prove no saving. Read actual path only when needed. Arrow keep blocks are literal. Example (shortened):
 → 不折叠开始
-Finding: retry can charge twice.
+Finding: retry charges twice.
 >> Evidence for duplicate charging <<
-Both attempts use the same ID. The first debit commits before the connection drops. Retry calls debit() again without a completed-request check.
+The first debit commits. Retry repeats it with the same ID and no completion check.
 → 不折叠开始
-Keep visible: request_id=42; regression test still pending.
+Keep: request_id=42; test pending.
 ← 不折叠结束
-Further detailed evidence goes here.
+Both debits appear in the ledger.
 << Same request debited twice >>
-Next: add deduplication and test.
+Next: deduplicate and test.
 ← 不折叠结束`;
   const archiveDirectory = options.stateDirectory ? ` --dir ${shellQuote(resolve(options.stateDirectory, 'archive'))}` : '';
   const recall = options.scope

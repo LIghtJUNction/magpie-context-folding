@@ -12,9 +12,20 @@ export function archivePath(directory: string, hash: string): string {
   return path;
 }
 
-export function saveArchiveFile(directory: string, hash: string, text: string): string {
+export function saveArchiveFile(directory: string, hash: string, text: string, created?: Set<string>): string {
   if (createHash('sha256').update(text, 'utf8').digest('hex') !== hash) throw new Error('Archive hash mismatch');
   const path = archivePath(directory, hash);
+  const verify = (): void => {
+    const existing = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      if (!readFileSync(existing).equals(Buffer.from(text, 'utf8'))) throw new Error('Archive file content mismatch');
+      fsyncSync(existing);
+    } finally { closeSync(existing); }
+    const parent = openSync(resolve(path, '..'), 'r');
+    try { fsyncSync(parent); } finally { closeSync(parent); }
+  };
+  try { verify(); return path; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const temporary = `${path}.${randomUUID()}.tmp`;
   const fd = openSync(temporary, 'wx', 0o600);
   try {
@@ -22,15 +33,9 @@ export function saveArchiveFile(directory: string, hash: string, text: string): 
       writeFileSync(fd, text, 'utf8');
       fsyncSync(fd);
     } finally { closeSync(fd); }
-    try { linkSync(temporary, path); }
+    try { linkSync(temporary, path); created?.add(path); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
-    const existing = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      if (!readFileSync(existing).equals(Buffer.from(text, 'utf8'))) throw new Error('Archive file content mismatch');
-      fsyncSync(existing);
-    } finally { closeSync(existing); }
-    const parent = openSync(resolve(path, '..'), 'r');
-    try { fsyncSync(parent); } finally { closeSync(parent); }
+    verify();
   } finally { unlinkSync(temporary); }
   return path;
 }
