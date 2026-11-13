@@ -67,34 +67,6 @@ def write_json(path: Path, value: object) -> None:
     path.chmod(0o600)
 
 
-def source_provenance() -> dict:
-    paths = [PROJECT / "package.json"]
-    paths.extend(path for path in (PROJECT / "src").rglob("*.ts") if path.is_file())
-    paths.extend(path for path in (PROJECT / "dist").rglob("*.js") if path.is_file())
-    checksums = {
-        path.relative_to(PROJECT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted(set(paths))
-    }
-    revision = subprocess.run(
-        ["git", "-C", str(PROJECT), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True, timeout=10,
-    ).stdout.strip()
-    status = subprocess.run(
-        [
-            "git", "-C", str(PROJECT), "status", "--porcelain", "--",
-            "src", "dist", "package.json",
-        ],
-        capture_output=True, text=True, check=True, timeout=10,
-    ).stdout
-    serialized = json.dumps(checksums, sort_keys=True, separators=(",", ":")).encode()
-    return {
-        "git_head": revision,
-        "plugin_worktree_modified": bool(status),
-        "files_sha256": checksums,
-        "aggregate_sha256": hashlib.sha256(serialized).hexdigest(),
-    }
-
-
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -472,7 +444,6 @@ def main() -> None:
         "benchmark": "isolated-magpie-host-provider-unrelated-followup",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "model_requested": MODEL,
-        "source_provenance": source_provenance(),
         "route": "real provider forwarded by local fixture through isolated Magpie/Bun hosts",
         "provider_address_recorded": False,
         "claim_under_test": "Compare provider-reported input usage for the same completed-Read history and unrelated follow-up with observe-only versus source folding through Magpie/Bun host dispatch.",

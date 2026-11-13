@@ -2,27 +2,41 @@ import { archivePath } from './archive-file.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { ConfigError, loadOptions } from './config.js';
-import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, guidanceText } from './guidance.js';
+import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, guidanceText, shellQuote } from './guidance.js';
 import { cleanRequestBody } from './request-clean.js';
-import { containsRegion, outermost, parseRegions, regionReference, replaceRegions, shortHash, type Region } from './annotations.js';
+import { containsRegion, outermost, parseRegions, regionReference, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, createJsonMeasurementCache, emptyMetrics, metricsSchema, type Metrics } from './metrics.js';
 import { extractSpans, projectExtractedSpans, recoveryShellName, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
+import { focusedSourceExcerpt, renderFocusedSourceExcerpt } from './source-excerpt.js';
 
 type Body = Record<string, unknown>;
 const record = (value: unknown): value is Body => !!value && typeof value === 'object' && !Array.isArray(value);
 const stateSchema = z.custom<Body>(record);
 const pendingKey = 'contextFoldingStatistics';
+const hookReportCodeSchema = z.enum(['ready', 'empty', 'unbound', 'unauthorized', 'unavailable', 'invalid', 'skipped']);
+type HookReportCode = z.infer<typeof hookReportCodeSchema>;
+
+function reportHook(context: unknown, code: HookReportCode, bytes?: number): void {
+  if (!record(context) || typeof context.report !== 'function') return;
+  try {
+    if (bytes === undefined) context.report.call(context, code);
+    else context.report.call(context, code, bytes);
+  } catch {
+    // Host diagnostics must never change whether the request proceeds.
+  }
+}
+
 const pendingSchema = z.object({
   scope: z.string().regex(/^[a-f0-9]{64}$/), bodyHash: z.string(), protocol: z.enum(['chat', 'responses', 'anthropic', 'gemini']).optional(), folded: z.boolean(),
   observeOnly: z.boolean().default(false), successDelta: metricsSchema,
   requestId: z.string().uuid(),
 });
 const contextSchema = z.object({
-  protocol: z.enum(['chat', 'responses', 'anthropic', 'gemini']), model: z.string(), session: z.string().min(1),
+  protocol: z.enum(['chat', 'responses', 'anthropic', 'gemini']), model: z.string(), session: z.string().default(''),
   origin: z.string().optional(), agent: z.string().optional(), cwd: z.string().optional(), options: z.unknown().optional(),
-  signal: z.instanceof(AbortSignal).optional(), state: stateSchema.optional(),
+  signal: z.instanceof(AbortSignal).optional(), state: stateSchema.optional(), report: z.unknown().optional(),
 });
 
 function fingerprint(value: unknown): string {
@@ -217,11 +231,25 @@ const sourceChineseCue = /源码|源文件|代码片段|标识符|函数(?:名|�
 
 function focusedSourceIdentifier(question: string, text: string): string | undefined {
   const sourceIdentifiers = new Set((text.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []).map(value => value.toLowerCase()));
-  for (const match of question.matchAll(/`([^`]+)`|([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) {
-    const value = (match[1] ?? match[2] ?? '').trim();
-    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value) && sourceIdentifiers.has(value.toLowerCase())) return value;
+  const calls = new Map<string, string>();
+  for (const match of question.matchAll(/([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) {
+    const value = match[1]!;
+    if (sourceIdentifiers.has(value.toLowerCase())) calls.set(value.toLowerCase(), value);
   }
-  return undefined;
+  const quoted = new Map<string, string>();
+  for (const match of question.matchAll(/`([^`]+)`/g)) {
+    const value = match[1]!.trim();
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value) && sourceIdentifiers.has(value.toLowerCase())) {
+      quoted.set(value.toLowerCase(), value);
+    }
+  }
+  if (calls.size > 1 || quoted.size > 1) return undefined;
+  if (calls.size === 1) {
+    const [callName] = calls.keys();
+    if (quoted.size && !quoted.has(callName!)) return undefined;
+    return [...calls.values()][0];
+  }
+  return quoted.size === 1 ? [...quoted.values()][0] : undefined;
 }
 
 function refersToSource(question: string, source: NonNullable<Span['source']>, text: string): boolean {
@@ -246,9 +274,9 @@ function refersToSource(question: string, source: NonNullable<Span['source']>, t
     && questionIdentifiers.has(identifier.toLowerCase()));
 }
 
-interface Candidate { region: Region; occurrence: string; role: 'assistant' | 'tool'; sourceRanges: NonNullable<NonNullable<Entry['annotation']>['observedRanges']> }
+interface Candidate { region: Region; occurrence: string; role: 'assistant' | 'tool'; sourceRanges: NonNullable<NonNullable<Entry['annotation']>['observedRanges']>; retainedExcerpt?: string }
 
-function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntries: readonly Entry[]): Candidate[] {
+function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntries: readonly Entry[], delayRequests: number): Candidate[] {
   // @context-fold begin candidates-9c5f930e91
   const result: Candidate[] = [];
   let conversation: Span[] = [];
@@ -271,6 +299,10 @@ function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntri
     }
   };
   const history = protocol === 'responses' ? body.input : protocol === 'gemini' ? body.contents : body.messages;
+  const latestQuestion = [...spans].reverse().find(span => span.role === 'user')?.text ?? '';
+  const assistantRole = protocol === 'gemini' ? 'model' : 'assistant';
+  const alreadyExposed = (messageIndex: number) => Array.isArray(history) && history.slice(messageIndex + 1)
+    .some(item => record(item) && item.role === assistantRole);
   const userBoundaries: number[] = [];
   if (Array.isArray(history)) history.forEach((item: unknown, index) => {
     if (!record(item) || item.role !== 'user') return;
@@ -338,6 +370,20 @@ function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntri
         // Re-evaluate the current turn: keep source while it is needed, then fold
         // it after that turn is answered and a later question is unrelated.
         const eligibleText = span.text.length > 0 && !/@context-fold|\[\[cf:/.test(span.text);
+        if (eligibleText && delayRequests === 0 && !alreadyExposed(span.messageIndex)
+          && !completeSourceReads.get(span.source.path)?.has(span.text)
+          && !completeSourceReferences.get(span.source.path)?.size) {
+          const identifier = focusedSourceIdentifier(latestQuestion, span.text);
+          const excerpt = identifier ? focusedSourceExcerpt(span.text, span.source.path, identifier) : undefined;
+          if (excerpt) {
+            const region: Region = { label: 'focused-source-read', text: span.text, sha256: digest(span.text),
+              slices: [{ id: span.id, start: 0, end: span.text.length }],
+              origin: { id: span.id, ordinal: 0, path: [] }, children: [], hasReferences: false };
+            result.push({ region, role: 'tool', retainedExcerpt: `[Focused function, source lines ${excerpt.startLine}-${excerpt.endLine}; full file archived. Search archive for referenced names not shown.]\n${renderFocusedSourceExcerpt(excerpt)}`,
+              sourceRanges: [{ sourceId: span.id, sourceHash: region.sha256, start: 0, end: span.text.length, offsetUnit: 'utf16' }],
+              occurrence: fingerprint([region.sha256, region.label, occurrenceIdentity(body, span), span.source]) });
+          }
+        }
         if (eligibleText && completedRead(span)) {
           const sourceHash = digest(span.text);
           const region: Region = { label: 'completed-source-read', text: span.text, sha256: sourceHash,
@@ -347,7 +393,7 @@ function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntri
             sourceRanges: [{ sourceId: span.id, sourceHash, start: 0, end: span.text.length, offsetUnit: 'utf16' }],
             occurrence: fingerprint([sourceHash, region.label, occurrenceIdentity(body, span), span.source]) });
         }
-        const referenceMatch = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(span.text);
+        const referenceMatch = /^\[\[cf:v2:([a-f0-9]{12,64})\]\](?:\r?\n|$)/.exec(span.text);
         if (referenceMatch) {
           const matches = archivedEntries.filter(entry => entry.annotation?.sha256.startsWith(referenceMatch[1]!));
           const first = matches[0];
@@ -387,15 +433,30 @@ function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntri
 export async function onRequest(input: unknown, context: unknown): Promise<unknown> {
   // @context-fold begin onRequest-d395c56e62
   const parsed = contextSchema.safeParse(context);
-  if (!record(input) || !parsed.success) return input;
+  if (!record(input) || !parsed.success) {
+    reportHook(context, 'invalid');
+    return input;
+  }
   const ctx = parsed.data;
   if (ctx.state) delete ctx.state[pendingKey];
+  if (!ctx.session) {
+    reportHook(context, 'unbound');
+    return input;
+  }
+  let outcome: HookReportCode = 'empty';
+  let reportedBytes: number | undefined;
   try {
     ctx.signal?.throwIfAborted();
     const options = await loadOptions(ctx.options, ctx.cwd);
-    if (!options.enabled) return input;
+    if (!options.enabled) {
+      reportHook(context, 'skipped');
+      return input;
+    }
     if (options.observeOnly) {
-      if (!ctx.state) return input;
+      if (!ctx.state) {
+        reportHook(context, 'skipped');
+        return input;
+      }
       const store = new Store();
       const scope = await store.scopeFor(JSON.stringify([ctx.session, ctx.origin ?? '', ctx.agent ?? '', ctx.cwd ?? '']));
       const requestId = randomUUID();
@@ -407,16 +468,27 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       }, ctx.signal, 'preserve');
       ctx.state[pendingKey] = { scope, requestId, bodyHash: fingerprint(input), protocol: ctx.protocol, folded: false,
         observeOnly: true, successDelta: emptyMetrics() };
+      reportHook(context, 'skipped', requestBytes);
       return input;
     }
     const hadGuidance = containsGuidance(input, ctx.protocol);
     const measureRequest = createJsonMeasurementCache();
     const body = cleanRequestBody(input, ctx.protocol);
     const spans = extractSpans(body, ctx.protocol);
-    if (!spans.length || spans.some(span => span.protectedReason)) return input;
+    if (!spans.length) {
+      reportHook(context, 'empty');
+      return input;
+    }
+    if (spans.some(span => span.protectedReason)) {
+      reportHook(context, 'skipped');
+      return input;
+    }
     // Recovery uses the host's existing shell, never a registered plugin tool.
     // A shell-less request must retain its input, including all original text.
-    if (!recoveryShellName(body, ctx.protocol, options.shellToolName)) return input;
+    if (!recoveryShellName(body, ctx.protocol, options.shellToolName)) {
+      reportHook(context, 'skipped');
+      return input;
+    }
     const store = new Store();
     const command = options.recoveryCommand ?? defaultRecoveryCommand();
     const decorate = (value: Body, scope?: string): Body => {
@@ -441,10 +513,9 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const cycle = snapshot.requestHash === undefined || snapshot.requestHash === requestHash || snapshot.projectedHash === requestHash
         ? previousCycle : previousCycle + 1;
       snapshot.cycle = cycle;
-      const guidance = snapshot.guidance ?? { noFoldPrompts: 0, nextCycle: 0 };
       if (requestHash !== snapshot.projectedHash) snapshot.requestHash = requestHash;
       const byHash = new Map(snapshot.entries.filter(entry => entry.annotation).map(entry => [entry.annotation!.sha256, entry]));
-      const found = candidates(body, spans, ctx.protocol, snapshot.entries);
+      const found = candidates(body, spans, ctx.protocol, snapshot.entries, options.delayRequests);
       const candidateByRegion = new Map(found.map(item => [item.region, item]));
       const resolved = new Map<Region, Entry>();
       const valid = new Map<Region, boolean>();
@@ -481,56 +552,70 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         const previous = byHash.get(candidate.region.sha256)?.occurrences?.[candidate.occurrence];
         const observed = previous && previous.lastSeen >= previousCycle
           ? { ...previous, lastSeen: cycle } : { firstSeen: cycle, lastSeen: cycle, folded: false };
-        return [candidate.region, { ...candidate, observed, reference: refFor(candidate.region) }] as const;
+        const reference = refFor(candidate.region);
+        const recoveryArgs = ` --state-dir ${shellQuote(store.directory)} --scope ${scope} --id ${reference.slice(8, -2)}`;
+        const localRecovery = candidate.retainedExcerpt
+          ? `\nNeed source: ${command} grep${recoveryArgs} --query 'TEXT'; use read${recoveryArgs} only if needed.` : '';
+        return [candidate.region, { ...candidate, observed, reference,
+          replacement: candidate.retainedExcerpt ? `${reference}\n${candidate.retainedExcerpt}${localRecovery}` : reference }] as const;
       }));
-      const proposed: { region: Region; reference: string }[] = [];
+      const proposed: { region: Region; reference: string; replacement: string; retainedExcerpt?: string }[] = [];
       const waitingRegions: Region[] = [];
       let waiting = 0;
       let skipped = 0;
       for (const candidate of observations.values()) {
-        const { region, observed, reference: ref } = candidate;
+        const { region, observed, reference: ref, replacement } = candidate;
         if (!valid.get(region) || region.referenceHash || kept(region)) continue;
         const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
           spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
-        const after = region.slices.length * Buffer.byteLength(JSON.stringify(ref));
+        const after = region.slices.length * Buffer.byteLength(JSON.stringify(replacement));
         if (after >= before || Math.floor((before - after) / 4) < options.minSavingsTokens) { skipped++; continue; }
         if (cycle - observed.firstSeen < options.delayRequests) { waiting++; waitingRegions.push(region); continue; }
-        proposed.push({ region, reference: ref });
+        proposed.push({ region, reference: ref, replacement,
+          ...(candidate.retainedExcerpt ? { retainedExcerpt: candidate.retainedExcerpt } : {}) });
       }
       // Parent/child ranges overlap. Price the actual outermost projection,
       // including all system guidance and recovery paths, before storing it.
       let selected = outermost(proposed);
-      const existingReferenceMatches = spans.filter(span => span.role === 'assistant' || span.source).flatMap(span =>
-        [...span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)].flatMap(match => {
+      const existingReferenceMatches: Array<{ match: RegExpMatchArray; entry: Entry; source?: Span['source'] }> = [];
+      for (const span of spans) {
+        if (span.role !== 'assistant' && !span.source) continue;
+        for (const match of span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)) {
           const matches = [...byHash.values()].filter(entry => entry.annotation!.sha256.startsWith(match[1]!));
-          return matches.length === 1 ? [{ match, entry: matches[0]!, ...(span.source ? { source: span.source } : {}) }] : [];
-        }));
+          if (matches.length === 1) existingReferenceMatches.push({ match, entry: matches[0]!,
+            ...(span.source ? { source: span.source } : {}) });
+        }
+      }
       const existingReferences = existingReferenceMatches.map(item => item.match);
       const latestUserText = [...spans].reverse().find(span => span.role === 'user')?.text ?? '';
       const recoveryRelevant = !!latestUserText.trim() && existingReferenceMatches.some(({ entry, source }) =>
         refersToSource(latestUserText, source ?? { path: entry.annotation!.label, range: '' }, entry.text));
+      const guidance = snapshot.guidance ?? { noFoldPrompts: 0, nextCycle: 0 };
+      const focusedInlineRecovery = !hadGuidance && selected.length > 0 && existingReferences.length === 0
+        && !recoveryRelevant && selected.every(item => !!item.retainedExcerpt);
       const replayingProjection = hadGuidance && snapshot.projectedHash === requestHash && selected.length === 0;
-      const guidanceDue = guidanceEligible && (guidance.noFoldPrompts < 2 || cycle >= guidance.nextCycle);
+      const guidanceDue = !focusedInlineRecovery && guidanceEligible
+        && (guidance.noFoldPrompts < 2 || cycle >= guidance.nextCycle);
       const guideOnlyResult = guidanceDue ? decorate(body) : body;
-      let injectGuidance = replayingProjection || selected.length > 0 || recoveryRelevant || guidanceDue;
-      let includeRecoveryCommand = replayingProjection || selected.length > 0 || recoveryRelevant;
       let hasFolded = selected.length > 0 || existingReferences.length > 0;
+      let injectGuidance = replayingProjection || selected.length > 0 && !focusedInlineRecovery || recoveryRelevant || guidanceDue;
+      let includeRecoveryCommand = replayingProjection || selected.length > 0 && !focusedInlineRecovery || recoveryRelevant;
       let projected = selected.length > 0
-        ? projectExtractedSpans(body, replaceRegions(spans, selected), ctx.protocol, spans) : body;
+        ? projectExtractedSpans(body, replaceRegions(spans, selected.map(item => ({ region: item.region, reference: item.replacement }))), ctx.protocol, spans) : body;
       let result = replayingProjection ? input : hasFolded
         ? (injectGuidance ? decorate(projected, includeRecoveryCommand ? scope : undefined) : projected)
-        : guidanceDue ? guideOnlyResult : body;
+        : guideOnlyResult;
       const netSaving = measureRequest(body).estimatedTokens - measureRequest(result).estimatedTokens;
       if (selected.length > 0 && (netSaving <= 0 || netSaving < options.minSavingsTokens)) {
         skipped += selected.length;
         selected = [];
         hasFolded = existingReferences.length > 0;
+        injectGuidance = recoveryRelevant || guidanceDue;
+        includeRecoveryCommand = recoveryRelevant;
         projected = body;
-        injectGuidance = replayingProjection || recoveryRelevant || guidanceDue;
-        includeRecoveryCommand = replayingProjection || recoveryRelevant;
-        result = replayingProjection ? input : hasFolded
+        result = hasFolded
           ? (injectGuidance ? decorate(body, includeRecoveryCommand ? scope : undefined) : body)
-          : guidanceDue ? guideOnlyResult : body;
+          : guideOnlyResult;
       }
       // Commit originals and required descendants only for published folds or
       // legitimate waiting cursors. A rejected batch creates no orphan archive.
@@ -580,13 +665,6 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         && selected.some(outer => outer.region === item.region || containsRegion(outer.region, item.region)));
       const newRegions = published.filter(item => !item.observed.folded);
       const newlyFolded = newRegions.length;
-      const guidanceSuppressed = guidanceEligible && !injectGuidance;
-      if (newlyFolded) snapshot.guidance = { noFoldPrompts: 0, nextCycle: cycle + 1, lastPromptCycle: cycle };
-      else if (injectGuidance && guidance.lastPromptCycle !== cycle) {
-        const noFoldPrompts = guidance.noFoldPrompts + 1;
-        const interval = noFoldPrompts < 2 ? 1 : Math.min(2 ** Math.min(noFoldPrompts, 6), 64);
-        snapshot.guidance = { noFoldPrompts, nextCycle: cycle + interval, lastPromptCycle: cycle };
-      }
       // Count only new outermost replacements. Older children inside a new
       // parent already contributed savings; unrelated replayed siblings must
       // remain identical on both sides of this incremental estimate.
@@ -594,7 +672,8 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const replayedChildren = published.filter(item => item.observed.folded
         && newOutermost.some(outer => containsRegion(outer.region, item.region)));
       const previousProjection = projectExtractedSpans(body, replaceRegions(spans, replayedChildren), ctx.protocol, spans);
-      const newProjection = projectExtractedSpans(body, replaceRegions(spans, newOutermost), ctx.protocol, spans);
+      const newProjection = projectExtractedSpans(body, replaceRegions(spans,
+        newOutermost.map(item => ({ region: item.region, reference: item.replacement }))), ctx.protocol, spans);
       for (const candidate of observations.values()) {
         if (!valid.get(candidate.region) || candidate.region.referenceHash) continue;
         const entry = resolved.get(candidate.region) ?? byHash.get(candidate.region.sha256);
@@ -620,11 +699,20 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const inputMeasurement = measureRequest(input);
       const bodyMeasurement = measureRequest(body);
       const resultMeasurement = measureRequest(result);
+      reportedBytes = resultMeasurement.bytes;
+      outcome = hasFolded ? 'ready' : waiting || skipped > 0 || injectGuidance ? 'skipped' : 'empty';
+      const guidanceSuppressed = guidanceEligible && !injectGuidance && !focusedInlineRecovery;
+      if (newlyFolded) snapshot.guidance = { noFoldPrompts: 0, nextCycle: cycle + 1, lastPromptCycle: cycle };
+      else if (injectGuidance && guidance.lastPromptCycle !== cycle) {
+        const noFoldPrompts = guidance.noFoldPrompts + 1;
+        const interval = noFoldPrompts < 2 ? 1 : Math.min(2 ** Math.min(noFoldPrompts, 6), 64);
+        snapshot.guidance = { noFoldPrompts, nextCycle: cycle + interval, lastPromptCycle: cycle };
+      }
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period'
         : skipped ? 'insufficient-net-savings' : 'no-eligible-annotations',
-        cycle, waiting, skipped, foldedRegions: selected.length, replayedReferences: existingReferences.length,
-        guidanceSuppressed,
-        estimatedNetSavings: bodyMeasurement.estimatedTokens - resultMeasurement.estimatedTokens,
+        cycle, waiting, skipped, guidanceBackoff: guidanceSuppressed,
+        foldedRegions: selected.length, replayedReferences: existingReferences.length,
+        estimatedNetSavings: replayingProjection ? 0 : bodyMeasurement.estimatedTokens - resultMeasurement.estimatedTokens,
         beforeBytes: inputMeasurement.bytes, afterBytes: resultMeasurement.bytes,
         observation: { requestId, observedAt: Date.now(), status: 'pending', sessionKey: digest(ctx.session) } };
       if (newlyFolded) snapshot.metrics = addMetrics(snapshot.metrics, {
@@ -636,14 +724,17 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
           guideOnlyRequests: hasFolded || !injectGuidance ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
+          guidanceSuppressedRequests: guidanceSuppressed ? 1 : 0,
           estimatedTokenDelta: String(inputMeasurement.estimatedTokens - resultMeasurement.estimatedTokens),
         }) };
       return result;
     }, ctx.signal);
     if (ctx.state && pending) ctx.state[pendingKey] = pending;
+    reportHook(context, outcome, reportedBytes);
     return output;
   } catch (error) {
     if (error instanceof ConfigError) console.error(`[context-folding] ${error.message}`);
+    reportHook(context, ctx.signal?.aborted ? 'skipped' : error instanceof ConfigError ? 'invalid' : 'unavailable');
     // The transaction must commit every original before a changed request escapes.
     return input;
   }

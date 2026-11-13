@@ -18,10 +18,10 @@ if (!Number.isSafeInteger(PAIRS) || PAIRS < 1 || PAIRS > 5) throw new Error('pai
 const MAX_REQUESTS_PER_USER_TURN = 5;
 const MAX_OUTPUT_TOKENS = 512;
 const firstIndex = 237;
-const followupIndex = 341;
 const scenarioFlag = process.argv.indexOf('--scenario');
 const scenario = scenarioFlag < 0 ? 'related' : process.argv[scenarioFlag + 1];
-if (scenario !== 'related' && scenario !== 'unrelated') throw new Error('scenario_must_be_related_or_unrelated');
+if (!['related', 'elliptical', 'unrelated'].includes(scenario)) throw new Error('scenario_must_be_related_elliptical_or_unrelated');
+const followupIndex = scenario === 'elliptical' ? firstIndex + 1 : 341;
 let seed = 0x5eed1234;
 const values = Array.from({ length: 360 }, () => {
   seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
@@ -32,9 +32,11 @@ const questions = [
   `Use read_file to inspect worker.ts. What integer does operation${firstIndex}() return? Reply with only the integer.`,
   scenario === 'related'
     ? `From worker.ts, what integer does operation${followupIndex}() return? Do not guess; reply with only the integer.`
-    : 'Separate topic: reply with exactly the word SAPPHIRE and do not use tools.',
+    : scenario === 'elliptical'
+      ? `What about ${followupIndex}? Reply with only the integer.`
+      : 'Separate topic: reply with exactly the word SAPPHIRE and do not use tools.',
 ];
-const expected = [String(values[firstIndex]), scenario === 'related' ? String(values[followupIndex]) : 'SAPPHIRE'];
+const expected = [String(values[firstIndex]), scenario === 'unrelated' ? 'SAPPHIRE' : String(values[followupIndex])];
 const systemPrompt = [
   'You are working in a local project. Use tools to inspect source; do not guess.',
   'For the first question, call read_file on worker.ts exactly once before answering.',
@@ -103,9 +105,10 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
   const session = `completed-read-${String(pair).padStart(2, '0')}-${mode}`;
   const scope = await store.scopeFor(JSON.stringify([session, 'completed-source-retention-benchmark', 'tool-loop', cwd]));
   const state = {};
-  const context = contextFor({ model, session, cwd, delayRequests: mode === 'baseline' ? 999 : 0, state });
+  const context = contextFor({ model, session, cwd, delayRequests: 0, state });
   const body = bodyFor(model);
   const metrics = { requests: [], answers: [], answerTurns: [], readCalls: 0, readCallTurns: [], recoveryCalls: 0,
+    recoveryActionCounts: { grep: 0, peek: 0, restore: 0, rejected: 0 },
     toolErrors: 0, completion: 'incomplete', providerModel: null, finalTurn: -1 };
   const started = performance.now();
 
@@ -118,8 +121,8 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
       const raw = structuredClone(body);
       const rawBytes = Buffer.byteLength(JSON.stringify(raw));
       const hookStarted = performance.now();
-      const projected = await onRequest(raw, context);
-      const hookMs = performance.now() - hookStarted;
+      const projected = mode === 'baseline' ? raw : await onRequest(raw, context);
+      const hookMs = mode === 'baseline' ? null : performance.now() - hookStarted;
       const spans = extractSpans(projected, 'chat');
       const references = spans.filter(span => span.role === 'tool' && /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/.test(span.text)).length;
       const fullSourceCopies = spans.filter(span => span.role === 'tool' && span.source?.path === 'worker.ts' && span.text === source).length;
@@ -128,10 +131,10 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
       let reply;
       try { reply = await request(endpoint, apiKey, projected); }
       catch (error) {
-        await onResponse({}, { ...context, success: false, request: projected, protocol: 'chat' });
+        if (mode !== 'baseline') await onResponse({}, { ...context, success: false, request: projected, protocol: 'chat' });
         metrics.requests.push({ turn, user_turn: userTurn, raw_request_json_bytes: rawBytes, sent_request_json_bytes: sentBytes,
           references, full_source_copies: fullSourceCopies, provider_wait_ms: Math.round(performance.now() - providerStarted),
-          hook_on_request_ms: Math.round(hookMs), status: 'provider-error', error_code: error.message,
+          hook_on_request_ms: hookMs === null ? null : Math.round(hookMs), status: 'provider-error', error_code: error.message,
           usage: { input_tokens: null, output_tokens: null, total_tokens: null, cache_read_tokens: null, cache_write_tokens: null } });
         metrics.completion = 'provider-error';
         return { mode, pair, session, scope, ...metrics, error: error.message };
@@ -142,8 +145,8 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
       metrics.providerModel ??= typeof reply.model === 'string' ? reply.model : null;
       metrics.requests.push({ turn, user_turn: userTurn, raw_request_json_bytes: rawBytes, sent_request_json_bytes: sentBytes,
         references, full_source_copies: fullSourceCopies, provider_wait_ms: Math.round(providerMs),
-        hook_on_request_ms: Math.round(hookMs), finish_reason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : null, usage });
-      await onResponse(reply, { ...context, success: true, request: projected, protocol: 'chat' });
+        hook_on_request_ms: hookMs === null ? null : Math.round(hookMs), finish_reason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : null, usage });
+      if (mode !== 'baseline') await onResponse(reply, { ...context, success: true, request: projected, protocol: 'chat' });
       if (!choice?.message || choice.message.role !== 'assistant') { metrics.completion = 'invalid-provider-response'; break; }
       const assistant = choice.message;
       const calls = Array.isArray(assistant.tool_calls) ? assistant.tool_calls : [];
@@ -175,10 +178,18 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
           const grepPrefix = `${defaultRecoveryCommand()} grep --state-dir ${shellQuote(stateDir)} --scope ${scope} --id `;
           const grepRest = typeof command === 'string' && command.startsWith(grepPrefix) ? command.slice(grepPrefix.length) : '';
           const grepMatch = /^([a-f0-9]{12,64}) --query (?:'([^']+)'|"([^"]+)"|([^ ]+))$/.exec(grepRest);
-          if (readMatch && readMatch[1] === scope) output = await execute({ action: 'read', scope, id: readMatch[2], peek: !readMatch[3], limit: 24000 });
-          else if (grepMatch) output = await execute({ action: 'grep', scope, id: grepMatch[1],
-            query: grepMatch[2] ?? grepMatch[3] ?? grepMatch[4], recursive: false, limit: 5 });
-          else { metrics.toolErrors++; output = JSON.stringify({ error: 'command is outside this benchmark allowlist' }); }
+          if (readMatch && readMatch[1] === scope) {
+            metrics.recoveryActionCounts[readMatch[3] ? 'restore' : 'peek']++;
+            output = await execute({ action: 'read', scope, id: readMatch[2], peek: !readMatch[3], limit: 24000 });
+          } else if (grepMatch) {
+            metrics.recoveryActionCounts.grep++;
+            output = await execute({ action: 'grep', scope, id: grepMatch[1],
+              query: grepMatch[2] ?? grepMatch[3] ?? grepMatch[4], recursive: false, limit: 5 });
+          } else {
+            metrics.recoveryActionCounts.rejected++;
+            metrics.toolErrors++;
+            output = JSON.stringify({ error: 'command is outside this benchmark allowlist' });
+          }
         } else { metrics.toolErrors++; output = JSON.stringify({ error: 'unsupported tool' }); }
         body.messages.push({ role: 'tool', tool_call_id: call?.id, content: output });
       }
@@ -203,6 +214,7 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
   return { mode, pair, session, scope, completion: metrics.completion, answers: metrics.answers,
     correct_answers: metrics.correct_answers, success: metrics.success, read_calls: metrics.readCalls,
     read_call_user_turns: metrics.readCallTurns, recovery_tool_calls: metrics.recoveryCalls,
+    recovery_action_counts: metrics.recoveryActionCounts,
     tool_errors: metrics.toolErrors, request_count: metrics.request_count, folded_source_requests: metrics.folded_source_requests,
     full_source_requests: metrics.full_source_requests, provider_model_reported: metrics.providerModel,
     provider_input_tokens: metrics.provider_input_tokens, provider_output_tokens: metrics.provider_output_tokens,
@@ -212,7 +224,7 @@ async function runArm({ mode, pair, model, endpoint, apiKey, cwd, workerPath, st
 
 const args = process.argv.slice(2);
 const outputIndex = args.indexOf('--output');
-if (outputIndex < 0 || !args[outputIndex + 1]) throw new Error('usage: bun scripts/live-completed-source-retention-benchmark.mjs --output docs/benchmarks/<name>.json [--pairs 1-5] [--scenario related|unrelated]');
+if (outputIndex < 0 || !args[outputIndex + 1]) throw new Error('usage: bun scripts/live-completed-source-retention-benchmark.mjs --output docs/benchmarks/<name>.json [--pairs 1-5] [--scenario related|elliptical|unrelated]');
 const outputPath = resolve(args[outputIndex + 1]);
 const modelIndex = args.indexOf('--model');
 const model = modelIndex >= 0 ? args[modelIndex + 1] : process.env.MAGPIE_SOURCE_READ_BENCH_MODEL || 'claude-sonnet-5';
@@ -239,22 +251,24 @@ await mkdir(join(cwd, '.git'), { recursive: true, mode: 0o700 });
 await writeFile(workerPath, source, { mode: 0o600 });
 
 let report = { schema_version: 1, benchmark: `live-completed-source-read-retention-${scenario}`, generated_at: new Date().toISOString(),
-  claim_under_test: 'After a full source read has informed a completed assistant answer, folding it on a later user turn preserves answers and lowers provider input tokens when the follow-up does not require source recovery.',
+  claim_under_test: `Compare provider input usage and answer preservation with the hook bypassed versus local folding onRequest for a ${scenario} follow-up after a completed full source read; include any archive recovery calls.`,
   model_requested: model, route: 'OpenAI-compatible /v1/chat/completions',
   usage_source: 'provider response usage.prompt_tokens and usage.completion_tokens; cache fields recorded only when explicitly returned',
-  implementation: { hook: 'src/context.hooks.ts:onRequest', hook_sha256: hookHash, published_package_loaded: false },
+  implementation: { hook: 'src/context.hooks.ts:onRequest', hook_sha256: hookHash, baseline_hook_bypassed: true, published_package_loaded: false },
   design: { planned_pairs: PAIRS, order: 'alternating baseline/folding, then folding/baseline', max_requests_per_user_turn: MAX_REQUESTS_PER_USER_TURN,
     max_output_tokens: MAX_OUTPUT_TOKENS,
     task_sha256: taskHash, source_sha256: sha256(source), source_utf8_bytes: Buffer.byteLength(source),
     scenario, source_question_index: firstIndex, related_followup_index: scenario === 'related' ? followupIndex : null,
-    questions, expected_answers: expected, baseline_delay_requests: 999, folding_delay_requests: 0,
+    questions, expected_answers: expected,
+    baseline: 'hook bypassed; raw request sent to provider',
+    folding: 'local onRequest hook with delayRequests=0',
     min_savings_tokens: 256, isolated_temp_workspace: true, bounded_tool_runner: true },
   machine_at_start: { load_average: loadavg(), logical_cores: cpus().length }, pairs: [], summary: null,
   limitations: ['The task deliberately asks two questions about one generated file; it does not measure ordinary follow-up prevalence.',
     'The agent may need an extra recovery or read tool call; those calls and their provider tokens are included.',
     'This is a real provider with a bounded local tool loop, not Magpie/OpenCode host dispatch.',
     'Provider token counts are not billing amounts; no price schedule was applied.',
-    'Three pairs are exploratory and wall-clock differences are not a speedup claim.'] };
+    'Small pair counts are exploratory and wall-clock differences are not a speedup claim.'] };
 let runError = null;
 try {
   for (let pair = 1; pair <= PAIRS; pair++) {
@@ -287,6 +301,11 @@ try {
     sent_request_json_bytes_saved: { median: median(byteDeltas), range: range(byteDeltas) },
     folding_recovery_calls: valid.reduce((sum, pair) => sum + pair.folding.recovery_tool_calls, 0),
     baseline_recovery_calls: valid.reduce((sum, pair) => sum + pair.baseline.recovery_tool_calls, 0),
+    recovery_action_counts: Object.fromEntries(['baseline', 'folding'].map(mode => [mode,
+      valid.reduce((total, pair) => {
+        for (const action of Object.keys(total)) total[action] += pair[mode].recovery_action_counts[action];
+        return total;
+      }, { grep: 0, peek: 0, restore: 0, rejected: 0 })])),
     cache_usage_reported_in_all_requests: report.pairs.length > 0 && report.pairs.every(pair =>
       [pair.baseline, pair.folding].filter(Boolean).every(arm => arm.requests.every(request =>
         request.usage.cache_read_tokens !== null && request.usage.cache_write_tokens !== null))) };

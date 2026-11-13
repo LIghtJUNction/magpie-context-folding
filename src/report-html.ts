@@ -119,6 +119,7 @@ export function renderReport(report: EffectsReport): string {
     ['失败转换请求', m.failedHookRequests, '失败响应'],
     ['未核实转换请求', m.unverifiedHookRequests, '未能核实的响应'],
     ['仅引导请求', m.guideOnlyRequests, '没有新折叠的引导请求'],
+    ['退避抑制指导', m.guidanceSuppressedRequests, '匹配成功响应中因无折叠结果而省略的指导'],
     ['成功带折叠请求', m.successfulFoldedRequests, '包含现有或新折叠内容'],
     ['失败带折叠请求', m.failedFoldedRequests, '失败响应'],
     ['未核实带折叠请求', m.unverifiedFoldedRequests, '不视为成功'],

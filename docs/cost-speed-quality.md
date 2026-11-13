@@ -102,26 +102,6 @@ npm run bench:fold-strategies -- --delay-requests 1 docs/benchmarks/fold-strateg
 
 这是合成消息的 UTF-8 请求字节数，不是 tokenizer token、模型质量或账单；运行没有调用模型或供应商缓存。它说明立即折叠能减少这条固定请求轨迹中的重复发送，不能单独证明真实任务节省金额或质量不变。对净收益谨慎的配置仍可显式设置 `delay_requests = 1`。
 
-### 2026-10-30 当前工作树复跑与缓存价格敏感性
-
-在 `main` HEAD `f9d27c5` 的当前工作树上，以同一生产 `onRequest` 和合成轨迹各运行一次 `delayRequests=0/1`。两份记录都带源码文件哈希。累计请求 JSON 字节和“缓存读取按未缓存输入价格 10%”时的输入费代理如下：
-
-| 策略 | delay 0 请求字节 | delay 1 请求字节 | delay 0 代理值 | delay 1 代理值 |
-| --- | ---: | ---: | ---: | ---: |
-| 不折叠 | 714,812 | 714,812 | 213,961.4 | 213,961.4 |
-| 每个里程碑折叠 | 13,286 | 169,719 | 3,371.9 | 160,798.5 |
-| 任务总块一次折叠 | 401,891 | 558,566 | 183,653 | 199,478.9 |
-| 总任务 + 里程碑嵌套折叠 | 12,443 | 169,512 | 3,598.1 | 161,283.6 |
-
-代理值以 prompt-message UTF-8 公共前缀和设定的缓存读取价格比例计算，单位是字节等值，不是 token 或账单。价格比例设为 0 时，delay 1 的三种折叠策略代理值比不折叠高 1,496、1,269、2,058；设为 10% 时则低于不折叠。delay 0 在这条固定轨迹中省去了大量重复发送，但这两次合成回放没有测时间、模型质量或真实缓存命中。
-
-完整记录：[delay 0](benchmarks/fold-strategy-cache-cost-delay-0-2026-10-30.json)、[delay 1](benchmarks/fold-strategy-cache-cost-delay-1-2026-10-30.json)。复现命令：
-
-```sh
-npm run bench:fold-strategies -- --delay-requests 0 docs/benchmarks/fold-strategy-cache-cost-delay-0-2026-10-30.json
-npm run bench:fold-strategies -- --delay-requests 1 docs/benchmarks/fold-strategy-cache-cost-delay-1-2026-10-30.json
-```
-
 ## Magpie 回复 usage 观测
 
 Magpie 完整响应回调现按匹配成功的请求记录回复中可识别的协议 usage：输入、输出 token；缓存读取和写入只在回复实际含对应字段时累计。输入和输出字段必须同时存在，否则将成功回复计为 usage 不完整。数据只存数字，按会话 scope 汇总，并分成请求投影“含折叠内容”“不含折叠内容”、`observe_only` 基线和无法分类的旧累计；只观测模式原样发送请求，不加折叠或恢复提示，但继续采集回复 usage。CLI `stats` 可查看累计分组；本地 HTML 报告也会在每个状态会话中显示对应分组，方便人工并排检查隔离运行。分组没有自动配对相同任务、模型或输出质量；人工按相同条件采样并检查输出质量后，才可用于有意义的对照，仍不直接证明账单节省。
@@ -130,11 +110,11 @@ Magpie 完整响应回调现按匹配成功的请求记录回复中可识别的�
 
 2026-10-29 将通用折叠指导从 445 B 缩至 388 B；加入动态收益门槛后为 397 B。发现旧提示把 begin/end 示例写在同一行，和解析器要求每个标记独占一行相矛盾。当前提示将多行、可解析的标记示例写清后为 423 B；含默认恢复命令、状态目录和 scope 时为 750 B，仍比原版本少 22 B（约 5.5 个 `字节 / 4` 估算 token）。提示告知模型当前配置的最低估算收益 token 数（默认 256），并要求每个完成阶段把长细节包在标记内、将结论摘要留在外面。解析器回归检查确认示例能被识别；这不等于真实模型已采用标记或账单已降低。
 
-2026-10-30 的一次只读检查记录了缓存包 `magpie-context-folding@0.5.1`：提示为 687 B，带同一恢复命令、状态目录和 scope 时为 1,063 B。默认状态中的累计统计为 2,968 次成功 hook、2,968 次 guide-only、0 次成功折叠、0 个折叠项目；`estimatedTokenDelta` 为 -486,597，是 JSON 字节 `/ 4` 估算，不是供应商 usage 或账单。该历史快照没有插件版本分组，不能归因于后来加载的候选源码。
+同日只读检查全局 Magpie 插件：运行的是缓存包 `magpie-context-folding@0.5.1`，其提示为 687 B；带同一恢复命令、状态目录和 scope 时为 1,063 B。该包的累计统计为 2,968 次成功 hook、2,968 次 guide-only、0 次成功折叠、0 个折叠项目；本地 `estimatedTokenDelta` 为 -486,597，属于 JSON 字节 `/ 4` 估算值，不是供应商 usage 或账单。CLI 汇总没有提供对应的模型 usage。已安装缓存与当前工作树源码不同，因此这些计数不能验证本次工作树提示是否会增加有效折叠；当前改动尚未进入运行中的插件。
 
 同日修正 guide-only 请求准备：清理旧 guidance 和 recovery metadata 时只复制协议指令所在的外壳，保留未改动的对话历史；无折叠时也不再执行丢弃的校验注入、空替换和重复注入。`npm run bench:hook-projection -- --output docs/benchmarks/hook-projection-2026-10-29.json` 在 403,213 B 的 Chat 请求（96 条 Assistant 消息、各含 4,096 B 负载、无折叠）上交替运行 15 轮，输出逐项相同且输入未变。Bun 1.4.0 / Linux x64 的本次中位数为旧路径 4.560 ms、新路径 1.463 ms；绝对耗时在本机连续回放间波动明显，只用于同轮路径对比。
 
-2026-10-30 初版将提示改为按需注入：新会话只有在文本估算足以覆盖最低净收益门槛与 scoped 指导开销估算（规则 JSON 字节 `/ 4`，另预留 64 B 字段开销）时才加入提示；当时已有指导会话继续保留，可恢复引用始终得到恢复命令。这个判定只序列化短系统规则，不为估算开销重新序列化整段对话。这样短请求不会为未来不确定的折叠先支付固定输入开销，旧 scope-only metadata 仍会清理。四种协议的本地 hook 测试覆盖短请求省略、长上下文注入、已有提示续接及折叠后的恢复信息。后续真实 provider 试验确认该合成任务的短首请求没有附加指导，长源码上下文会启用指导；试验未单独对照旧版的无条件注入，所以门槛本身对质量与 usage 的增益尚未隔离。恢复命令的相关性与提示退避随后在本节末的本地回归中更新。
+2026-10-30 将提示改为按需注入：新会话只有在文本估算足以覆盖最低净收益门槛与 scoped 指导开销估算（规则 JSON 字节 `/ 4`，另预留 64 B 字段开销）时才加入提示；已有指导会话继续保留，可恢复引用始终得到恢复命令。这个判定只序列化短系统规则，不为估算开销重新序列化整段对话。这样短请求不会为未来不确定的折叠先支付固定输入开销，旧 scope-only metadata 仍会清理。四种协议的本地 hook 测试覆盖短请求省略、长上下文注入、已有提示续接及折叠后的恢复信息。后续真实 provider 试验确认该合成任务的短首请求没有附加指导，长源码上下文会启用指导；试验未单独对照旧版的无条件注入，所以门槛本身对质量与 usage 的增益尚未隔离。
 
 折叠投影也从整请求 `structuredClone` 改为只复制被改路径上的容器；公开 `replaceExtractedSpans` API 保持深拷贝语义。基准在四种协议、约 403–409 KB 历史、每个请求替换 3 段长细节，比较一次投影和模拟 hook 所需的连续三次投影；输出与旧实现深度相同，原输入未变，未改消息仍共享。Bun 1.4.0 / Linux x64 的三次投影中位数如下：
 
@@ -219,28 +199,50 @@ Provider 回报 baseline 输入 122,970 tokens、输出 468；folding 输入 85,
 
 2026-10-30 修正基准提示后重跑真实 provider 对照：三组 baseline/folding 都正确回答两题（12/12），每组先完整读取 `worker.ts`，再回答一个无关的新问题。折叠组 provider 输入 token 分别少 5,400、5,398、5,397，中位少 **5,398**；请求 JSON 中位少 **17,783 B**（范围 17,783–17,819 B），每组都只折叠一次旧源码且没有恢复调用。短首请求没有附加指导（原始与发送 JSON 均为 1,135 B）；包含源码的后续请求才注入 scoped 指导。
 
+统一口径：本页旧 hook 实验（单次直接对照、五组复读、已完成回答、相关/省略式追问）的 `baseline` 都运行了 `onRequest`，用 `delayRequests=999` 禁止折叠。它们测的是“插件运行且不折叠”对比“插件折叠”的增量，不是插件关闭对比开启；因此 10,957→6,047、4,915、5,398、10,013 等差值不能当作整体插件节省量。当前 completed-source 实验脚本已改为真正绕过 hook 的基线；新的总效果对照见下节。
+
 逐请求用量、时延和本次实测源码哈希见[修正提示后的三组实测 JSON](benchmarks/live-completed-source-retention-guidance-gate-exact-format-2026-10-30.json)，脚本见[可复现实验](../scripts/live-completed-source-retention-benchmark.mjs)。之后仅把“标记即提前注入”收窄为“可恢复引用才提前注入”；本试验的大源码请求独立超过注入门槛，因此覆盖的发送路径不变，但 JSON 哈希不是最终工作树的逐字节哈希。该试验直接加载未发布工作树，没有经过 Magpie host dispatch。模型响应未提供缓存 token；这证明该合成任务中 provider 输入减少且答案通过，不证明账单节省、真实工作负载收益或提速。
 
+此前试验曾把源码中相同的数字当作相关信号；2026-10-30 已移除这条规则，单独数字巧合不再阻止折叠。以函数调用或反引号明确写出的源码标识符可走限定归档检索，模糊技术追问仍保留源码。该判断仍是词法规则；具体任务的回答质量需要独立验证。
+
 此前一份“exact-format”试验要求模型回答十进制整数，却在第二题要求输出 `SAPPHIRE`，系统与用户指令冲突；其数据已排除，不纳入结论。
+
+### 真正关闭 hook 的总效果对照
+
+2026-10-30 用 `--pairs 3 --scenario unrelated` 比较原始请求与折叠 hook。三组中两组有效：两臂答案均为 4/4 正确，provider 输入分别少 5,054 和 5,048 token，中位少 **5,051**；发送 JSON 每组少 **16,803 B**，折叠组没有归档恢复调用。逐请求原始数据见[实测 JSON](benchmarks/total-effect-unrelated-2026-10-30.json)。
+
+第三组保留在记录中但判为无效：折叠臂第一题没有调用 `read_file`，在源码进入上下文前就把原始 1,135 B 请求原样发给 provider，随后错误回答 `3`。因此不能把该臂较低的 678 输入 token 算成节省；脚本总状态为 inconclusive（2/3 组有效）。Provider 未报告缓存 token，实验直接运行本地 bounded tool loop，没有经过 Magpie host dispatch。这提供了两组真实 provider 输入 token 对照，不证明账单金额、日常任务平均收益或主机已加载候选版本。
+
+### 真正关闭 hook 的省略式追问对照
+
+同日以 `--pairs 3 --scenario elliptical` 比较“完全不运行 hook”与折叠 hook，三组全部未通过严格答案校验，summary 不计算节省值。部分模型回复夹带了本地 benchmark 提示和工具定义里不存在的“clean client task tool”指令；请求发往配置的自定义 provider host，无法判断是模型生成还是网关注入。完整原始回复保留在[实测 JSON](benchmarks/total-effect-elliptical-2026-10-30.json)，但这份数据不能用于判断插件的质量或节省效果；在取得干净、可控的 provider route 前，不据此调整折叠策略。
 
 ### 短请求跳过指导的真实 provider 对照（当前未发布工作树）
 
 2026-10-30 用同一条短 Chat 请求交替比较当前 `onRequest` 门控和强制附加相同指导文本，`claude-sonnet-5` 三组均答对（6/6）。门控组每次报告 473 个输入 token，强制指导组 647 个，三组都少 174 token；发送 JSON 每次少 485 B。逐组数据和源码哈希见[实测记录](benchmarks/live-guidance-overhead-gate-2026-10-30.json)，脚本见[可复现实验](../scripts/live-guidance-overhead-benchmark.mjs)。Provider 未报告缓存 token；这量出该短请求的提示开销，不等同账单节省或生产流量收益。实验直接运行当前未发布工作树；主机当前仍加载 0.5.1，因此此改动尚未影响主机请求。
 
-早期版本在紧接着询问同一源码时会恢复整份文件；2/3 组配对有效，11/12 个答案通过检查，有效配对的输入 token 中位反而增加 2,046，并出现两次恢复调用；记录见[相关追问试验](benchmarks/live-completed-source-retention-2026-10-30.json)。当前实现会在新问题提到文件名、明显回指或明确的技术追问（边界情况、错误处理、空/无效输入等）时保留完整读取；明确写出的函数调用或反引号标识符也会保留源码，让模型直接用当前上下文回答，避免刚追问就触发恢复调用。源码关联会重新按最新用户问题判断：当前问题仍相关就保留；该轮已有完整回答、后续问题无关时再折叠。此前两组有效相关追问样本各多一次恢复调用、输入分别增加 2,032 和 2,060 token，所以上述时序调整是为避免已测得的即时恢复开销；这次调整尚无新的 Provider A/B 复测。泛词 `explain`、`return` 不再独自触发；`result/value` 只在简短答案式问句中触发。泛代词 `it/this/that`、中文“比赛结果”及单独的“它/这/那”也不再触发。`What was the result?`、`What is the value?`、`What does it return?`、`它返回什么？`仍保留，带外部主题的追问可折叠。源码和问题仅共享一个数字不再视为相关，例如源码里的 `8341` 不会让“Was the 8341 election result certified?”继续携带整份源码；像“What about 238?”这样的省略追问仍可折叠并用 scoped 归档搜索取回片段。该词法保护无法完全判断语义相关性；未命中时归档仍可恢复，但可能增加一次本地检索。Chat、Responses、Anthropic、Gemini 的回归用例覆盖相关性边界。同一请求的四协议测试还比较变换前后完整 JSON 的 UTF-8 字节（包括 scoped 恢复指引），要求投影后严格变短；这是序列化请求体积证据，不等于模型 tokenizer 用量或账单。
+随后把同一源码整理为独立的 `0.5.2` 本地候选提交 `1fdaad6`，在 Magpie 中启用该路径并关闭旧的 `0.5.1` 项。打包安装验收和路径直载验收都通过 18/18 个合成 host 请求，响应 hook 成功 18 次、失败/未验证为 0；来源哈希与上面的真实 provider 对照一致。这里证明候选已能经 Magpie host 执行并保留折叠行为；真实 provider 试验仍只证明输入 token 减少，缓存字段缺失，实际账单金额和持续生产收益尚未确认。该候选尚未发布到 npm。
 
-### 当前工作树的真实 Magpie host A/B
+当前未发布工作树从无 scope 的通用指导中删去了重复的 CLI 恢复提醒，指导文本由 441 缩至 406 UTF-8 字节；带有 scope 的折叠引用仍提供 `grep`/`read` 命令。这里只验证了请求文本字节变化，本次未重跑 Provider，不能据此确认输入 token 或账单下降。
 
-2026-10-30 在同一 `main` 工作树通过隔离 Magpie/Bun host 做一组成对 Provider 调用：baseline 与 folding 各发一条真实终轮请求，之前的两轮 Read 历史由本地合成 fixture 提供。`claude-sonnet-5` 回报输入从 12,235 降至 1,173 token（少 11,062，90.4%）；两边都正确回答 `391`。序列化请求从 34,064 B 降至 2,202 B，folding 确认折叠一个 32,477 B 的合成源码并发送引用。
+候选版继续收紧归档恢复提示：新折叠仍在当轮附带 scoped 命令；旧引用只有在最新问题匹配文件名、源码标识符或明确的源码追问线索时才附加恢复命令，无关问题只保留短引用。通用折叠指导另按不同 request cycle 退避；同一折叠投影的精确重试原样返回、不重复添加提示，也不推进计数。Chat、Responses、Anthropic、Gemini 各用 6 个无关追问与“每次强制附加相同指导”的 JSON 对照，少发送 4,746、4,584、4,716、4,632 B，合计 18,678 B。字节数由本地合成请求得出，不代表 Provider token 或账单；没有重载宿主或调用 Provider。
 
-这是一个无关整数追问的单组探索性结果，不能代表常见工作负载或提速。Provider 没有回报缓存读写 token，输入 token 也不等同账单；实验使用当前未发布工作树和临时隔离 host，没有重载已安装插件。含 Git HEAD、源码/构建文件及 `package.json` 共 39 个哈希、逐臂 usage 与限制的[实测回执](benchmarks/live-magpie-provider-host-ab-main-2026-10-30.json)，以及[可复现实验脚本](../scripts/live-magpie-provider-host-ab.py)。
+早期版本在紧接着询问同一源码时会恢复整份文件；2/3 组配对有效，11/12 个答案通过检查，有效配对的输入 token 中位反而增加 2,046，并出现两次恢复调用；记录见[相关追问试验](benchmarks/live-completed-source-retention-2026-10-30.json)。当前实现会在新问题提到文件名、明确的源码/答案回指词，或“边界情况”“空输入”“错误处理”等常见追问时保留完整读取；对函数调用或反引号中明确出现的源码标识符，则在完整读取后按配置的 `delay_requests` 时机折叠整份源码，同时提供限定归档的 `grep` 命令。泛词 `explain`、`return`、`function`、`implementation`，以及中文的“之前”“内容”“函数”“实现”不再单独触发；“explain the implementation”“请解释这个函数”“这个函数的返回值”等明确技术问法仍保留。`result/value` 只在简短答案式问句中触发，带外部主题的追问（如“previous election result”“function of the election committee”“implementation schedule”“之前的选举结果”“今天比赛的内容”）可折叠。源码和问题仅共享一个数字不再视为相关，例如文件中的 `8341` 不会让“Was the 8341 election result certified?” 继续携带整份源码；像“What about 238?”这样的省略追问可折叠，并用 scoped 归档搜索取回所需片段。该词法保护无法完全判断语义相关性；未命中时归档仍可恢复，但可能增加一次本地检索。Chat、Responses、Anthropic、Gemini 的回归测试验证了判断和归档 grep，但这项新折叠行为尚无新的 Provider 质量复测。同一请求的四协议测试还比较变换前后完整 JSON 的 UTF-8 字节（包括 scoped 恢复指引），要求投影后严格变短；这是序列化请求体积证据，不等于模型 tokenizer 用量或账单。
 
-### 恢复指导相关性与通用提示退避（本地验证）
+### 短省略式追问的归档检索
 
-2026-10-30 收紧归档恢复指导：新回合只有在最新问题能关联到已归档源码时才附 scoped CLI；无关问题保留短引用。四种协议的 JSON 对照测试确认强制附加无关恢复指导会增大序列化请求，但这只是本地结构对照，不代表 Provider token 或账单变化。通用指导在两次无新折叠提示后按指数间隔退避，最多每 64 轮再次提示；精确重试保持原请求不变。来源追问回归覆盖 `previous`、`same`、宽泛 `function/implementation` 及相应中文误匹配。`rtk bun test --parallel=1 --timeout=15000 test/*.test.ts`：312 项通过；`rtk bun run typecheck` 与 `rtk git diff --check` 通过。该次本地改动没有调用 Provider、重载插件或部署，因此这些改动的实际用量和延迟收益仍未验证。
+2026-10-30 在同一段 17,890 B 的生成源码后追问“What about 238?”，与两组 baseline 交替对照。baseline 保留完整源码；folding 把源码归档后，每组各发生一次归档恢复命令调用。第二组 baseline 还完整重读源码一次，folding 臂只读初次源码并发生一次恢复调用。两组共 8 个答案都正确；Provider 输入 token 分别少 3,696 和 16,330，中位少 10,013；发送 JSON 中位少 34,244 B。该结果使用的 `onRequest` SHA 与本机 0.5.2 候选一致，但通过有界本地工具循环直连 Provider，未经过 Magpie host。闭环耗时一组慢 2.1 秒、另一组快 19.9 秒，波动太大，不能证明提速。Provider 未返回缓存 token，且只有两组、合成源码；恢复命令具体是 `grep`、peek 还是完整恢复没有记录。这证明该场景能在一次归档恢复后答对并减少输入 token，不证明账单金额或常见追问上的普遍收益。逐项记录见[实测 JSON](benchmarks/live-completed-source-retention-elliptical-current-2026-10-30.json)，脚本见[实验脚本](../scripts/live-completed-source-retention-benchmark.mjs)。
 
-同日把源码关联从子串改为完整标识符和文件名边界，避免 `operation2380` 误命中 `operation238`、`worker.tsx` 误命中 `worker.ts`；并让相关性按最新回合重算，当前相关追问保留源码、回答后的无关回合再折叠。随后补齐 `What does it do?`、参数/签名/用途等代词式追问及中文对应问法，并保留“选举委员会的 function”负例，避免只凭 `function` 泛词滞留源码。主树源追问套件 38 项通过；候选树 34 项通过。之后两边完整套件均为 328 项，其中 324 项通过、4 项跳过、0 项失败；两边类型检查通过。验证的是四协议本地投影与归档检索，不是 Provider 节省或延迟收益。
+### Magpie 宿主中的真实 Provider 单对验证
 
-同日在主工作树运行 `rtk python3 -I scripts/host-smoke.py`，通过 bubblewrap 启动真实 Magpie/Bun host，所有 29 个上游请求均发往本机合成 HTTP fixture。插件 response hook 匹配 29/29 回复，合成 usage 精确累计为 290 输入、58 输出 token，并分为 8 个含折叠请求和 21 个未折叠请求。断言验证完成读取后的首轮 grace 保留、下一轮无关数字巧合会折叠；明确源码标识符问题保留完整读取，回答后第一条无关消息遵守 grace，再下一条无关消息折叠并可限定 grep 恢复。标记折叠样例的闭合观察请求估算为 14,420，折叠后的请求估算为 2,710（`JSON UTF-8 字节 / 4`）；折叠后的请求多了一轮对话历史，因此这两个数不能作为同 payload A/B 比较。恢复、Unicode/CRLF、隔离及提示退避断言通过。这验证 host dispatch 和 usage 观测链，不是 Provider usage 或真实费用结果。
+2026-10-30 在 bubblewrap 隔离的 Magpie/Bun 宿主中对照 observe-only 基线与折叠候选。每臂先由本地 fixture 合成 Read 工具调用和完整源码答复，只有最后一个无关算术追问转发给真实 Provider；Read 工具形状为 `Read.absolutePath`。这组唯一配对两边都答对 `391`，Provider 回报输入用量从 12,238 降到 1,176，少 11,062（90.4%）；实际转发 JSON 从 34,064 B 降为 2,203 B。宿主指标确认折叠一条，基线请求含完整标记源码，折叠请求含恢复引用且不含完整源码。
 
-本次只读复核 `magpie plugin list --json` 显示：缓存包 `magpie-context-folding@0.5.1` 已关闭，加载项是本地 `0.5.2` 候选目录（分支 `codex/magpie-context-folding-0.5.2-candidate`，HEAD `f791bfe`，工作树有未提交改动）。候选 CLI 读取的默认 lifetime 统计仍是上面的 2,968 / 0 折叠，且 `responseUsageRequests=0`、`actualBillSavingUsd=null`；没有时间和版本分组，不能证明这些数值来自当前候选，也不能证明其已处理新的真实请求。主工作树的 host smoke 使用隔离状态，不会污染这组历史统计。
+这只是一个合成历史的单对结果，不能代表常见任务或稳定节省；Provider 没回报缓存 token 或账单金额，输入 token 差不能直接换算费用。它验证候选代码经真实 Magpie 请求分派后仍会折叠，不代表生产安装已重载。完整指标见[原始 JSON](benchmarks/live-magpie-provider-host-ab-validated-2026-10-30.json)，复跑脚本见[隔离宿主 Provider 对照](../scripts/live-magpie-provider-host-ab.py)。
+
+随后在主工作树和候选目录分别运行隔离 host smoke，各 29 个请求都只发给本机合成 fixture；两边 hook 均成功 29/29，失败和未验证均为 0。主树合成 usage 为 290 输入、58 输出 token；候选 smoke 报告 17 次仅提示注入和 4 次提示退避。新增闭环确认完成源码读取后的首轮 grace 保留；下一轮无关数字巧合会折叠并可从归档恢复。明确追问 `operation238()` 时保留原文供模型直接回答；答复完成后，第一条无关消息遵守 grace，下一条无关消息折叠，并可用限定 grep 查回。此后把源码关联从子串改为完整标识符和文件名边界，避免 `operation2380` 误命中 `operation238`、`worker.tsx` 误命中 `worker.ts`；另覆盖 `What does it do?`、参数/签名/用途及中文追问，并用“选举委员会的 function”负例防止泛词误保留。主树源追问测试 38 项、候选树 34 项通过；两边完整套件各运行 328 项，324 项通过、4 项跳过、0 项失败，typecheck 通过。同一请求 JSON 体积的四协议断言包含恢复指引。它验证了本地投影和归档检索链，不是 Provider 用量、账单或任务提速证据。
+
+### 首次完整源码读取的函数定向投影（本地合成，未调用 Provider）
+
+2026-10-30 在同一条包含 123,727 B、2,400 个函数和文件级 `BASE_OFFSET` 常量的合成 `worker.ts` 读取请求上比较三种投影，并把完整序列化请求 JSON 计入字节数：A 保留完整源码并附通常的 scoped 恢复指导，B 只发送归档引用并附相同全局指导，C 发送归档引用、问题明确点名的函数原文和可确认的文件级字面量依赖，并给出局部 `grep/read` 恢复命令。Chat、Responses、Anthropic、Gemini 四种请求形状中，C 请求为 1,086–1,177 B；A 为 127,340–127,439 B，C 的 JSON 体积少 99.08%–99.15%；B 为 1,235–1,334 B，C 少 11.77%–13.33%。C 保留目标函数及其 `BASE_OFFSET` 定义；归档正文与源文件逐字一致，单次搜索既能找到目标函数，也能找到该常量。局部变量遮蔽的同名值和可变文件级值不会被拼入片段。源码前的历史不变，也没有加入全局指导。两条分别点名多个函数的歧义问题在四协议中都保留整份源码。C 的工具结果 JSON 字段为 746 B（B 的引用字段为 24 B）。
+
+这些比例只比较本地生成请求的 UTF-8 字节；四分之一字节估算不是模型 tokenizer，也不是 Provider 用量。没有调用 Provider，因此目标答案是否等价、恢复工具是否会被模型调用、输入 token、缓存和账单都未验证。另用 15 个精确范围样例覆盖 TypeScript/JavaScript（含模板内和控制语句后的正则）、Python（含装饰器和 `async def`）、Go、Rust、Java、Kotlin、C++（类方法和模板函数）、C 自由函数；全部与预期行范围完全一致。原始记录含 5 次预热和 31 次本地解析计时，中位数 34.722 ms；这是合成文件微基准，不能说明真实仓库耗时或 agent 总体提速。复现命令：`rtk bun scripts/source-projection-strategy-benchmark.ts > docs/benchmarks/source-projection-local-2026-10-30.json`。原始记录及限制见[本地合成基准](benchmarks/source-projection-local-2026-10-30.json)，实现见[`source-excerpt.ts`](../src/source-excerpt.ts)。此前其他场景的 Provider 结果不能转作这条首次读取投影的效果证据。

@@ -1,0 +1,294 @@
+{
+  "measuredAt": "2026-10-30",
+  "kind": "local synthetic request projection; no Provider calls",
+  "task": "What does operation238() return?",
+  "source": {
+    "path": "worker.ts",
+    "bytes": 123727,
+    "sha256": "8cd897d1c39f031d5be5e237dfdb56bcfcc4399b927a0897bc4eb2ad8e6df0e0",
+    "generatedFunctionCount": 2400,
+    "reference": "[[cf:v2:8cd897d1c39f]]"
+  },
+  "dependencyChecks": {
+    "fileLevelLiteralIncluded": true,
+    "shadowedParameterAndLocalExcluded": true,
+    "mutableFileLevelValueExcluded": true
+  },
+  "strategies": {
+    "fullSource": "Keep complete tool result; baseline is measured with ordinary scoped recovery guidance.",
+    "referenceOnly": "Replace tool result with archive reference; guidance stays in the global system/instructions field.",
+    "referencePlusExcerpt": "Replace tool result with reference, exact target function and a local recovery command."
+  },
+  "protocolResults": [
+    {
+      "protocol": "chat",
+      "fullSourceJsonBytes": 126129,
+      "referenceOnlyJsonBytes": 24,
+      "focusedValueJsonBytes": 746,
+      "fullRequestBytesWithGuidance": 127425,
+      "referenceOnlyRequestBytesWithGuidance": 1320,
+      "focusedRequestBytes": 1144,
+      "targetCodeRetained": true,
+      "dependencyDefinitionIncluded": true,
+      "archiveExact": true,
+      "oneSearchRecoversTarget": true,
+      "dependencySearchFindsDefinition": true,
+      "dependencyRecoveryPrompt": true,
+      "prefixBeforeSourceUnchanged": true,
+      "globalGuidanceInjected": false,
+      "estimatedInputTokenProxy": 286,
+      "ambiguousQueriesRetainFullSource": true
+    },
+    {
+      "protocol": "responses",
+      "fullSourceJsonBytes": 126129,
+      "referenceOnlyJsonBytes": 24,
+      "focusedValueJsonBytes": 746,
+      "fullRequestBytesWithGuidance": 127340,
+      "referenceOnlyRequestBytesWithGuidance": 1235,
+      "focusedRequestBytes": 1086,
+      "targetCodeRetained": true,
+      "dependencyDefinitionIncluded": true,
+      "archiveExact": true,
+      "oneSearchRecoversTarget": true,
+      "dependencySearchFindsDefinition": true,
+      "dependencyRecoveryPrompt": true,
+      "prefixBeforeSourceUnchanged": true,
+      "globalGuidanceInjected": false,
+      "estimatedInputTokenProxy": 272,
+      "ambiguousQueriesRetainFullSource": true
+    },
+    {
+      "protocol": "anthropic",
+      "fullSourceJsonBytes": 126129,
+      "referenceOnlyJsonBytes": 24,
+      "focusedValueJsonBytes": 746,
+      "fullRequestBytesWithGuidance": 127436,
+      "referenceOnlyRequestBytesWithGuidance": 1331,
+      "focusedRequestBytes": 1160,
+      "targetCodeRetained": true,
+      "dependencyDefinitionIncluded": true,
+      "archiveExact": true,
+      "oneSearchRecoversTarget": true,
+      "dependencySearchFindsDefinition": true,
+      "dependencyRecoveryPrompt": true,
+      "prefixBeforeSourceUnchanged": true,
+      "globalGuidanceInjected": false,
+      "estimatedInputTokenProxy": 290,
+      "ambiguousQueriesRetainFullSource": true
+    },
+    {
+      "protocol": "gemini",
+      "fullSourceJsonBytes": 126129,
+      "referenceOnlyJsonBytes": 24,
+      "focusedValueJsonBytes": 746,
+      "fullRequestBytesWithGuidance": 127439,
+      "referenceOnlyRequestBytesWithGuidance": 1334,
+      "focusedRequestBytes": 1177,
+      "targetCodeRetained": true,
+      "dependencyDefinitionIncluded": true,
+      "archiveExact": true,
+      "oneSearchRecoversTarget": true,
+      "dependencySearchFindsDefinition": true,
+      "dependencyRecoveryPrompt": true,
+      "prefixBeforeSourceUnchanged": true,
+      "globalGuidanceInjected": false,
+      "estimatedInputTokenProxy": 295,
+      "ambiguousQueriesRetainFullSource": true
+    }
+  ],
+  "focusedParserTiming": {
+    "warmupSamples": 5,
+    "measuredSamples": 31,
+    "medianMs": 34.722,
+    "minMs": 15.95,
+    "maxMs": 52.11
+  },
+  "languageCases": [
+    {
+      "path": "worker.ts",
+      "sourceBytes": 255,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 249,
+      "lines": [
+        1,
+        5
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.js",
+      "sourceBytes": 161,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 181,
+      "lines": [
+        2,
+        6
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.py",
+      "sourceBytes": 182,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 142,
+      "lines": [
+        4,
+        9
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.go",
+      "sourceBytes": 107,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 138,
+      "lines": [
+        1,
+        3
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.rs",
+      "sourceBytes": 97,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 127,
+      "lines": [
+        1,
+        4
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "Worker.java",
+      "sourceBytes": 117,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 130,
+      "lines": [
+        2,
+        5
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.kt",
+      "sourceBytes": 82,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 94,
+      "lines": [
+        2,
+        4
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.cpp",
+      "sourceBytes": 127,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 139,
+      "lines": [
+        2,
+        5
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.ts",
+      "sourceBytes": 75,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 104,
+      "lines": [
+        1,
+        3
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.ts",
+      "sourceBytes": 153,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 144,
+      "lines": [
+        1,
+        4
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.js",
+      "sourceBytes": 111,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 109,
+      "lines": [
+        1,
+        4
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.ts",
+      "sourceBytes": 170,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 161,
+      "lines": [
+        1,
+        4
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.py",
+      "sourceBytes": 89,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 90,
+      "lines": [
+        1,
+        3
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.c",
+      "sourceBytes": 125,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 115,
+      "lines": [
+        2,
+        5
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    },
+    {
+      "path": "worker.cpp",
+      "sourceBytes": 93,
+      "referenceJsonBytes": 24,
+      "referenceWithExcerptJsonBytes": 96,
+      "lines": [
+        1,
+        4
+      ],
+      "expectedCodeRetained": true,
+      "exactExpectedScope": true
+    }
+  ],
+  "limitations": [
+    "Synthetic source and explicit function lookup only.",
+    "Byte/4 is a size proxy, not provider tokenization or billing.",
+    "Correct model answers, recovery-call avoidance, cache usage and dollars were not measured."
+  ]
+}
