@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { ConfigError, loadOptions } from './config.js';
 import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, shellQuote } from './guidance.js';
 import { cleanRequestBody } from './request-clean.js';
-import { containsRegion, editableSlices, outermost, parseRegions, regionReference, reference, replaceRegions, shortHash, type Region } from './annotations.js';
+import { containsRegion, outermost, parseRegions, regionReference, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, createJsonMeasurementCache, emptyMetrics, metricsSchema, type Metrics } from './metrics.js';
 import { extractSpans, projectExtractedSpans, recoveryShellName, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
@@ -573,10 +573,11 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       for (const candidate of observations.values()) {
         const { region, observed, reference: ref, replacement } = candidate;
         if (!valid.get(region) || region.referenceHash || kept(region)) continue;
-        const editable = editableSlices(region);
-        const before = editable.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
-          spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
-        const after = editable.length * Buffer.byteLength(JSON.stringify(replacement + (region.retained?.length ? '\n' : '')));
+        const ids = new Set(region.slices.map(slice => slice.id));
+        const parts = spans.filter(span => ids.has(span.id));
+        const replacements = replaceRegions(parts, [{ region, reference: replacement }]);
+        const before = parts.reduce((sum, part) => sum + Buffer.byteLength(JSON.stringify(part.text)), 0);
+        const after = parts.reduce((sum, part) => sum + Buffer.byteLength(JSON.stringify(replacements.get(part.id) ?? part.text)), 0);
         if (after >= before || Math.floor((before - after) / 4) < options.minSavingsTokens) { skipped++; continue; }
         if (cycle - observed.firstSeen < options.delayRequests) { waiting++; waitingRegions.push(region); continue; }
         proposed.push({ region, reference: ref, replacement,
