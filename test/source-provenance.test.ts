@@ -249,7 +249,8 @@ for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[
       setFollowup(unrelated, protocol, 'Does this restaurant serve lunch?');
       const skippedCommand = await onRequest(unrelated, fastContext) as Record<string, unknown>;
       assert.match(toolText(skippedCommand, protocol), /^\[\[cf:v2:[a-f0-9]{12,64}\]\]$/);
-      assert.equal(guideCount(skippedCommand), 0, 'an unrelated turn keeps the short archive reference without its CLI command');
+      assert.equal(guideCount(skippedCommand), 1, 'the proactive rule remains without a scoped recovery command');
+      assert.doesNotMatch(JSON.stringify(skippedCommand), /--scope/);
       const forced = appendGuidanceToCleanBody(skippedCommand, protocol, {
         command: defaultRecoveryCommand(), minSavingsTokens: 256, scope, stateDirectory: store.directory,
       });

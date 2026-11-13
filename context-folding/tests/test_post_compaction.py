@@ -22,6 +22,10 @@ class PostCompactionTests(unittest.TestCase):
         self.assertIn("未闭合的标记不能折叠", POST_COMPACTION_REMINDER)
         self.assertIn("不同宿主未必能报告压缩事件", POST_COMPACTION_REMINDER)
         self.assertIn("不要猜测或重建", POST_COMPACTION_REMINDER)
+        self.assertIn(">> 具体起因 <<", POST_COMPACTION_REMINDER)
+        self.assertIn("<< 已验证结果 >>", POST_COMPACTION_REMINDER)
+        self.assertIn("不要自行计算或编造", POST_COMPACTION_REMINDER)
+        self.assertNotIn("<!-- @context-fold", POST_COMPACTION_REMINDER)
 
     def run_hook(self, payload, *, raw=False, cwd=None, env=None):
         return subprocess.run(

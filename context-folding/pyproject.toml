@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "context-folding"
-version = "0.1.1"
+version = "0.1.2"
 description = "Host-neutral reversible context archive, transparent references, CLI and local SDK transport"
 requires-python = ">=3.10"
 license = "MIT"

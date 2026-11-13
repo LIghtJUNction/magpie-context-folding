@@ -1,0 +1,33 @@
+{
+  "model": "cursor/grok-4.7@256k",
+  "userPromptMentionedMarkers": false,
+  "initialTaskUtf8Bytes": 693,
+  "injectedRuleCopies": 1,
+  "modelGeneratedClosedRegions": 1,
+  "generatedReplyUtf8Bytes": 9555,
+  "subsequentHookFolded": true,
+  "archivedFilesVerified": 1,
+  "originalAssistantUtf8Bytes": 9555,
+  "foldedAssistantUtf8Bytes": 1121,
+  "exactFormatReply": "OK",
+  "elapsedSeconds": 80.07,
+  "validation": "candidate onRequest injects actual system rule; real model via running gateway; installed hook bypassed with no shell tools to preserve candidate guidance",
+  "task": "请审查下面这份网关上线配置，逐项给出12项问题的具体后果、可观测的排查证据和可执行的修复建议。每项都保留足够细节让同事后续复核，最后列出优先级最高的三个动作。配置：1.重试所有POST 5次；2.超时为0；3.缓存键只含URL不含租户；4.日志记录完整Authorization；5.健康检查仅看进程存在；6.后台队列无上限；7.流式响应到结束才刷新；8.计费请求重试无幂等键；9.数据库连接数无限；10.每次请求同步查询全部模型列表；11.转发客户端自带X-Forwarded-For作为可信IP；12.变更后没有回滚开关。不要执行任何工具或改动文件。",
+  "guidanceSha256": "666190f7651e9b0ba26021585ca1a8709a2cace23781edcdfbea35ab31f9a71c",
+  "generatedMarkerLines": [
+    ">> 网关十二项上线风险的后果证据与修复 <<",
+    "<< 十二项均可复核的上线风险结论 >>"
+  ],
+  "attempts": [
+    {
+      "promptRevision": "supporting-detail wording",
+      "generatedRegions": 0,
+      "replyUtf8Bytes": 8956
+    },
+    {
+      "promptRevision": "mandatory long-review protocol",
+      "generatedRegions": 1,
+      "replyUtf8Bytes": 9555
+    }
+  ]
+}

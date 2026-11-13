@@ -2,7 +2,7 @@ import { archivePath } from './archive-file.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { ConfigError, loadOptions } from './config.js';
-import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, guidanceText, shellQuote } from './guidance.js';
+import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, shellQuote } from './guidance.js';
 import { cleanRequestBody } from './request-clean.js';
 import { containsRegion, outermost, parseRegions, regionReference, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, createJsonMeasurementCache, emptyMetrics, metricsSchema, type Metrics } from './metrics.js';
@@ -495,15 +495,8 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       return appendGuidanceToCleanBody(value, ctx.protocol, { command, minSavingsTokens: options.minSavingsTokens,
         ...(scope ? { scope, stateDirectory: store.directory } : {}) });
     };
-    // Estimate only the injected instruction and its JSON envelope; serializing a
-    // potentially large conversation here would erase the hook's savings.
-    const scopedGuide = guidanceText({ command, minSavingsTokens: options.minSavingsTokens,
-      scope: '0'.repeat(64), stateDirectory: store.directory });
-    const guidanceOverhead = Math.ceil((Buffer.byteLength(JSON.stringify(scopedGuide)) + 64) / 4);
-    const contextBytes = spans.reduce((total, span) => total + Buffer.byteLength(span.text), 0);
-    const hasRecoveryReference = spans.some(span => span.role !== 'user' && /\[\[cf:v2:/.test(span.text));
-    const guidanceEligible = hadGuidance && !hasRecoveryReference
-      || Math.ceil(contextBytes / 4) >= options.minSavingsTokens + guidanceOverhead;
+    // The rule must be present before the model starts producing long work,
+    // including the first short request. Only recovery commands are conditional.
     const scope = await store.scopeFor(JSON.stringify([ctx.session, ctx.origin ?? '', ctx.agent ?? '', ctx.cwd ?? '']));
     let pending: z.infer<typeof pendingSchema> | undefined;
     const output = await store.transaction(scope, true, options.maxSessionBytes, snapshot => {
@@ -590,31 +583,26 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const latestUserText = [...spans].reverse().find(span => span.role === 'user')?.text ?? '';
       const recoveryRelevant = !!latestUserText.trim() && existingReferenceMatches.some(({ entry, source }) =>
         refersToSource(latestUserText, source ?? { path: entry.annotation!.label, range: '' }, entry.text));
-      const guidance = snapshot.guidance ?? { noFoldPrompts: 0, nextCycle: 0 };
       const focusedInlineRecovery = !hadGuidance && selected.length > 0 && existingReferences.length === 0
         && !recoveryRelevant && selected.every(item => !!item.retainedExcerpt);
       const replayingProjection = hadGuidance && snapshot.projectedHash === requestHash && selected.length === 0;
-      const guidanceDue = !focusedInlineRecovery && guidanceEligible
-        && (guidance.noFoldPrompts < 2 || cycle >= guidance.nextCycle);
-      const guideOnlyResult = guidanceDue ? decorate(body) : body;
+      const guideOnlyResult = decorate(body);
       let hasFolded = selected.length > 0 || existingReferences.length > 0;
-      let injectGuidance = replayingProjection || selected.length > 0 && !focusedInlineRecovery || recoveryRelevant || guidanceDue;
       let includeRecoveryCommand = replayingProjection || selected.length > 0 && !focusedInlineRecovery || recoveryRelevant;
       let projected = selected.length > 0
         ? projectExtractedSpans(body, replaceRegions(spans, selected.map(item => ({ region: item.region, reference: item.replacement }))), ctx.protocol, spans) : body;
       let result = replayingProjection ? input : hasFolded
-        ? (injectGuidance ? decorate(projected, includeRecoveryCommand ? scope : undefined) : projected)
+        ? decorate(projected, includeRecoveryCommand ? scope : undefined)
         : guideOnlyResult;
       const netSaving = measureRequest(body).estimatedTokens - measureRequest(result).estimatedTokens;
       if (selected.length > 0 && (netSaving <= 0 || netSaving < options.minSavingsTokens)) {
         skipped += selected.length;
         selected = [];
         hasFolded = existingReferences.length > 0;
-        injectGuidance = recoveryRelevant || guidanceDue;
         includeRecoveryCommand = recoveryRelevant;
         projected = body;
         result = hasFolded
-          ? (injectGuidance ? decorate(body, includeRecoveryCommand ? scope : undefined) : body)
+          ? decorate(body, includeRecoveryCommand ? scope : undefined)
           : guideOnlyResult;
       }
       // Commit originals and required descendants only for published folds or
@@ -700,17 +688,10 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       const bodyMeasurement = measureRequest(body);
       const resultMeasurement = measureRequest(result);
       reportedBytes = resultMeasurement.bytes;
-      outcome = hasFolded ? 'ready' : waiting || skipped > 0 || injectGuidance ? 'skipped' : 'empty';
-      const guidanceSuppressed = guidanceEligible && !injectGuidance && !focusedInlineRecovery;
-      if (newlyFolded) snapshot.guidance = { noFoldPrompts: 0, nextCycle: cycle + 1, lastPromptCycle: cycle };
-      else if (injectGuidance && guidance.lastPromptCycle !== cycle) {
-        const noFoldPrompts = guidance.noFoldPrompts + 1;
-        const interval = noFoldPrompts < 2 ? 1 : Math.min(2 ** Math.min(noFoldPrompts, 6), 64);
-        snapshot.guidance = { noFoldPrompts, nextCycle: cycle + interval, lastPromptCycle: cycle };
-      }
+      outcome = hasFolded ? 'ready' : 'skipped';
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period'
         : skipped ? 'insufficient-net-savings' : 'no-eligible-annotations',
-        cycle, waiting, skipped, guidanceBackoff: guidanceSuppressed,
+        cycle, waiting, skipped, guidanceBackoff: false,
         foldedRegions: selected.length, replayedReferences: existingReferences.length,
         estimatedNetSavings: replayingProjection ? 0 : bodyMeasurement.estimatedTokens - resultMeasurement.estimatedTokens,
         beforeBytes: inputMeasurement.bytes, afterBytes: resultMeasurement.bytes,
@@ -723,8 +704,8 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       pending = { scope, requestId, bodyHash: fingerprint(result), protocol: ctx.protocol, folded: hasFolded, observeOnly: false,
         successDelta: addMetrics(emptyMetrics(), {
           successfulHookRequests: 1, successfulFoldedRequests: hasFolded ? 1 : 0,
-          guideOnlyRequests: hasFolded || !injectGuidance ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
-          guidanceSuppressedRequests: guidanceSuppressed ? 1 : 0,
+          guideOnlyRequests: hasFolded ? 0 : 1, replayRequests: hasFolded && !newlyFolded ? 1 : 0,
+          guidanceSuppressedRequests: 0,
           estimatedTokenDelta: String(inputMeasurement.estimatedTokens - resultMeasurement.estimatedTokens),
         }) };
       return result;
