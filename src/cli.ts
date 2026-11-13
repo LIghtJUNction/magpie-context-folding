@@ -153,6 +153,7 @@ async function main(): Promise<void> {
         `统计范围：${data.scope === 'global-lifetime' ? '全局累计' : '当前会话'}`,
         `折叠次数：${data.summary.foldCount}`,
         `查看详情次数：${data.summary.detailViewCount}`,
+        `退避抑制指导（成功请求）：${m.guidanceSuppressedRequests}`,
         `累计折叠 token（估算）：${data.summary.foldedTokensDisplay}`,
         `累计净减少 token（成功请求估算）：${formatTokenCount(m.estimatedTokenDelta)}`,
         '净收益状态：未验证（实际账单和耗时未测）',

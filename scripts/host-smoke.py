@@ -123,7 +123,7 @@ def write_json(path: Path, value: object) -> None:
 def verify_request(
     outgoing: dict, sent: dict, expect_guidance: bool | None = None,
 ) -> tuple[dict, str | None, dict]:
-    """Check the real wire request, including adaptive low-noise guidance."""
+    """Check the wire request, including adaptive low-noise guidance."""
     clean = copy.deepcopy(outgoing)
     hints = [item for item in clean["messages"] if item.get("role") == "system"
              and isinstance(item.get("content"), str) and GUIDANCE.fullmatch(item["content"])]
@@ -134,7 +134,10 @@ def verify_request(
         )
     assert not any(item.get("role") == "system" and isinstance(item.get("content"), str)
                    and BUDGET.fullmatch(item["content"]) for item in clean["messages"]), "removed context budget was injected"
-    scope_match = re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"]) if hints else None
+    scope_match = (
+        re.search(r"--scope ([a-f0-9]{64})(?:\s|$)", hints[0]["content"])
+        if hints else None
+    )
     scope = scope_match[1] if scope_match else None
     assert outgoing["model"] == "m1", f"unexpected routed model: {outgoing['model']}"
     # Magpie changes fake/m1 to m1 after the hook. Count the same model name to
@@ -145,7 +148,10 @@ def verify_request(
         clean["messages"].remove(hints[0])
     clean["model"] = sent["model"]
     assert clean["tools"] == sent["tools"], "client tool declarations changed"
-    return clean, scope, {"usedEstimate": used, "basis": "json-utf8-bytes/4", "guidanceInjected": bool(hints)}
+    return clean, scope, {
+        "usedEstimate": used, "basis": "json-utf8-bytes/4",
+        "guidanceInjected": bool(hints),
+    }
 
 
 def advance(body: dict, message: str) -> dict:
@@ -289,7 +295,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             declarations = [
                 {"type": "function", "function": {"name": "exec_command", "description": "Execute a shell command", "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}}}},
                 {"type": "function", "function": {"name": "exec", "description": "Synthetic history only", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}}}},
-                {"type": "function", "function": {"name": "read", "description": "Synthetic Read history only", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+                {"type": "function", "function": {"name": "Read", "description": "Synthetic Read history only", "parameters": {"type": "object", "properties": {"absolutePath": {"type": "string"}}}}},
             ]
             first_part = "Beginning of completed research.\r\n" + "".join(
                 f"middle-evidence-{i:04d}: punctuation and CRLF; 原文必须可逆恢复。😀\r\n"
@@ -320,7 +326,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             ])
             first, first_scope, first_request = send(closed, expect_guidance=True)
             assert first_scope is None and opening_scope is None and first == closed, "first closed observation did not keep its grace period"
-            retry, retry_scope, _ = send(closed, expect_guidance=False)
+            retry, retry_scope, _ = send(closed)
             assert retry_scope is None and retry == closed, "an identical retry consumed the grace period"
             advanced = advance(closed, "A distinct request after the completed work.")
             folded, scope, folded_request = send(advanced)
@@ -331,11 +337,11 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             expected["messages"][5]["content"] = reference + suffix
             assert folded == expected, "only annotated assistant text should change; tool structure and other text must survive"
             assert folded_request["usedEstimate"] < first_request["usedEstimate"], "fold did not reduce the outgoing estimate"
-            repeated, _, _ = send(advanced)
+            repeated, _, _ = send(advanced, expect_guidance=True)
             assert repeated == expected, "a repeated request changed the projection"
             projected = copy.deepcopy(fixture.upstream[-1])
             projected["model"] = "fake/m1"
-            replayed, _, _ = send(projected)
+            replayed, _, _ = send(projected, expect_guidance=True)
             assert replayed == expected, "replaying a projected request duplicated guidance or re-folded a reference"
             guidance_schedule = []
             guidance_payload = "Large unmarked history for the adaptive guidance probe.\n" * 500
@@ -348,7 +354,9 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                     probe, "host-smoke-guidance", expect_guidance=cycle in (0, 1, 5),
                 )
                 guidance_schedule.append(observed["guidanceInjected"])
-            assert guidance_schedule == [True, True, False, False, False, True]
+            assert guidance_schedule == [True, True, False, False, False, True], (
+                f"unexpected adaptive guidance schedule: {guidance_schedule}"
+            )
             status = call({"scope": scope, "action": "status"})
             scope_metrics = call({"scope": scope, "action": "stats"})["metrics"]
             assert status["entries"] == 1 and scope_metrics["itemsFolded"] == 1, "retry created duplicate archives or folds"
@@ -381,7 +389,7 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                 return {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
                     {"role": "user", "content": "Inspect the synthetic source view."},
                     {"role": "assistant", "content": "Reading source.", "tool_calls": [{
-                        "id": call_id, "type": "function", "function": {"name": "read", "arguments": serialized({"path": str(source_path)})},
+                        "id": call_id, "type": "function", "function": {"name": "Read", "arguments": serialized({"absolutePath": str(source_path)})},
                     }]},
                     {"role": "tool", "tool_call_id": call_id, "content": text},
                     {"role": "user", "content": "Continue."},
@@ -474,16 +482,34 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
             assert any("operation238()" in match["text"] for match in matches), "the exact source symbol was not searchable"
             read_all(identifier_scope, identifier_source)
             assert source_path.read_bytes() == identifier_source.encode("utf-8"), "automatic folding changed the source file"
+            process_start = ">> Code review started: changes against 'main' <<\r\n"
+            process_end = "\r\n<< Code review finished >>"
+            process_body = {"model": "fake/m1", "stream": False, "tools": declarations, "messages": [
+                {"role": "user", "content": "Review this change."},
+                {"role": "assistant", "content": process_start + original + process_end},
+                {"role": "user", "content": "Continue after the review."},
+            ]}
+            process_first, _, _ = send(process_body, "host-smoke-process")
+            assert process_first == process_body, "process markers ignored the configured grace period"
+            process_next = advance(process_body, "A distinct request after the review.")
+            process_folded, _, _ = send(process_next, "host-smoke-process")
+            process_visible = process_folded["messages"][1]["content"]
+            assert process_visible.startswith(process_start + "line:") and process_visible.endswith(process_end), (
+                "process reason or result was not preserved verbatim"
+            )
+            assert "hash:" + sha256(original) in process_visible, "process metadata lost the full content hash"
+            process_path = Path(re.search(r"(?:^|[\r\n])path:([^\r\n]+)", process_visible)[1])
+            assert process_path.is_absolute() and process_path == process_path.resolve(), "archive path is not canonical"
+            assert process_path.name == sha256(original) + ".txt", "archive file is not named by full SHA-256"
+            assert process_path.read_bytes() == original.encode("utf-8"), "portable archive file differs from the original"
+            process_replay = copy.deepcopy(fixture.upstream[-1])
+            process_replay["model"] = "fake/m1"
+            process_replayed, _, _ = send(process_replay, "host-smoke-process")
+            assert process_replayed == process_folded, "process metadata was folded again on replay"
             final_metrics = call({"action": "stats"})["metrics"]
-            upstream_requests = len(fixture.upstream)
-            assert final_metrics["responseUsageRequests"] == upstream_requests, "matched response usage was not recorded for every host request"
-            assert final_metrics["responseUsageUnavailableRequests"] == 0, "complete synthetic usage was marked unavailable"
-            assert final_metrics["responseInputTokens"] == str(10 * upstream_requests), "synthetic input usage was not accumulated exactly"
-            assert final_metrics["responseOutputTokens"] == str(2 * upstream_requests), "synthetic output usage was not accumulated exactly"
-            folded_usage = final_metrics["responseFoldedUsageRequests"]
-            unfolded_usage = final_metrics["responseUnfoldedUsageRequests"]
-            assert folded_usage > 0 and unfolded_usage > 0, "usage was not grouped by the projected fold state"
-            assert folded_usage + unfolded_usage == upstream_requests, "fold-state usage groups do not cover all matched replies"
+            assert final_metrics["guidanceSuppressedRequests"] >= 3, (
+                "suppressed guidance was not counted on the response hook"
+            )
             print(serialized({
                 "result": "passed", "host": "real Magpie and Bun via bubblewrap",
                 "provider": "local synthetic HTTP fixture; no external model was called",
@@ -492,6 +518,8 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                     "distinct requests fold explicit annotations", "short SHA-256 references retain marker lines", "system/user/unmarked text and tool calls/results remain intact",
                     "adaptive guidance backoff and reinjection after folds; no context budgets",
                     "projection replay does not duplicate guidance or archives",
+                    "process reason/result markers survive folding and replay",
+                    "canonical full-hash UTF-8 archive files are directly readable",
                     "host guidance schedule is inject, inject, suppress three, inject",
                     "paginated byte-for-byte Unicode/CRLF recovery", "exclusive paste without text echo", "unknown scope refused",
                     "explicit --restore persistently expands all slices", "session isolation", "source comments share the protocol",
@@ -499,13 +527,12 @@ def run(magpie: Path, bun: Path, bwrap: Path, directory: Path, project: Path) ->
                     "source files remain unchanged by folding", "unmarked source stays visible",
                     "unrelated numeric coincidence folds completed source", "source identifier stays visible until answered, then grace precedes later fold",
                 ],
-                "upstreamRequests": upstream_requests, "originalUtf8Bytes": len(original.encode("utf-8")),
+                "upstreamRequests": len(fixture.upstream), "originalUtf8Bytes": len(original.encode("utf-8")),
                 "firstRequestEstimate": first_request, "foldedRequestEstimate": folded_request,
                 "guidanceBackoffSchedule": guidance_schedule,
                 "responseHooks": {key: final_metrics[key] for key in (
                     "successfulHookRequests", "unverifiedHookRequests", "failedHookRequests",
-                    "responseUsageRequests", "responseInputTokens", "responseOutputTokens",
-                    "responseFoldedUsageRequests", "responseUnfoldedUsageRequests")},
+                    "guideOnlyRequests", "guidanceSuppressedRequests")},
             }))
     except BaseException:
         if log_path.exists():

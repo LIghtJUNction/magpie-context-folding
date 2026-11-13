@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "benchmark": "isolated-magpie-host-provider-unrelated-followup",
+  "generated_at": "2026-10-29T20:13:21.419265+00:00",
+  "model_requested": "claude-sonnet-5",
+  "route": "real provider forwarded by local fixture through isolated Magpie/Bun hosts",
+  "provider_address_recorded": false,
+  "claim_under_test": "Compare provider-reported input usage for the same completed-Read history and unrelated follow-up with observe-only versus source folding through Magpie/Bun host dispatch.",
+  "design": {
+    "pair_count": 1,
+    "real_provider_completions": 2,
+    "synthetic_seed_completions": 4,
+    "source_payload_utf8_bytes": 32477,
+    "source_marked_utf8_bytes": 32541,
+    "read_tool_shape": "Read.absolutePath",
+    "task": "unrelated integer follow-up after a completed source answer",
+    "historical_tool_result": "synthetic source fixture; no external Read tool was run",
+    "temporary_home_and_xdg": true,
+    "bubblewrap_isolation": true
+  },
+  "baseline": {
+    "mode": "baseline",
+    "answer": "391",
+    "answer_correct": true,
+    "hook_confirmed": true,
+    "fold_confirmed": false,
+    "synthetic_seed_completions": 2,
+    "measured_provider_completions": true,
+    "provider_usage": {
+      "input_tokens": 12164,
+      "output_tokens": 2,
+      "total_tokens": 12166,
+      "cached_input_tokens": null,
+      "cache_write_input_tokens": null
+    },
+    "provider_wire": {
+      "request_json_bytes": 33936,
+      "full_source_payload_present": false,
+      "fold_reference_present": false
+    },
+    "hook_metrics": {
+      "observeOnlySuccessfulRequests": 3,
+      "successfulHookRequests": 0,
+      "successfulFoldedRequests": 0,
+      "foldBatchesApproved": 0,
+      "itemsFolded": 0,
+      "guidanceSuppressedRequests": 0,
+      "unverifiedHookRequests": 0,
+      "failedHookRequests": 0
+    },
+    "provider_error": null
+  },
+  "folding": {
+    "mode": "folding",
+    "answer": "391",
+    "answer_correct": true,
+    "hook_confirmed": false,
+    "fold_confirmed": false,
+    "synthetic_seed_completions": 2,
+    "measured_provider_completions": true,
+    "provider_usage": {
+      "input_tokens": 12177,
+      "output_tokens": 2,
+      "total_tokens": 12179,
+      "cached_input_tokens": null,
+      "cache_write_input_tokens": null
+    },
+    "provider_wire": {
+      "request_json_bytes": 33936,
+      "full_source_payload_present": false,
+      "fold_reference_present": false
+    },
+    "hook_metrics": {
+      "observeOnlySuccessfulRequests": 0,
+      "successfulHookRequests": 0,
+      "successfulFoldedRequests": 0,
+      "foldBatchesApproved": 0,
+      "itemsFolded": 0,
+      "guidanceSuppressedRequests": 0,
+      "unverifiedHookRequests": 0,
+      "failedHookRequests": 0
+    },
+    "provider_error": null,
+    "sanitized_host_diagnostic": "● magpie gateway on [redacted-url]\n  OpenAI   [redacted-url] · [redacted-url]\n  Anthropic [redacted-url]\n  key      magpie (anything works; the gateway only listens on localhost)\n  1 models · magpie models\n"
+  },
+  "valid": false,
+  "provider_input_tokens_saved": -13,
+  "limitations": [
+    "One exploratory pair cannot establish typical savings or speedup.",
+    "Provider token usage is not a bill amount; cached token accounting may differ.",
+    "The source and prior read/answer are synthetic fixtures, and the test does not reload the live plugin."
+  ]
+}
