@@ -78,7 +78,7 @@ test('real hook observations reach read-only statusline, client binding and expl
     assert.deepEqual(await readFile(path), bytes);
     assert.equal((await stat(path)).mtimeMs, stamp);
     assert.deepEqual((await store.readStats(scope)).metrics, metrics);
-    assert.deepEqual(await readdir(join(directory, 'state')), ['archive', 'state.sqlite']);
+    assert.deepEqual((await readdir(join(directory, 'state'))).sort(), ['archive', 'state.sqlite']);
   });
 });
 

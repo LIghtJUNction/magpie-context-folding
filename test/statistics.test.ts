@@ -114,7 +114,7 @@ test('annotation batches count once; successful, failed and uncertain responses 
     assert.deepEqual(lifetime.summary, session.summary);
     assert.equal(lifetime.storage.activeSessions, 0);
     assert.equal(lifetime.storage.blobs, 0);
-    assert.deepEqual(await readdir(directory), ['archive', 'state.sqlite']);
+    assert.deepEqual((await readdir(directory)).sort(), ['archive', 'state.sqlite']);
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../src/cli.ts', import.meta.url)), 'stats'], {
       encoding: 'utf8', env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: directory },
     });
