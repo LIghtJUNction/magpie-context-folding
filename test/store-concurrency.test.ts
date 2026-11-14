@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { Database } from 'bun:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -89,5 +90,68 @@ test('unchanged snapshots reject intervening statistics writes without losing th
     await assert.rejects(pending, ScopeConflictError);
     assert.equal((await store.readStats(scope)).metrics.successfulHookRequests, 1);
     assert.equal((await store.readStats()).metrics.successfulHookRequests, 1);
+  });
+});
+
+
+test('SQLite lock waits yield so unrelated sessions and lock release can run', async () => {
+  await fixture(async (store, scope) => {
+    const blocker = new Database(join(store.directory, 'state.sqlite'));
+    blocker.exec('BEGIN EXCLUSIVE');
+    let released = false;
+    const timer = setTimeout(() => { blocker.exec('ROLLBACK'); released = true; }, 30);
+    let calls = 0;
+    try {
+      await store.transaction(scope, false, limit, snapshot => {
+        calls++;
+        assert.equal(released, true);
+        snapshot.entries.push(entry('after-lock'));
+      });
+      assert.equal(calls, 1);
+      assert.equal((await store.transaction(scope, false, limit, s => s.entries)).length, 2);
+    } finally {
+      clearTimeout(timer);
+      if (blocker.inTransaction) blocker.exec('ROLLBACK');
+      blocker.close();
+    }
+  });
+});
+
+
+test('persistent SQLite contention fails within a bounded wait without running projection', async () => {
+  await fixture(async (store, scope) => {
+    const blocker = new Database(join(store.directory, 'state.sqlite'));
+    blocker.exec('BEGIN EXCLUSIVE');
+    let calls = 0;
+    let ticks = 0;
+    const timer = setInterval(() => { ticks++; }, 10);
+    const start = performance.now();
+    try {
+      await assert.rejects(store.transaction(scope, false, limit, () => { calls++; }),
+        (error: unknown) => error instanceof Error && 'code' in error && error.code === 'SQLITE_BUSY');
+      assert.equal(calls, 0);
+      assert.ok(ticks >= 3, 'other hook work must continue during contention');
+      assert.ok(performance.now() - start < 1800, 'lock retries must have a deadline');
+    } finally {
+      clearInterval(timer);
+      blocker.exec('ROLLBACK');
+      blocker.close();
+    }
+    assert.equal((await store.transaction(scope, false, limit, s => s.entries)).length, 1);
+  });
+});
+
+
+test('existing scope identity does not acquire a writer lock', async () => {
+  await fixture(async (store, scope) => {
+    const reader = new Database(join(store.directory, 'state.sqlite'));
+    reader.exec('BEGIN');
+    reader.query('SELECT snapshot FROM sessions WHERE scope = ?').get(scope);
+    try {
+      assert.equal(await store.scopeFor('synthetic concurrent state'), scope);
+    } finally {
+      reader.exec('ROLLBACK');
+      reader.close();
+    }
   });
 });
