@@ -6,3 +6,6 @@ __pycache__/
 benchmarks/harbor/.venv/
 benchmarks/harbor/jobs/
 benchmarks/harbor/results/
+
+# Generated evidence is stored in the external archive.
+/docs/assets/logo.png

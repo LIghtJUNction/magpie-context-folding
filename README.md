@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/assets/logo.png" alt="magpie-context-folding 折纸喜鹊 Logo" width="176">
-</p>
-
 <div align="center">
   <h1>magpie-context-folding</h1>
   <p><strong>让 Agent 主动收起已经完成的长过程，同时保留可精确恢复的原文。</strong></p>
