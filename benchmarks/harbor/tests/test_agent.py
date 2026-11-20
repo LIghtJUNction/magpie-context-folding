@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -142,15 +143,17 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
         bridge = type("FixtureBridge", (), {})()
         bridge.call = AsyncMock(return_value={"exit_code": 0, "stdout": '{"text":"precise 中文😀"}', "stderr": ""})
         environment = FakeEnvironment()
-        result = await self.agent._tool("context_folding", {"action": "read", "id": "abc", "offset": 2, "limit": 30}, environment, bridge)
+        result = await self.agent._tool("context_folding", {"action": "read", "id": "a" * 64}, environment, bridge)
         self.assertEqual(json.loads(result), {"text": "precise 中文😀"})
-        bridge.call.assert_awaited_once_with("cli", argv=["read", "--json", "--id", "abc", "--offset", "2", "--limit", "30"])
+        bridge.call.assert_awaited_once_with("cli", argv=["read", "--id", "a" * 64])
         for args in ({"action": []}, {"action": "read", "scope": "other"},
-                     {"action": "read", "limit": True}, {"action": "read", "id": "--restore"}):
+                     {"action": "read", "limit": True}, {"action": "read", "id": "--restore"},
+                     {"action": "meta", "id": "a" * 64}, {"action": "read", "id": "abc"}):
             self.assertIn("error", json.loads(await self.agent._tool("context_folding", args, environment, bridge)))
         self.assertEqual(bridge.call.await_count, 1)
         self.assertEqual(environment.commands, [])
         self.assertEqual([item["function"]["name"] for item in module.TOOLS], ["terminal", "read_file", "context_folding"])
+        self.assertEqual(module.TOOLS[-1]["function"]["parameters"]["properties"]["action"]["enum"], ["read"])
 
     async def test_fixed_terminal_archive_prefix_never_executes_host_or_environment_shell(self):
         bridge = type("FixtureBridge", (), {"cli_prefix": ("/runtime/bun", "/package/src/cli.ts")})()
@@ -221,9 +224,9 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                 await first.close()
                 await second.close()
 
-    async def test_nested_cli_queries_keep_history_folded_and_confined_to_the_trial(self):
+    async def test_nested_original_reads_keep_history_folded_and_confined_to_the_trial(self):
         bridge = Bridge(self.directory / "nested")
-        leaf = "needle-child " + "precise evidence " * 200
+        leaf = "needle-child 中文🙂 " + "precise evidence " * 200
         nested = ("<!-- @context-fold begin parent -->\nParent heading\n"
                   "<!-- @context-fold begin child -->\n" + leaf
                   + "\n<!-- @context-fold end child -->\nParent conclusion\n"
@@ -247,30 +250,23 @@ class BridgeAgentTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["exit_code"], 0, result["stderr"])
                 return json.loads(result["stdout"])
 
-            meta = await query("meta", "--id", parent, "--json")
-            self.assertEqual(meta["childCount"], 1)
-            child = meta["children"][0]
-            parent_view = await query("read", "--id", parent, "--limit", "24000", "--json")
-            self.assertIn("[[cf:v2:", parent_view["text"])
-            self.assertNotIn(leaf, parent_view["text"])
-            found = await query("grep", "--id", parent, "--query", "needle-child", "--json")
-            self.assertEqual(found["matches"][0]["id"], child)
-            recovered = await query("read", "--id", child, "--limit", "24000", "--json")
+            parent_view = await query("read", "--id", parent)
+            self.assertIn(leaf, parent_view["text"])
+            self.assertTrue(hashlib.sha256(parent_view["text"].encode()).hexdigest().startswith(parent))
+            child = hashlib.sha256(leaf.encode()).hexdigest()
+            recovered = await query("read", "--id", child)
             self.assertEqual(recovered["text"], leaf)
             agent = MagpieAgent(logs_dir=self.directory / "nested-agent", model_name="fixture/model")
             environment = FakeEnvironment()
-            for action, fields, expected in (
-                ("meta", {"id": parent}, meta),
-                ("grep", {"id": parent, "query": "needle-child"}, found),
-                ("read", {"id": child, "limit": 24000}, recovered),
-            ):
-                parsed = json.loads(await agent._tool("context_folding", {"action": action, **fields}, environment, bridge))
-                if action == "read":
-                    self.assertEqual(parsed["text"], expected["text"])
-                elif action == "meta":
-                    self.assertEqual(parsed["children"], expected["children"])
-                else:
-                    self.assertEqual(parsed["matches"], expected["matches"])
+            parsed = json.loads(await agent._tool(
+                "context_folding", {"action": "read", "id": child}, environment, bridge))
+            self.assertEqual(parsed["text"], leaf)
+            for action in ("meta", "grep", "list"):
+                with self.assertRaisesRegex(module.BridgeError, "unsupported_action"):
+                    await bridge.call("cli", argv=[action, "--id", parent])
+                rejected = json.loads(await agent._tool(
+                    "context_folding", {"action": action, "id": parent}, environment, bridge))
+                self.assertIn("error", rejected)
             self.assertEqual(environment.commands, [])
             repeated = await bridge.call("project", mode="folding", body=body)
             self.assertEqual(repeated["body"], projected["body"])

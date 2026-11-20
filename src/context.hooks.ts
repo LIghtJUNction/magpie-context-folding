@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { archivePath } from './archive-file.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
@@ -6,7 +7,7 @@ import { appendGuidanceToCleanBody, containsGuidance, defaultRecoveryCommand, sh
 import { cleanRequestBody } from './request-clean.js';
 import { containsRegion, outermost, parseRegions, regionReference, reference, replaceRegions, shortHash, type Region } from './annotations.js';
 import { addMetrics, createJsonMeasurementCache, emptyMetrics, metricsSchema, type Metrics } from './metrics.js';
-import { extractSpans, projectExtractedSpans, recoveryShellName, type Protocol, type Span } from './protocol.js';
+import { extractSpans, projectExtractedSpans, type Protocol, type Span } from './protocol.js';
 import { Store, digest, type Entry } from './store.js';
 import { sourceMarkerOffsets } from './source.js';
 import { focusedSourceExcerpt, renderFocusedSourceExcerpt } from './source-excerpt.js';
@@ -426,7 +427,16 @@ function candidates(body: Body, spans: Span[], protocol: Protocol, archivedEntri
     }
   }
   collect(conversation, 'assistant');
-  return result;
+  // Multiple source rules can select the same span. Keep one candidate per
+  // exact range before outermost compares containment; equal ranges would
+  // otherwise discard each other. Preserve the first, more specific rule
+  // rather than the later duplicate-read fallback.
+  const unique = new Map<string, Candidate>();
+  for (const candidate of result) {
+    const key = JSON.stringify([candidate.role, candidate.region.slices]);
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+  return [...unique.values()];
   // @context-fold end candidates-9c5f930e91
 }
 
@@ -483,16 +493,13 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       reportHook(context, 'skipped');
       return input;
     }
-    // Recovery uses the host's existing shell, never a registered plugin tool.
-    // A shell-less request must retain its input, including all original text.
-    if (!recoveryShellName(body, ctx.protocol, options.shellToolName)) {
-      reportHook(context, 'skipped');
-      return input;
-    }
+    // Folding is a text/archive protocol, independent of the host's tool names.
+    // Persisted absolute paths and CLI recovery remain valid even when tools are
+    // wrapped, deferred, namespaced, disabled, or unavailable in this request.
     const store = new Store();
     const command = options.recoveryCommand ?? defaultRecoveryCommand();
     const decorate = (value: Body, scope?: string): Body => {
-      return appendGuidanceToCleanBody(value, ctx.protocol, { command, minSavingsTokens: options.minSavingsTokens,
+      return appendGuidanceToCleanBody(value, ctx.protocol, { command,
         ...(scope ? { scope, stateDirectory: store.directory } : {}) });
     };
     // The rule must be present before the model starts producing long work,
@@ -525,10 +532,14 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
           return ok;
         }
         let visible = region.text;
+        const ranges = [...(region.retained ?? []), ...region.children];
+        const hidden = ranges.filter((item, index) => !ranges.some((outer, other) => other !== index
+          && outer.start <= item.start && outer.end >= item.end
+          && (outer.start < item.start || outer.end > item.end || other < index)));
         let ok = true;
-        for (const child of [...region.children].reverse()) {
-          if (!validate(child.region)) ok = false;
-          visible = visible.slice(0, child.start) + visible.slice(child.end);
+        for (const child of region.children) if (!validate(child.region)) ok = false;
+        for (const range of hidden.sort((a, b) => b.start - a.start)) {
+          visible = visible.slice(0, range.start) + visible.slice(range.end);
         }
         ok &&= !/\[\[cf:/.test(visible);
         valid.set(region, ok);
@@ -546,35 +557,31 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         const observed = previous && previous.lastSeen >= previousCycle
           ? { ...previous, lastSeen: cycle } : { firstSeen: cycle, lastSeen: cycle, folded: false };
         const reference = refFor(candidate.region);
-        const recoveryArgs = ` --state-dir ${shellQuote(store.directory)} --scope ${scope} --id ${reference.slice(8, -2)}`;
+        const recoveryArgs = ` --dir ${shellQuote(join(store.directory, 'archive'))}`;
         const localRecovery = candidate.retainedExcerpt
-          ? `\nNeed source: ${command} grep${recoveryArgs} --query 'TEXT'; use read${recoveryArgs} only if needed.` : '';
+          ? `\nNeed source: ${command} search${recoveryArgs} 'TEXT'; ${command} read${recoveryArgs} ${reference.slice(8, -2)}.` : '';
         return [candidate.region, { ...candidate, observed, reference,
           replacement: candidate.retainedExcerpt ? `${reference}\n${candidate.retainedExcerpt}${localRecovery}` : reference }] as const;
       }));
       const proposed: { region: Region; reference: string; replacement: string; retainedExcerpt?: string }[] = [];
       const waitingRegions: Region[] = [];
       let waiting = 0;
-      let skipped = 0;
       for (const candidate of observations.values()) {
         const { region, observed, reference: ref, replacement } = candidate;
         if (!valid.get(region) || region.referenceHash || kept(region)) continue;
-        const before = region.slices.reduce((sum, slice) => sum + Buffer.byteLength(JSON.stringify(
-          spans.find(span => span.id === slice.id)!.text.slice(slice.start, slice.end))), 0);
-        const after = region.slices.length * Buffer.byteLength(JSON.stringify(replacement));
-        if (after >= before || Math.floor((before - after) / 4) < options.minSavingsTokens) { skipped++; continue; }
         if (cycle - observed.firstSeen < options.delayRequests) { waiting++; waitingRegions.push(region); continue; }
         proposed.push({ region, reference: ref, replacement,
           ...(candidate.retainedExcerpt ? { retainedExcerpt: candidate.retainedExcerpt } : {}) });
       }
-      // Parent/child ranges overlap. Price the actual outermost projection,
-      // including all system guidance and recovery paths, before storing it.
-      let selected = outermost(proposed);
+      // Closed markers authorize folding regardless of size or recovery overhead.
+      // Parent/child ranges overlap, so replace only the outermost regions.
+      const selected = outermost(proposed);
       const existingReferenceMatches: Array<{ match: RegExpMatchArray; entry: Entry; source?: Span['source'] }> = [];
       for (const span of spans) {
         if (span.role !== 'assistant' && !span.source) continue;
-        for (const match of span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]/g)) {
-          const matches = [...byHash.values()].filter(entry => entry.annotation!.sha256.startsWith(match[1]!));
+        for (const match of span.text.matchAll(/\[\[cf:v2:([a-f0-9]{12,64})\]\]|(?:^|\r\n|\r|\n)line:\d+(?:\r\n|\r|\n)hash:([a-f0-9]{64})(?:\r\n|\r|\n)tokens:\d+(?:\r\n|\r|\n)tokens_method:utf8-bytes\/4-ceil(?:\r\n|\r|\n)path:[^\r\n]+(?:\r\n|\r|\n)\.\.\./g)) {
+          const hash = match[1] ?? match[2]!;
+          const matches = [...byHash.values()].filter(entry => entry.annotation!.sha256.startsWith(hash));
           if (matches.length === 1) existingReferenceMatches.push({ match, entry: matches[0]!,
             ...(span.source ? { source: span.source } : {}) });
         }
@@ -587,26 +594,15 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
         && !recoveryRelevant && selected.every(item => !!item.retainedExcerpt);
       const replayingProjection = hadGuidance && snapshot.projectedHash === requestHash && selected.length === 0;
       const guideOnlyResult = decorate(body);
-      let hasFolded = selected.length > 0 || existingReferences.length > 0;
-      let includeRecoveryCommand = replayingProjection || selected.length > 0 && !focusedInlineRecovery || recoveryRelevant;
-      let projected = selected.length > 0
+      const hasFolded = selected.length > 0 || existingReferences.length > 0;
+      const includeRecoveryCommand = replayingProjection || selected.length > 0 && !focusedInlineRecovery || recoveryRelevant;
+      const projected = selected.length > 0
         ? projectExtractedSpans(body, replaceRegions(spans, selected.map(item => ({ region: item.region, reference: item.replacement }))), ctx.protocol, spans) : body;
-      let result = replayingProjection ? input : hasFolded
+      const result = replayingProjection ? input : hasFolded
         ? decorate(projected, includeRecoveryCommand ? scope : undefined)
         : guideOnlyResult;
-      const netSaving = measureRequest(body).estimatedTokens - measureRequest(result).estimatedTokens;
-      if (selected.length > 0 && (netSaving <= 0 || netSaving < options.minSavingsTokens)) {
-        skipped += selected.length;
-        selected = [];
-        hasFolded = existingReferences.length > 0;
-        includeRecoveryCommand = recoveryRelevant;
-        projected = body;
-        result = hasFolded
-          ? decorate(body, includeRecoveryCommand ? scope : undefined)
-          : guideOnlyResult;
-      }
       // Commit originals and required descendants only for published folds or
-      // legitimate waiting cursors. A rejected batch creates no orphan archive.
+      // legitimate waiting cursors.
       const needed = new Set<Region>();
       const retain = (region: Region) => {
         if (needed.has(region)) return;
@@ -665,8 +661,7 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       for (const candidate of observations.values()) {
         if (!valid.get(candidate.region) || candidate.region.referenceHash) continue;
         const entry = resolved.get(candidate.region) ?? byHash.get(candidate.region.sha256);
-        // A rejected mature candidate can already have a durable waiting
-        // cursor. Refresh it without creating a new archive for this batch.
+        // Invalid or kept candidates need not have a durable archive.
         if (!entry) continue;
         (entry.occurrences ??= {})[candidate.occurrence] = candidate.observed;
       }
@@ -690,8 +685,8 @@ export async function onRequest(input: unknown, context: unknown): Promise<unkno
       reportedBytes = resultMeasurement.bytes;
       outcome = hasFolded ? 'ready' : 'skipped';
       snapshot.decision = { reason: hasFolded ? 'annotated-regions-folded' : waiting ? 'annotation-grace-period'
-        : skipped ? 'insufficient-net-savings' : 'no-eligible-annotations',
-        cycle, waiting, skipped, guidanceBackoff: false,
+        : 'no-eligible-annotations',
+        cycle, waiting, skipped: 0, guidanceBackoff: false,
         foldedRegions: selected.length, replayedReferences: existingReferences.length,
         estimatedNetSavings: replayingProjection ? 0 : bodyMeasurement.estimatedTokens - resultMeasurement.estimatedTokens,
         beforeBytes: inputMeasurement.bytes, afterBytes: resultMeasurement.bytes,

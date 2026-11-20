@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -410,6 +410,51 @@ test('global physical quota rejects growth and rolls back without losing earlier
     assert.deepEqual(await read(store, scope), before);
     assert.ok((await stat(join(directory, 'state.sqlite'))).size <= 128 * 1024);
     assert.deepEqual(await readdir(directory), ['state.sqlite']);
+  });
+});
+
+const foldedEntry = (text: string): Entry => ({ ...entry(digest(text), text),
+  annotation: { sha256: digest(text), label: 'review' }, folded: '...' });
+
+test('global quota failure publishes no portable archive files', async () => {
+  await fixture(async (_store, directory) => {
+    const store = new Store(directory, { maxTotalBytes: 64 * 1024 });
+    const scope = await store.scopeFor('failed portable archive');
+    await assert.rejects(store.transaction(scope, true, sessionLimit, snapshot => {
+      snapshot.entries.push(foldedEntry('x'.repeat(100_000)));
+    }), /Global archive full/);
+    assert.equal((await store.readStats()).storage.activeSessions, 0);
+    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+  });
+});
+
+test('archive publication failure removes new files and preserves existing originals', async () => {
+  await fixture(async (store, directory) => {
+    const scope = await store.scopeFor('portable rollback');
+    const original = foldedEntry('existing original');
+    await store.transaction(scope, true, sessionLimit, snapshot => { snapshot.entries.push(original); });
+    const before = await read(store, scope);
+    const broken = foldedEntry('broken target');
+    await writeFile(join(directory, 'archive', broken.id + '.txt'), 'corrupt');
+    await assert.rejects(store.transaction(scope, false, sessionLimit, snapshot => {
+      snapshot.entries.push(foldedEntry('new unpublished original'), broken);
+    }), /content mismatch/);
+    assert.deepEqual(await read(store, scope), before);
+    assert.deepEqual((await readdir(join(directory, 'archive'))).sort(),
+      [original.id + '.txt', broken.id + '.txt'].sort());
+  });
+});
+
+test('concurrent scope conflict publishes no portable archives from stale work', async () => {
+  await fixture(async (store, directory) => {
+    const scope = await store.scopeFor('portable conflict');
+    await store.transaction(scope, true, sessionLimit, () => {});
+    await assert.rejects(store.transaction(scope, false, sessionLimit, async snapshot => {
+      snapshot.entries.push(foldedEntry('stale unpublished original'));
+      await store.recordMetrics(scope, { originalReadCalls: 1 });
+    }), /changed concurrently/);
+    assert.deepEqual(await readdir(directory), ['state.sqlite']);
+    assert.equal((await store.readStats(scope)).metrics.originalReadCalls, 1);
   });
 });
 

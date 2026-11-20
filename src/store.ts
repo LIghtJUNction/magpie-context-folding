@@ -1,10 +1,13 @@
+import { annotationReferenceHash } from './annotations.js';
 import { saveArchiveFile } from './archive-file.js';
 import { Database } from 'bun:sqlite';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { unlinkSync } from 'node:fs';
 import { chmod, mkdir, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
+import { setTimeout as delay } from 'node:timers/promises';
 import { addMetrics, compactMetrics, emptyMetrics, metricsSchema, storedMetricsSchema } from './metrics.js';
 import type { Metrics } from './metrics.js';
 
@@ -180,7 +183,7 @@ function validateLayers(snapshot: Snapshot): void {
         throw new Error('Invalid annotation child range');
       }
       const body = frame.entry.text.slice(edge.start, edge.end);
-      const ref = /^\[\[cf:v2:([a-f0-9]{12,64})\]\]$/.exec(body.replace(/^[ \t]+|[ \t]+$/g, ''))?.[1];
+      const ref = annotationReferenceHash(body);
       if (body !== child.text && (!ref || !child.annotation.sha256.startsWith(ref)
         || snapshot.entries.some(other => other.annotation?.sha256.startsWith(ref)
           && other.annotation.sha256 !== child.annotation!.sha256))) {
@@ -294,46 +297,65 @@ export class Store {
     const file = await open(path, 'a', 0o600);
     await file.close();
     await chmod(path, 0o600);
-    const database = new Database(path, { create: true, strict: true });
-    try {
-      database.exec('PRAGMA busy_timeout = 2000');
-      database.exec('PRAGMA foreign_keys = ON');
-      database.exec('PRAGMA journal_mode = DELETE');
-      database.exec('PRAGMA auto_vacuum = FULL');
-      const pageSize = numberRowSchema.parse(database.query('SELECT page_size AS value FROM pragma_page_size').get()).value;
-      const pageLimit = Math.floor(this.maxTotalBytes / pageSize);
-      if (pageLimit < 1) throw new Error('Global archive limit is smaller than one SQLite page');
-      database.exec(`PRAGMA max_page_count = ${pageLimit}`);
-      database.exec(`
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS sessions (
-          scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, snapshot TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, text TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS refs (
-          scope TEXT NOT NULL REFERENCES sessions(scope) ON DELETE CASCADE,
-          hash TEXT NOT NULL REFERENCES blobs(hash), PRIMARY KEY (scope, hash)
-        );
-        CREATE INDEX IF NOT EXISTS refs_hash ON refs(hash);
-      `);
-      const pageCount = numberRowSchema.parse(database.query('SELECT page_count AS value FROM pragma_page_count').get()).value;
-      if (pageCount * pageSize > this.maxTotalBytes) throw new Error('Global archive full; original request retained');
-      return run(database);
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'SQLITE_FULL') {
-        throw new Error('Global archive full; original request retained', { cause: error });
+    const deadline = performance.now() + 1000;
+    for (let attempt = 0; ; attempt++) {
+      const database = new Database(path, { create: true, strict: true });
+      let retry = false;
+      try {
+        // Waiting inside SQLite blocks every session sharing this Bun worker.
+        database.exec('PRAGMA busy_timeout = 0');
+        database.exec('PRAGMA foreign_keys = ON');
+        database.exec('PRAGMA journal_mode = DELETE');
+        // Reassigning auto_vacuum takes a write lock even when already FULL.
+        const vacuum = numberRowSchema.parse(database.query('SELECT auto_vacuum AS value FROM pragma_auto_vacuum').get()).value;
+        if (vacuum !== 1) database.exec('PRAGMA auto_vacuum = FULL');
+        const pageSize = numberRowSchema.parse(database.query('SELECT page_size AS value FROM pragma_page_size').get()).value;
+        const pageLimit = Math.floor(this.maxTotalBytes / pageSize);
+        if (pageLimit < 1) throw new Error('Global archive limit is smaller than one SQLite page');
+        database.exec(`PRAGMA max_page_count = ${pageLimit}`);
+        database.exec(`
+          CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS sessions (
+            scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, snapshot TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, text TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS refs (
+            scope TEXT NOT NULL REFERENCES sessions(scope) ON DELETE CASCADE,
+            hash TEXT NOT NULL REFERENCES blobs(hash), PRIMARY KEY (scope, hash)
+          );
+          CREATE INDEX IF NOT EXISTS refs_hash ON refs(hash);
+        `);
+        const pageCount = numberRowSchema.parse(database.query('SELECT page_count AS value FROM pragma_page_count').get()).value;
+        if (pageCount * pageSize > this.maxTotalBytes) throw new Error('Global archive full; original request retained');
+        return run(database);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'SQLITE_FULL') {
+          throw new Error('Global archive full; original request retained', { cause: error });
+        }
+        if (error instanceof Error && 'code' in error
+          && ['SQLITE_BUSY', 'SQLITE_LOCKED'].includes(String(error.code))
+          && performance.now() < deadline) retry = true;
+        else throw error;
+      } finally {
+        database.close();
       }
-      throw error;
-    } finally {
-      database.close();
+      // Close the connection before yielding. Transaction callbacks roll back
+      // before retrying; the caller's projection callback is never re-executed.
+      if (retry) await delay(Math.min(10 * 2 ** Math.min(attempt, 3), Math.max(0, deadline - performance.now())));
     }
     // @context-fold end database-094f17a959
   }
 
   async scopeFor(identity: string): Promise<string> {
     return this.database((database) => {
-      database.query("INSERT OR IGNORE INTO meta (key, value) VALUES ('secret', ?)").run(randomBytes(32).toString('hex'));
-      const row = z.object({ value: hashSchema }).parse(database.query("SELECT value FROM meta WHERE key = 'secret'").get());
+      const select = database.query("SELECT value FROM meta WHERE key = 'secret'");
+      // Established identities need no writer lock on every incoming request.
+      let stored = select.get();
+      if (stored === null) {
+        database.query("INSERT OR IGNORE INTO meta (key, value) VALUES ('secret', ?)").run(randomBytes(32).toString('hex'));
+        stored = select.get();
+      }
+      const row = z.object({ value: hashSchema }).parse(stored);
       return createHmac('sha256', Buffer.from(row.value, 'hex')).update(identity).digest('hex');
     });
   }
@@ -497,11 +519,6 @@ export class Store {
       });
       return result;
     }
-    for (const entry of snapshot.entries) {
-      if (entry.annotation && entry.folded?.startsWith('line:')) {
-        saveArchiveFile(this.directory, entry.annotation.sha256, entry.text);
-      }
-    }
     const { stored, blobs } = encode(snapshot);
     const serialized = serializeSnapshot({ ...stored, payloadBytes, sessionLimitBytes });
     const metricsDelta = metricsDifference(previousMetrics, snapshot.metrics);
@@ -510,6 +527,7 @@ export class Store {
     await this.database((database) => {
       signal?.throwIfAborted();
       database.exec('BEGIN IMMEDIATE');
+      const createdArchives = new Set<string>();
       try {
         const current: unknown = database.query('SELECT revision, snapshot FROM sessions WHERE scope = ?').get(scope);
         const revision = current === null ? 0 : sessionRowSchema.parse(current).revision;
@@ -537,10 +555,21 @@ export class Store {
           + COALESCE((SELECT SUM(length(CAST(snapshot AS BLOB))) FROM sessions), 0)
           + COALESCE((SELECT SUM(length(CAST(value AS BLOB))) FROM meta), 0) AS value`).get()).value;
         if (total > this.maxTotalBytes) throw new Error('Global archive full; original request retained');
+        // Publish while holding the writer lock, after quota/conflict checks.
+        // A failed commit may remove only files this transaction created.
+        for (const entry of snapshot.entries) {
+          if (entry.annotation && entry.folded && entry.annotation.sha256 === digest(entry.text)) {
+            saveArchiveFile(this.directory, entry.annotation.sha256, entry.text, createdArchives);
+          }
+        }
         signal?.throwIfAborted();
         database.exec('COMMIT');
       } catch (error) {
-        if (database.inTransaction) database.exec('ROLLBACK');
+        try {
+          for (const path of createdArchives) unlinkSync(path);
+        } finally {
+          if (database.inTransaction) database.exec('ROLLBACK');
+        }
         throw error;
       }
     });

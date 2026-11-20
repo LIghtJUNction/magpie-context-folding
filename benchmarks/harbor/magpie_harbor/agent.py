@@ -49,11 +49,9 @@ TOOLS = [
          {"command": {"type": "string"}}, ["command"]),
     tool("read_file", "Read one complete UTF-8 source file from the task sandbox. Large reads fail; use terminal for partial inspection.",
          {"path": {"type": "string"}}, ["path"]),
-    tool("context_folding", "Query this trial's archive. read returns a bounded current view without restoring history; follow nextOffset. meta and grep inspect nested references.",
-         {"action": {"type": "string", "enum": ["read", "list", "status", "meta", "grep"]},
-          "id": {"type": "string"}, "query": {"type": "string"},
-          "recursive": {"type": "boolean"}, "offset": {"type": "integer", "minimum": 0},
-          "limit": {"type": "integer", "minimum": 1, "maximum": 24000}}, ["action"]),
+    tool("context_folding", "Read exact original text by content hash from this trial's private archive. Reading does not restore or change conversation history.",
+         {"action": {"type": "string", "enum": ["read"]},
+          "id": {"type": "string"}}, ["action", "id"]),
 ]
 
 
@@ -173,29 +171,14 @@ def cli_arguments(command: str, bridge: Bridge) -> list[str] | None:
 
 
 def archive_arguments(args: dict) -> list[str]:
-    if set(args) - {"action", "id", "query", "recursive", "offset", "limit"}:
+    if set(args) - {"action", "id"}:
         raise ValueError("Unexpected archive arguments")
-    action = args.get("action")
-    if not isinstance(action, str) or action not in {"read", "list", "status", "meta", "grep"}:
+    if args.get("action") != "read":
         raise ValueError("Unsupported archive action")
-    argv = [action, "--json"]
-    for name in ("id", "query", "offset", "limit", "recursive"):
-        if name not in args:
-            continue
-        value = args[name]
-        if name in {"id", "query"}:
-            if not isinstance(value, str) or not value or "\0" in value or value.startswith("-"):
-                raise ValueError("Invalid archive text argument")
-        elif name == "recursive":
-            if type(value) is not bool:
-                raise ValueError("Invalid recursive flag")
-            if value:
-                argv.append("--recursive")
-            continue
-        elif type(value) is not int or value < 0 or (name == "limit" and not 1 <= value <= 24000):
-            raise ValueError("Invalid archive range")
-        argv.extend(["--" + name, str(value)])
-    return argv
+    identifier = args.get("id")
+    if not isinstance(identifier, str) or re.fullmatch(r"[a-f0-9]{12,64}", identifier) is None:
+        raise ValueError("Expected an archive content hash")
+    return ["read", "--id", identifier]
 
 
 class Usage:
@@ -439,7 +422,7 @@ class ScriptedSmokeAgent(MagpieAgent):
             if self.options.mode == "folding":
                 if not match:
                     raise RuntimeError("Smoke expected a delayed production-hook reference")
-                name, args = "context_folding", {"action": "read", "id": match[1], "limit": 24000}
+                name, args = "context_folding", {"action": "read", "id": match[1]}
             elif match:
                 raise RuntimeError("Baseline unexpectedly folded a note")
         elif step == 3:

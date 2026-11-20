@@ -96,27 +96,42 @@ test('disabled, cancelled, oversized or ambiguous requests retain the exact inpu
   });
 });
 
-test('without a callable shell the request is unchanged and emits no metadata', async () => {
+test('without tools folding still archives evidence and exposes recovery metadata', async () => {
   await fixture(async ({ context, store }) => {
     const input = { ...bodyFor('chat'), tools: [] };
     const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-    assert.deepEqual(withoutMetadata(output, 'chat'), input);
-    assert.equal(folded(output), false);
-    assert.equal((await store.readStats()).storage.activeSessions, 0);
-    assert.deepEqual(output, input);
-    assert.doesNotMatch(JSON.stringify(output), /<context-budget|<context-folding>/);
+    assert.equal(folded(output), true);
+    assert.equal((await store.readStats()).storage.activeSessions, 1);
+    assert.deepEqual(output.tools, []);
+    assert.match(JSON.stringify(output), /--dir/);
   });
 });
 
-test('malformed and tiny annotated blocks remain readable', async () => {
+test('unclosed annotated blocks remain readable', async () => {
   await fixture(async ({ context }) => {
-    for (const text of [marked('x'), '@context-fold begin x\n' + payload]) {
-      const input = bodyFor('chat', text);
-      const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
-      assert.deepEqual(withoutMetadata(output, 'chat'), input);
-    }
+    const input = bodyFor('chat', '@context-fold begin x\n' + payload);
+    const output = await onRequest(input, { ...context, options: { delayRequests: 0 } }) as Record<string, unknown>;
+    assert.deepEqual(withoutMetadata(output, 'chat'), input);
   });
 });
+
+for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) {
+  test(`${protocol}: a tiny closed block folds despite legacy thresholds and larger recovery metadata`, async () => {
+    await fixture(async ({ context, scope, store }) => {
+      const input = bodyFor(protocol, '>> Review <<\nx\n<< Done >>');
+      const ctx = { ...context, options: { delayRequests: 0, minSavingsTokens: Number.MAX_SAFE_INTEGER } };
+      const output = await onRequest(input, ctx) as Record<string, unknown>;
+      const visible = extractSpans(output, protocol).find(span => span.role === 'assistant')!.text;
+      const path = /^path:(.+)$/m.exec(visible)?.[1];
+      assert.ok(path);
+      assert.match(visible, /\n\.\.\.\n<< Done >>$/);
+      assert.equal(await readFile(path, 'utf8'), 'x');
+      assert.ok(Buffer.byteLength(JSON.stringify(output)) > Buffer.byteLength(JSON.stringify(input)));
+      assert.equal((await store.readStats(scope)).metrics.itemsFolded, 1);
+      assert.deepEqual(await onRequest(output, ctx), output);
+    }, protocol);
+  });
+}
 
 test('non-text user input breaks an open block in all four protocols', async () => {
   for (const protocol of ['chat', 'responses', 'anthropic', 'gemini'] as Protocol[]) await fixture(async ({ context }) => {

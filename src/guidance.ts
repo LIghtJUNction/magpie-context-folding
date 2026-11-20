@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Protocol } from './protocol.js';
 
@@ -113,10 +114,21 @@ export function guidanceText(options: GuidanceOptions): string {
     || (options.scope !== undefined && !/^[a-f0-9]{64}$/.test(options.scope))) {
     throw new Error('Unsupported CLI recovery path');
   }
-  const rule = `Mandatory context-management protocol. For every substantial reply or completed stage: write a brief current result outside, then wrap the long findings/explanation/evidence in literal whole-line delimiters:\n>> Specific reason for starting <<\n...\n<< Verified result of this stage >>\nKeep next steps outside. Use task-specific descriptions, not these placeholders or code fences. Long reviews and reports MUST use this format even when the user did not ask to compress. Mark proactively before sending; do not wait for reminders. Use one block per substantial stage, not per short bullet. Keep current constraints, failures, and active essentials outside; close completed stages before the next user turn. Skip markers for short replies or explicitly required JSON/code-only/exact answers; never mark user text or expose private reasoning. The plugin saves the body and generates line/hash/tokens/path metadata if worthwhile; never invent metadata or count tokens. Read actual path only when needed. Do not poll or demo. Report known facts only.`;
-  const stateDirectory = options.stateDirectory ? ` --state-dir ${shellQuote(options.stateDirectory)}` : '';
+  const rule = `Fold long evidence, keeping conclusions, constraints, failures and next steps outside. Closed markers fold directly without a savings threshold. Never wrap progress or tool-only work: tools are not folded. No empty blocks, logs or filler. Use whole-line delimiters, no Markdown prefixes or split > >. Keep evidence open across related tool calls until verified; never close short preambles or reopen per call. Skip short/exact-format answers; never expose private reasoning. Markers prove no saving. Read actual path only when needed. Arrow keep blocks are literal. Example (shortened):
+→ 不折叠开始
+Finding: retry charges twice.
+>> Evidence for duplicate charging <<
+The first debit commits. Retry repeats it with the same ID and no completion check.
+→ 不折叠开始
+Keep: request_id=42; test pending.
+← 不折叠结束
+Both debits appear in the ledger.
+<< Same request debited twice >>
+Next: deduplicate and test.
+← 不折叠结束`;
+  const archiveDirectory = options.stateDirectory ? ` --dir ${shellQuote(resolve(options.stateDirectory, 'archive'))}` : '';
   const recall = options.scope
-    ? ` Need source: ${options.command} grep${stateDirectory} --scope ${options.scope} --id HASH --query 'TEXT'; use read${stateDirectory} --scope ${options.scope} --id HASH only if needed.` : '';
+    ? ` Need source: read the actual path; or ${options.command} search${archiveDirectory} 'TEXT'; ${options.command} read${archiveDirectory} HASH.` : '';
   return `<context-folding>${rule}${recall}</context-folding>`;
 }
 
