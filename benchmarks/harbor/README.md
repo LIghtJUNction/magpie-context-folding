@@ -49,7 +49,7 @@ npm run bench:harbor -- smoke
 | `ScriptedSmokeAgent` + baseline | 确定性脚本通过，历史不折叠。 |
 | `ScriptedSmokeAgent` + folding | 确定性脚本通过，真实延迟折叠、精确 CLI 查阅，查看后历史继续保持折叠。 |
 
-归档查询由 `context_folding` 或终端中识别出的固定 CLI 命令，通过相同的真实 CLI 子进程执行 `read`、`list`、`grep`、`meta`、`status`，只允许当前 trial 的 scope 与归档目录。嵌套查询返回当前节点的视图，子节点保持短引用；按需继续读取子节点，不展开原历史。
+基准的 `context_folding` 工具只提供 `read`：按内容哈希，通过真实 CLI 子进程读取当前 trial 独立归档目录中的完整原文。嵌套区域也按各自的内容哈希恢复；读取不修改原历史中的折叠引用。基准工具不向模型提供 `list`、`grep` 或 `meta`，也不宣称支持分页。终端中匹配到固定 CLI 的调用由同一桥接层处理；内部 `status` 只用于计数检查。
 
 脚本 Agent 直接使用仓库中公开的 oracle，并不测模型解题能力。它不会连接模型服务，token/费用保持未知，不伪造为零。命令会检查所有预期 trial 的实际结果，不能只因 Harbor 进程退出码为 0 就判通过。
 

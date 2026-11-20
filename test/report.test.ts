@@ -4,13 +4,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Store } from '../src/store.js';
-import { collectReport } from '../src/report.js';
+import { collectReport, writeReport } from '../src/report.js';
 import { escapeHtml, renderReport } from '../src/report-html.js';
 import { onRequest, onResponse } from '../src/context.hooks.js';
 import { emptyMetrics } from '../src/metrics.js';
 import { usageByFoldState } from '../src/statistics.js';
 
-const cli = join(import.meta.dir, '..', 'src', 'cli.ts');
+// Reports remain an internal API, outside the directory CLI.
+async function reportRequest(args: string[]) {
+  if (args.includes('--help')) return { code: 0, out: '', err: '' };
+  try {
+    const output = args[args.indexOf('--output') + 1];
+    const scope = args.includes('--scope') ? args[args.indexOf('--scope') + 1] : undefined;
+    if (!args.includes('--output') || !output) throw new Error('Missing output');
+    if (scope !== undefined && !/^[a-f0-9]{64}$/.test(scope)) throw new Error('Invalid scope');
+    await writeReport(output, scope);
+    return { code: 0, out: '', err: '' };
+  } catch { return { code: 1, out: '', err: 'Cannot create report' }; }
+}
 async function fixture(run: (directory: string, scope: string, invoke: (args: string[]) => Promise<{ code: number; out: string; err: string }>) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), 'folding-report-'));
   const previous = process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
@@ -34,14 +45,7 @@ async function fixture(run: (directory: string, scope: string, invoke: (args: st
       state.metrics.itemsFolded = 3;
       state.metrics.estimatedTokenDelta = '-12345678901234567890';
     });
-    const invoke = async (args: string[]) => {
-      const child = Bun.spawn([process.execPath, cli, ...args], {
-        cwd: directory, env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: stateDirectory },
-        stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
-      });
-      const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-      return { code, out, err };
-    };
+    const invoke = reportRequest;
     await run(directory, scope, invoke);
   } finally {
     if (previous === undefined) delete process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
@@ -194,17 +198,20 @@ test('report refuses overwrite, symlink, relative path and secret-bearing invali
 
 test('report on unused installation stays empty and creates no state directory', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'folding-report-empty-'));
+  const previous = process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
   try {
     const state = join(directory, 'absent-state');
     const output = join(directory, 'empty.html');
-    const child = Bun.spawn([process.execPath, cli, 'report', '--output', output], {
-      env: { ...process.env, MAGPIE_CONTEXT_FOLDING_STATE_DIR: state }, stdout: 'pipe', stderr: 'pipe',
-    });
-    const [code, , err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR = state;
+    const { code, err } = await reportRequest(['report', '--output', output]);
     assert.equal(code, 0, err);
     assert.ok((await readFile(output, 'utf8')).includes('还没有用量观测或归档会话'));
     await assert.rejects(stat(state), { code: 'ENOENT' });
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    if (previous === undefined) delete process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR;
+    else process.env.MAGPIE_CONTEXT_FOLDING_STATE_DIR = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('real annotation projection reports full request sizes, response state and no private binding', async () => {
