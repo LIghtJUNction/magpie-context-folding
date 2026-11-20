@@ -142,8 +142,8 @@ export class FoldingBridge {
         && input.argv.every(value => typeof value === 'string' && value.length <= 4096 && !value.includes('\0')),
       'invalid_request', 'CLI requires a bounded array of arguments');
       const argv = input.argv as string[];
-      requireCondition(['read', 'list', 'grep', 'meta', 'status'].includes(argv[0]!),
-        'unsupported_action', 'Only read, list, grep, meta and status are available in benchmarks');
+      requireCondition(['read', 'status'].includes(argv[0]!),
+        'unsupported_action', 'Only archive reads and internal status are available in benchmarks');
       requireCondition(this.scope !== null && this.mode === 'folding',
         'archive_unavailable', 'This trial has no recovery archive');
       const confined: string[] = [];
